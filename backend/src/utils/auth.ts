@@ -1,0 +1,22 @@
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import { config } from '../config.js';
+import type { AuthClaims } from '../types/index.js';
+
+export async function hashPassword(plain: string): Promise<string> {
+  return bcrypt.hash(plain, config.auth.bcryptRounds);
+}
+
+export async function verifyPassword(plain: string, hash: string): Promise<boolean> {
+  return bcrypt.compare(plain, hash);
+}
+
+export function signToken(claims: AuthClaims): string {
+  return jwt.sign(claims, config.auth.jwtSecret, {
+    expiresIn: config.auth.jwtExpiresIn as jwt.SignOptions['expiresIn'],
+  });
+}
+
+export function verifyToken(token: string): AuthClaims {
+  return jwt.verify(token, config.auth.jwtSecret) as AuthClaims;
+}
