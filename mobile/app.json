@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "Vollo",
+    "slug": "vollo",
+    "scheme": "vollo",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": false,
+    "backgroundColor": "#0B141A",
+    "splash": {
+      "backgroundColor": "#0B141A",
+      "resizeMode": "contain"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "app.vollo.mobile",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Vollo uses your location to find courts near you and map your territories."
+      }
+    },
+    "android": {
+      "package": "app.vollo.mobile",
+      "permissions": ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"]
+    },
+    "web": {
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-location",
+      "expo-notifications"
+    ],
+    "extra": {
+      "apiUrl": "http://localhost:4000"
+    }
+  }
+}
