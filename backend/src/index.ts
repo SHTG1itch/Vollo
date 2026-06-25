@@ -1,11 +1,13 @@
 import { createApp } from './app.js';
 import { config } from './config.js';
 import { closePool } from './db/pool.js';
+import { scheduleWorkers } from './workers/schedule.js';
 
 const app = createApp();
 
 const server = app.listen(config.port, () => {
   console.log(`🎾 Vollo API listening on http://localhost:${config.port} (${config.env})`);
+  if (config.startWorker) scheduleWorkers();
 });
 
 async function shutdown(signal: string): Promise<void> {

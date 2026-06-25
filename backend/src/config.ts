@@ -50,6 +50,9 @@ export const config = {
   cors: {
     origin: process.env.CORS_ORIGIN ?? '*',
   },
+
+  /** Run the cron sweeps inside the API process (single $0 web service). */
+  startWorker: bool(process.env.START_WORKER, false),
 } as const;
 
 export type Config = typeof config;

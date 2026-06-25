@@ -1,6 +1,6 @@
-import cron from 'node-cron';
 import { closePool } from '../db/pool.js';
 import { runStreakSweep, runTerritorySweep } from './sweeps.js';
+import { scheduleWorkers } from './schedule.js';
 
 /**
  * Decoupled worker process for the asynchronous, long-term telemetry the spec
@@ -23,17 +23,7 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  // Temporal heat index — daily at 03:00.
-  cron.schedule('0 3 * * *', () => {
-    void runStreakSweep().catch((e) => console.error('[worker] streak sweep failed', e));
-  });
-
-  // Territory recompute — every 6 hours.
-  cron.schedule('0 */6 * * *', () => {
-    void runTerritorySweep().catch((e) => console.error('[worker] territory sweep failed', e));
-  });
-
-  console.log('🛠️  Vollo worker scheduled (streak: daily 03:00, territory: every 6h)');
+  scheduleWorkers();
 }
 
 void main().catch((err) => {
