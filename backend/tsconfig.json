@@ -9,7 +9,6 @@
     "outDir": "dist",
     "strict": true,
     "noImplicitOverride": true,
-    "noUncheckedIndexedAccess": true,
     "noFallthroughCasesInSwitch": true,
     "forceConsistentCasingInFileNames": true,
     "esModuleInterop": true,
