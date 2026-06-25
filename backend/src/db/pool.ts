@@ -24,6 +24,9 @@ pool.on('error', (err) => {
 
 export type QueryParams = ReadonlyArray<unknown>;
 
+/** Either the shared pool or a transaction-bound client. */
+export type Queryable = pg.Pool | pg.PoolClient;
+
 /** Run a query and return the rows, typed by the caller. */
 export async function query<T extends pg.QueryResultRow = pg.QueryResultRow>(
   text: string,
