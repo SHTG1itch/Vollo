@@ -5,8 +5,6 @@
     "moduleResolution": "Bundler",
     "lib": ["ES2022"],
     "types": ["node"],
-    "rootDir": "src",
-    "outDir": "dist",
     "strict": true,
     "noImplicitOverride": true,
     "noFallthroughCasesInSwitch": true,
