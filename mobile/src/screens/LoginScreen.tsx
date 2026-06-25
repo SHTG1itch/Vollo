@@ -1,0 +1,75 @@
+import React, { useState } from 'react';
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import type { RootStackParamList } from '../navigation/types';
+import { useAuth } from '../store/auth';
+import { Button, Field, H1, Muted, Screen } from '../components/ui';
+import { colors, font, spacing } from '../theme';
+
+type Props = NativeStackScreenProps<RootStackParamList, 'Login'>;
+
+export function LoginScreen({ navigation }: Props) {
+  const login = useAuth((s) => s.login);
+  const [identifier, setIdentifier] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const submit = async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      await login(identifier.trim(), password);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Login failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Screen edges={['top', 'bottom']}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+        <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+          <View style={styles.brand}>
+            <Text style={styles.logo}>🎾</Text>
+            <H1>Vollo</H1>
+            <Muted>Track matches. Claim courts. Rule the map.</Muted>
+          </View>
+
+          <View style={styles.form}>
+            <Field
+              label="Username or email"
+              autoCapitalize="none"
+              autoCorrect={false}
+              value={identifier}
+              onChangeText={setIdentifier}
+              placeholder="srivats"
+            />
+            <Field
+              label="Password"
+              secureTextEntry
+              value={password}
+              onChangeText={setPassword}
+              placeholder="••••••••"
+            />
+            {error ? <Text style={styles.error}>{error}</Text> : null}
+            <Button label="Sign in" onPress={submit} loading={loading} disabled={!identifier || !password} />
+            <Button label="Create an account" variant="ghost" onPress={() => navigation.navigate('Register')} />
+          </View>
+
+          <Muted style={styles.hint}>Demo: srivats / volley123</Muted>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </Screen>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flexGrow: 1, justifyContent: 'center', padding: spacing.xl, gap: spacing.xxl },
+  brand: { alignItems: 'center', gap: spacing.xs },
+  logo: { fontSize: 56 },
+  form: { gap: spacing.md },
+  error: { color: colors.loss, fontSize: font.small, textAlign: 'center' },
+  hint: { marginTop: spacing.lg },
+});
