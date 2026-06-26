@@ -32,6 +32,19 @@ export function setAuthToken(token: string | null): void {
   authToken = token;
 }
 
+/**
+ * Registered by the auth store so the client can trigger a clean sign-out when
+ * any request comes back 401 (expired/invalid token), without importing the
+ * store directly (which would be a circular dependency).
+ */
+let onUnauthorized: (() => void) | null = null;
+export function setUnauthorizedHandler(fn: (() => void) | null): void {
+  onUnauthorized = fn;
+}
+
+/** Abort a request that hangs so the UI never spins forever. */
+const REQUEST_TIMEOUT_MS = 15_000;
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = {
     Accept: 'application/json',
@@ -40,17 +53,41 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   };
   if (authToken) headers.Authorization = `Bearer ${authToken}`;
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
   let res: Response;
   try {
-    res = await fetch(`${API_BASE}${path}`, { ...options, headers });
-  } catch {
-    throw new ApiError(0, 'network_error', 'Could not reach the Vollo server. Check your connection.');
+    res = await fetch(`${API_BASE}${path}`, { ...options, headers, signal: controller.signal });
+  } catch (e) {
+    const aborted = e instanceof Error && e.name === 'AbortError';
+    throw new ApiError(
+      0,
+      aborted ? 'timeout' : 'network_error',
+      aborted
+        ? 'The Vollo server took too long to respond. Try again.'
+        : 'Could not reach the Vollo server. Check your connection.',
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (res.status === 401) {
+    // Expired/invalid session — let the app sign out before surfacing the error.
+    onUnauthorized?.();
   }
 
   if (res.status === 204) return undefined as T;
 
   const text = await res.text();
-  const json = text ? JSON.parse(text) : {};
+  let json: unknown = {};
+  if (text) {
+    try {
+      json = JSON.parse(text);
+    } catch {
+      throw new ApiError(res.status, 'bad_response', 'The server returned an unexpected response.');
+    }
+  }
   if (!res.ok) {
     const err = (json as { error?: { code?: string; message?: string } }).error;
     throw new ApiError(res.status, err?.code ?? 'error', err?.message ?? 'Request failed');

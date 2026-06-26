@@ -1,7 +1,9 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { api, setAuthToken } from '../api/client';
+import { ApiError, api, setAuthToken, setUnauthorizedHandler } from '../api/client';
+import { useFeed } from './feed';
+import { useNotifications } from './notifications';
 import type { User } from '../types';
 
 interface AuthState {
@@ -37,6 +39,9 @@ export const useAuth = create<AuthState>()(
       logout: () => {
         setAuthToken(null);
         set({ user: null, token: null });
+        // Clear per-user caches so the next account never sees stale data.
+        useFeed.getState().reset();
+        useNotifications.getState().reset();
       },
 
       setUser: (user) => set({ user }),
@@ -46,9 +51,10 @@ export const useAuth = create<AuthState>()(
         try {
           const { user } = await api.me();
           set({ user });
-        } catch {
-          // token likely expired — sign out cleanly
-          get().logout();
+        } catch (err) {
+          // Only sign out when the token is actually rejected — a network blip
+          // on cold start must NOT nuke a valid session.
+          if (err instanceof ApiError && err.status === 401) get().logout();
         }
       },
     }),
@@ -63,3 +69,8 @@ export const useAuth = create<AuthState>()(
     },
   ),
 );
+
+// Any 401 from the API means the session is dead — sign out once, cleanly.
+setUnauthorizedHandler(() => {
+  if (useAuth.getState().token) useAuth.getState().logout();
+});

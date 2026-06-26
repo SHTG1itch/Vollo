@@ -6,22 +6,25 @@ interface NotificationState {
   items: NotificationItem[];
   unread: number;
   loading: boolean;
+  error: string | null;
   fetch: () => Promise<void>;
   markAllRead: () => Promise<void>;
+  reset: () => void;
 }
 
 export const useNotifications = create<NotificationState>((set, get) => ({
   items: [],
   unread: 0,
   loading: false,
+  error: null,
 
   fetch: async () => {
-    set({ loading: true });
+    set({ loading: true, error: null });
     try {
       const { notifications, unread_count } = await api.getNotifications();
       set({ items: notifications, unread: unread_count });
-    } catch {
-      /* silently ignore */
+    } catch (e) {
+      set({ error: e instanceof Error ? e.message : 'Failed to load notifications' });
     } finally {
       set({ loading: false });
     }
@@ -36,4 +39,6 @@ export const useNotifications = create<NotificationState>((set, get) => ({
       void get().fetch();
     }
   },
+
+  reset: () => set({ items: [], unread: 0, loading: false, error: null }),
 }));

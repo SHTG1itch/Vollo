@@ -17,6 +17,7 @@ interface FeedState {
   loadMore: () => Promise<void>;
   prepend: (match: MatchCard) => void;
   toggleKudos: (matchId: string) => Promise<void>;
+  reset: () => void;
 }
 
 export const useFeed = create<FeedState>((set, get) => ({
@@ -64,28 +65,34 @@ export const useFeed = create<FeedState>((set, get) => ({
 
   // Optimistic: flip the UI immediately, reconcile with the server, revert on error.
   toggleKudos: async (matchId) => {
-    const before = get().matches;
-    const target = before.find((m) => m.id === matchId);
+    const target = get().matches.find((m) => m.id === matchId);
     if (!target) return;
     const wasKudosed = target.viewer_has_kudos ?? false;
 
-    set({
-      matches: before.map((m) =>
-        m.id === matchId
-          ? { ...m, viewer_has_kudos: !wasKudosed, kudos_count: m.kudos_count + (wasKudosed ? -1 : 1) }
-          : m,
-      ),
-    });
+    const applyDelta = (kudosed: boolean) =>
+      set({
+        matches: get().matches.map((m) =>
+          m.id === matchId
+            ? { ...m, viewer_has_kudos: kudosed, kudos_count: Math.max(0, m.kudos_count + (kudosed ? 1 : -1)) }
+            : m,
+        ),
+      });
+
+    applyDelta(!wasKudosed);
 
     try {
       const res = wasKudosed ? await api.removeKudos(matchId) : await api.addKudos(matchId);
+      // Reconcile only this item from the authoritative server counts.
       set({
         matches: get().matches.map((m) =>
           m.id === matchId ? { ...m, kudos_count: res.kudos_count, viewer_has_kudos: res.viewer_has_kudos } : m,
         ),
       });
     } catch {
-      set({ matches: before }); // revert
+      // Revert just this item — don't clobber concurrent feed updates.
+      applyDelta(wasKudosed);
     }
   },
+
+  reset: () => set({ matches: [], scope: 'global', loading: false, refreshing: false, loadingMore: false, cursor: null, error: null }),
 }));
