@@ -122,6 +122,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: spacing.xs,
   },
-  rallySegText: { color: colors.black, fontWeight: '800', fontSize: font.tiny },
+  rallySegText: { fontWeight: '800', fontSize: font.tiny },
   rallyLabel: { color: colors.textFaint, fontSize: font.tiny, textAlign: 'center' },
 });
