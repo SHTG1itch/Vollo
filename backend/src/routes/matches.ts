@@ -141,15 +141,19 @@ matchesRouter.post(
 
     // Post-commit side effects must NOT fail the request: the match is already
     // durably committed, so a PostGIS-hull or achievement hiccup that 500'd here
-    // would invite a client retry that double-logs the match. Best-effort only —
-    // the 6-hourly territory sweep is the backstop for any missed recompute.
-    try {
-      if (body.court_id) {
+    // would invite a client retry that double-logs the match. Each is isolated so
+    // one failing doesn't skip the other; the 6-hourly sweep backstops territory.
+    if (body.court_id) {
+      try {
         await recomputeAfterMatch({ courtId: body.court_id, loggerUserId: uid, previousControllerId });
+      } catch (err) {
+        console.error('[matches] territory recompute failed', err instanceof Error ? err.message : err);
       }
+    }
+    try {
       await evaluateAchievements(uid);
     } catch (err) {
-      console.error('[matches] post-commit side effects failed', err instanceof Error ? err.message : err);
+      console.error('[matches] achievement evaluation failed', err instanceof Error ? err.message : err);
     }
 
     // Notify a registered opponent that they were tagged in a match.

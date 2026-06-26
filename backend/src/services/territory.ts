@@ -212,9 +212,11 @@ export async function recomputeAfterMatch(args: {
   const { courtId, loggerUserId, previousControllerId } = args;
 
   const affected = await query<{ user_id: string }>(
+    // `court_ids @> ARRAY[...]` (containment) so the GIN index on court_ids is
+    // actually usable — the array_ops GIN opclass doesn't support `= ANY(...)`.
     `SELECT DISTINCT user_id FROM court_leaderboard WHERE court_id = $1 AND rank <= 2
      UNION
-     SELECT user_id FROM territories WHERE $1 = ANY(court_ids)`,
+     SELECT user_id FROM territories WHERE court_ids @> ARRAY[$1]::uuid[]`,
     [courtId],
   );
   const userIds = new Set<string>(affected.map((r) => r.user_id));

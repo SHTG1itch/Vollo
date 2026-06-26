@@ -56,13 +56,15 @@ export function LogMatchScreen() {
   // submitted with a different typed name.
   const searchOpponents = (term: string) => {
     if (oppDebounce.current) clearTimeout(oppDebounce.current);
+    // Bump the token synchronously on every keystroke so any already-in-flight
+    // request resolves stale and can't clobber the latest query's results.
+    const t = ++oppToken.current;
     const query = term.trim();
     if (query.length < 2 || opponentId) {
       setOppResults([]);
       return;
     }
     oppDebounce.current = setTimeout(async () => {
-      const t = ++oppToken.current;
       try {
         const { users } = await api.searchUsers(query, 6);
         if (t === oppToken.current) setOppResults(users);
