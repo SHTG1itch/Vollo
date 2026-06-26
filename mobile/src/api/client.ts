@@ -124,6 +124,7 @@ export interface CreateMatchPayload {
   court_id?: string;
   surface: Surface;
   score_array: ScoreArray;
+  is_tiebreak?: boolean;
   rpe_index?: number;
   duration_minutes?: number;
   notes?: string;

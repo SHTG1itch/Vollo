@@ -44,3 +44,40 @@ export function setsSummary(score: ScoreArray): { won: number; lost: number } {
   }
   return { won, lost };
 }
+
+/**
+ * Client-side mirror of the backend's analyzeScore/decideResult: decide the
+ * result by sets, falling back to total games when sets are even, and only call
+ * it a tie when both are equal. `finalSetTiebreak` mirrors the server flag
+ * (true = last set is a 1-game super-tiebreak, false = all games count,
+ * undefined = magnitude heuristic).
+ */
+export function analyzeLocal(
+  score: ScoreArray,
+  finalSetTiebreak?: boolean,
+): { result: 'win' | 'loss' | 'tie'; setsWon: number; setsLost: number } {
+  let setsWon = 0;
+  let setsLost = 0;
+  let gamesWon = 0;
+  let gamesLost = 0;
+  const last = score.length - 1;
+  score.forEach(([a, b], i) => {
+    if (a === b) return; // an unfinished/tied set contributes nothing to the preview
+    const isTb =
+      finalSetTiebreak === true ? i === last : finalSetTiebreak === false ? false : a >= 10 || b >= 10;
+    if (isTb) {
+      if (a > b) { gamesWon += 1; setsWon += 1; }
+      else { gamesLost += 1; setsLost += 1; }
+    } else {
+      gamesWon += a;
+      gamesLost += b;
+      if (a > b) setsWon += 1;
+      else setsLost += 1;
+    }
+  });
+  let result: 'win' | 'loss' | 'tie';
+  if (setsWon !== setsLost) result = setsWon > setsLost ? 'win' : 'loss';
+  else if (gamesWon !== gamesLost) result = gamesWon > gamesLost ? 'win' : 'loss';
+  else result = 'tie';
+  return { result, setsWon, setsLost };
+}

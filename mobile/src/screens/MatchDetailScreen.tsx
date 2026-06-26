@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, KeyboardAvoidingView, Platform, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { api, ApiError } from '../api/client';
@@ -24,13 +24,14 @@ export function MatchDetailScreen({ route, navigation }: Props) {
   const [comments, setComments] = useState<Comment[]>([]);
   const [draft, setDraft] = useState('');
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [posting, setPosting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let active = true;
-    setLoading(true);
+    if (reloadKey === 0) setLoading(true);
     setError(null);
     void (async () => {
       try {
@@ -41,13 +42,41 @@ export function MatchDetailScreen({ route, navigation }: Props) {
       } catch (e) {
         if (active) setError(e instanceof Error ? e.message : 'Failed to load match');
       } finally {
-        if (active) setLoading(false);
+        if (active) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     })();
     return () => {
       active = false;
     };
   }, [matchId, reloadKey]);
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    setReloadKey((k) => k + 1);
+  };
+
+  const goToUser = (username: string | null | undefined) => {
+    if (!username) return;
+    if (username === user?.username) navigation.navigate('Tabs', { screen: 'Me' });
+    else navigation.navigate('UserProfile', { username });
+  };
+
+  const share = async () => {
+    if (!match) return;
+    const opp = match.opponent_display_name ?? match.opponent_name ?? 'an opponent';
+    try {
+      await Share.share({
+        message: `${match.author_display_name} ${match.result === 'win' ? 'won' : 'lost'} ${formatScoreLine(
+          match.score_array,
+        )} vs ${opp} — tracked on Vollo 🎾`,
+      });
+    } catch {
+      /* user dismissed the share sheet */
+    }
+  };
 
   const toggleKudos = async () => {
     if (!match) return;
@@ -106,27 +135,50 @@ export function MatchDetailScreen({ route, navigation }: Props) {
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, backgroundColor: colors.bg }}>
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+      >
         <Card style={{ gap: spacing.sm }}>
           <View style={styles.headerRow}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+            <Pressable
+              style={({ pressed }) => [{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexShrink: 1 }, pressed && { opacity: 0.7 }]}
+              onPress={() => goToUser(match.author_username)}
+            >
               <Avatar name={match.author_display_name} uri={match.author_avatar_url} size={42} />
               <View>
                 <Text style={styles.author}>{match.author_display_name}</Text>
                 <Text style={styles.sub}>@{match.author_username} · {timeAgo(match.played_at)}</Text>
               </View>
-            </View>
+            </Pressable>
             <SurfaceBadge surface={match.surface} />
           </View>
 
           <View style={styles.resultRow}>
             <Text style={[styles.result, { color: win ? colors.win : colors.loss }]}>{win ? 'WIN' : 'LOSS'}</Text>
             <Text style={styles.score}>{formatScoreLine(match.score_array)}</Text>
+            <Text style={styles.setsTag}>Sets {match.sets_won}–{match.sets_lost}</Text>
           </View>
-          <Muted>vs {opponent}</Muted>
+          {match.opponent_username ? (
+            <Text style={styles.vs}>
+              vs{' '}
+              <Text style={styles.vsLink} onPress={() => goToUser(match.opponent_username)}>
+                {opponent}
+              </Text>
+            </Text>
+          ) : (
+            <Muted>vs {opponent}</Muted>
+          )}
 
           <View style={styles.metaRow}>
-            {match.court_name ? <Text style={styles.meta}>📍 {match.court_name}</Text> : null}
+            {match.court_name ? (
+              <Text
+                style={[styles.meta, match.court_id && styles.metaLink]}
+                onPress={match.court_id ? () => navigation.navigate('Court', { courtId: match.court_id! }) : undefined}
+              >
+                📍 {match.court_name}
+              </Text>
+            ) : null}
             {match.rpe_index ? <Text style={styles.meta}>🔥 RPE {match.rpe_index}</Text> : null}
             {match.duration_minutes ? <Text style={styles.meta}>⏱ {match.duration_minutes}m</Text> : null}
             <Text style={styles.metaScore}>⚡ {match.match_score > 0 ? '+' : ''}{match.match_score} pts</Text>
@@ -135,7 +187,10 @@ export function MatchDetailScreen({ route, navigation }: Props) {
 
           <View style={styles.actions}>
             <KudosButton active={match.viewer_has_kudos ?? false} count={match.kudos_count} onPress={toggleKudos} />
-            {isOwner ? <Button label="Delete" variant="danger" onPress={remove} style={{ height: 38, paddingHorizontal: spacing.lg }} /> : null}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+              <Button label="Share" variant="secondary" onPress={share} style={{ height: 38, paddingHorizontal: spacing.md }} />
+              {isOwner ? <Button label="Delete" variant="danger" onPress={remove} style={{ height: 38, paddingHorizontal: spacing.md }} /> : null}
+            </View>
           </View>
         </Card>
 
@@ -202,8 +257,12 @@ const styles = StyleSheet.create({
   resultRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginTop: spacing.sm },
   result: { fontSize: font.h2, fontWeight: '900', letterSpacing: 1 },
   score: { color: colors.text, fontSize: font.h2, fontWeight: '800', letterSpacing: 1 },
+  setsTag: { color: colors.textFaint, fontSize: font.small, fontWeight: '700' },
+  vs: { color: colors.textDim, fontSize: font.body },
+  vsLink: { color: colors.primary, fontWeight: '700' },
   metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, marginTop: spacing.xs },
   meta: { color: colors.textDim, fontSize: font.small },
+  metaLink: { color: colors.primary, fontWeight: '600' },
   metaScore: { color: colors.primary, fontSize: font.small, fontWeight: '700' },
   notes: { color: colors.textDim, fontStyle: 'italic', marginTop: spacing.xs },
   actions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: spacing.sm },

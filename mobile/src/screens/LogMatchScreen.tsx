@@ -1,19 +1,21 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
-import { api, ApiError, type CreateMatchPayload } from '../api/client';
+import { api, ApiError, type CreateMatchPayload, type UserSearchResult } from '../api/client';
 import { useFeed } from '../store/feed';
-import { Button, Card, Field, H2, Muted } from '../components/ui';
+import { Avatar, Button, Card, Field, H2, Muted } from '../components/ui';
 import { ScoreInput } from '../components/ScoreInput';
 import { Stepper } from '../components/Stepper';
 import { SurfaceBadge } from '../components/SurfaceBadge';
 import { colors, font, radius, spacing, surfaceColors } from '../theme';
 import type { Court, MatchStats, ScoreArray, Surface } from '../types';
-import { setsSummary } from '../utils/format';
+import { analyzeLocal } from '../utils/format';
+
+const DAY_MS = 86_400_000;
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 const SURFACES: Surface[] = ['hard', 'clay', 'grass', 'indoor'];
@@ -31,9 +33,16 @@ export function LogMatchScreen() {
   const prepend = useFeed((s) => s.prepend);
 
   const [surface, setSurface] = useState<Surface>('hard');
+  const [surfaceTouched, setSurfaceTouched] = useState(false);
   const [courtId, setCourtId] = useState<string | null>(null);
   const [opponentName, setOpponentName] = useState('');
+  const [opponentId, setOpponentId] = useState<string | null>(null);
+  const [oppResults, setOppResults] = useState<UserSearchResult[]>([]);
+  const oppToken = useRef(0);
+  const oppDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [score, setScore] = useState<ScoreArray>([[6, 4]]);
+  const [tiebreakFinal, setTiebreakFinal] = useState(false);
+  const [daysAgo, setDaysAgo] = useState(0);
   const [rpe, setRpe] = useState<number | null>(null);
   const [duration, setDuration] = useState(0);
   const [notes, setNotes] = useState('');
@@ -41,6 +50,31 @@ export function LogMatchScreen() {
   const [stats, setStats] = useState<MatchStats>(emptyStats);
   const [courts, setCourts] = useState<Court[]>([]);
   const [submitting, setSubmitting] = useState(false);
+
+  // Debounced player search for tagging a registered opponent. Typing in the
+  // field clears any previously-picked id so a stale opponent_id can't be
+  // submitted with a different typed name.
+  const searchOpponents = (term: string) => {
+    if (oppDebounce.current) clearTimeout(oppDebounce.current);
+    const query = term.trim();
+    if (query.length < 2 || opponentId) {
+      setOppResults([]);
+      return;
+    }
+    oppDebounce.current = setTimeout(async () => {
+      const t = ++oppToken.current;
+      try {
+        const { users } = await api.searchUsers(query, 6);
+        if (t === oppToken.current) setOppResults(users);
+      } catch {
+        if (t === oppToken.current) setOppResults([]);
+      }
+    }, 300);
+  };
+
+  useEffect(() => () => {
+    if (oppDebounce.current) clearTimeout(oppDebounce.current);
+  }, []);
 
   useEffect(() => {
     void (async () => {
@@ -69,11 +103,14 @@ export function LogMatchScreen() {
     })();
   }, []);
 
-  const summary = useMemo(() => setsSummary(score), [score]);
-  const result = summary.won > summary.lost ? 'win' : summary.won < summary.lost ? 'loss' : 'tie';
-  const scoreValid = score.every(([a, b]) => a !== b) && summary.won !== summary.lost;
+  const preview = useMemo(() => analyzeLocal(score, tiebreakFinal), [score, tiebreakFinal]);
+  const result = preview.result;
+  // Mirror the backend: valid when every set has a winner and the match isn't a
+  // dead tie (games-decided matches with even sets are allowed).
+  const scoreValid = score.every(([a, b]) => a !== b) && result !== 'tie';
 
   const setStat = (k: keyof MatchStats, v: number) => setStats((s) => ({ ...s, [k]: v }));
+  const statsTouched = showStats && Object.values(stats).some((v) => v > 0);
 
   const submit = async () => {
     if (!scoreValid) {
@@ -85,19 +122,32 @@ export function LogMatchScreen() {
       const payload: CreateMatchPayload = {
         surface,
         score_array: score,
+        is_tiebreak: tiebreakFinal,
         ...(courtId ? { court_id: courtId } : {}),
-        ...(opponentName.trim() ? { opponent_name: opponentName.trim() } : {}),
+        // A tagged registered player takes precedence over a free-text name.
+        ...(opponentId
+          ? { opponent_id: opponentId }
+          : opponentName.trim()
+            ? { opponent_name: opponentName.trim() }
+            : {}),
         ...(rpe ? { rpe_index: rpe } : {}),
         ...(duration > 0 ? { duration_minutes: duration } : {}),
         ...(notes.trim() ? { notes: notes.trim() } : {}),
-        ...(showStats ? { stats } : {}),
+        ...(daysAgo > 0 ? { played_at: new Date(Date.now() - daysAgo * DAY_MS).toISOString() } : {}),
+        // Don't ship an all-zero stat row just because the section was expanded.
+        ...(statsTouched ? { stats } : {}),
       };
       const { match } = await api.createMatch(payload);
       prepend(match);
       navigation.navigate('Tabs', { screen: 'Feed' });
-      // Reset for next time.
+      // Reset the match-specific fields for the next log; deliberately keep
+      // surface + court as session context for back-to-back logging.
       setScore([[6, 4]]);
+      setTiebreakFinal(false);
+      setDaysAgo(0);
       setOpponentName('');
+      setOpponentId(null);
+      setOppResults([]);
       setRpe(null);
       setDuration(0);
       setNotes('');
@@ -129,7 +179,7 @@ export function LogMatchScreen() {
           {result === 'win' ? 'WIN' : result === 'loss' ? 'LOSS' : '—'}
         </Text>
         <Text style={styles.previewSets}>
-          {summary.won} – {summary.lost} sets
+          {preview.setsWon} – {preview.setsLost} sets
         </Text>
       </Card>
 
@@ -139,7 +189,10 @@ export function LogMatchScreen() {
           {SURFACES.map((s) => (
             <Pressable
               key={s}
-              onPress={() => setSurface(s)}
+              onPress={() => {
+                setSurface(s);
+                setSurfaceTouched(true);
+              }}
               style={[
                 styles.surfaceChip,
                 surface === s && { borderColor: surfaceColors[s], backgroundColor: `${surfaceColors[s]}22` },
@@ -154,11 +207,86 @@ export function LogMatchScreen() {
       {/* Score */}
       <Section title="Score (your games first)">
         <ScoreInput value={score} onChange={setScore} />
+        <Pressable
+          onPress={() => setTiebreakFinal((v) => !v)}
+          style={styles.tbToggle}
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: tiebreakFinal }}
+        >
+          <View style={[styles.checkbox, tiebreakFinal && styles.checkboxOn]}>
+            {tiebreakFinal ? <Text style={styles.checkboxMark}>✓</Text> : null}
+          </View>
+          <Text style={styles.tbToggleText}>Final set was a match tie-break (first to 10)</Text>
+        </Pressable>
       </Section>
 
       {/* Opponent */}
       <Section title="Opponent">
-        <Field value={opponentName} onChangeText={setOpponentName} placeholder="Opponent name (optional)" />
+        {opponentId ? (
+          <View style={styles.oppChip}>
+            <Avatar name={opponentName} size={28} />
+            <Text style={styles.oppChipName} numberOfLines={1}>{opponentName}</Text>
+            <Pressable
+              onPress={() => {
+                setOpponentId(null);
+                setOpponentName('');
+              }}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Remove tagged opponent"
+            >
+              <Text style={styles.oppRemove}>✕</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <>
+            <Field
+              value={opponentName}
+              onChangeText={(t) => {
+                setOpponentName(t);
+                setOpponentId(null);
+                searchOpponents(t);
+              }}
+              placeholder="Search a Vollo player, or type any name"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            {oppResults.map((u) => (
+              <Pressable
+                key={u.id}
+                onPress={() => {
+                  setOpponentId(u.id);
+                  setOpponentName(u.display_name);
+                  setOppResults([]);
+                }}
+                style={styles.oppResult}
+              >
+                <Avatar name={u.display_name} uri={u.avatar_url} size={28} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.oppResultName}>{u.display_name}</Text>
+                  <Text style={styles.oppResultHandle}>@{u.username}</Text>
+                </View>
+              </Pressable>
+            ))}
+          </>
+        )}
+      </Section>
+
+      {/* When */}
+      <Section title="When">
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: spacing.sm }}>
+          {[0, 1, 2, 3, 4, 5, 6, 7].map((d) => (
+            <Pressable
+              key={d}
+              onPress={() => setDaysAgo(d)}
+              style={[styles.dayChip, daysAgo === d && styles.dayChipActive]}
+            >
+              <Text style={[styles.dayChipText, daysAgo === d && { color: colors.onPrimary }]}>
+                {d === 0 ? 'Today' : d === 1 ? 'Yesterday' : `${d}d ago`}
+              </Text>
+            </Pressable>
+          ))}
+        </ScrollView>
       </Section>
 
       {/* Court */}
@@ -176,7 +304,9 @@ export function LogMatchScreen() {
                 active={courtId === c.id}
                 onPress={() => {
                   setCourtId(c.id);
-                  setSurface(c.surface);
+                  // Adopt the court's surface only if the user hasn't picked one
+                  // themselves, so selecting a court can't silently override it.
+                  if (!surfaceTouched) setSurface(c.surface);
                 }}
               />
             ))}
@@ -303,4 +433,31 @@ const styles = StyleSheet.create({
   courtChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   courtChipText: { color: colors.text, fontWeight: '700', fontSize: font.small },
   courtChipSub: { color: colors.textFaint, fontSize: font.tiny },
+  tbToggle: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.xs },
+  checkbox: {
+    width: 22, height: 22, borderRadius: radius.sm, borderWidth: 1.5, borderColor: colors.border,
+    alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface,
+  },
+  checkboxOn: { backgroundColor: colors.primary, borderColor: colors.primary },
+  checkboxMark: { color: colors.onPrimary, fontWeight: '900', fontSize: 13 },
+  tbToggleText: { color: colors.textDim, fontSize: font.small, flexShrink: 1 },
+  oppChip: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm, alignSelf: 'flex-start',
+    backgroundColor: colors.primarySoft, borderRadius: radius.pill, paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm, maxWidth: '100%',
+  },
+  oppChipName: { color: colors.text, fontWeight: '700', fontSize: font.small, flexShrink: 1 },
+  oppRemove: { color: colors.textDim, fontWeight: '800', paddingHorizontal: spacing.xs },
+  oppResult: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm, backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.md, padding: spacing.sm, borderWidth: 1, borderColor: colors.border,
+  },
+  oppResultName: { color: colors.text, fontWeight: '700', fontSize: font.small },
+  oppResultHandle: { color: colors.textFaint, fontSize: font.tiny },
+  dayChip: {
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.md,
+    backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border,
+  },
+  dayChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  dayChipText: { color: colors.textDim, fontWeight: '700', fontSize: font.small },
 });
