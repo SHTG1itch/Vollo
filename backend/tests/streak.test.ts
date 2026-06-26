@@ -33,6 +33,17 @@ describe('computeStreak', () => {
     expect(s.currentStreakWeeks).toBe(0);
     expect(s.streakModifier).toBe(1);
   });
+
+  it('reports a longest streak that does not drift as now advances', () => {
+    // Fixed history → fixed longest, regardless of when the calc runs. Anchoring
+    // to calendar windows is what stops the old rolling buckets from inflating it.
+    const history = [daysAgo(2), daysAgo(9), daysAgo(16), daysAgo(45)];
+    const a = computeStreak(history, NOW, opts).longestStreakWeeks;
+    const b = computeStreak(history, NOW + 3 * DAY, opts).longestStreakWeeks;
+    const c = computeStreak(history, NOW + 9 * DAY, opts).longestStreakWeeks;
+    expect(b).toBe(a);
+    expect(c).toBe(a);
+  });
 });
 
 describe('streakModifierFor', () => {

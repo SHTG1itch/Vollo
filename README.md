@@ -181,7 +181,7 @@ compass district naming) lives in `backend/src/utils/geo.ts` and is fully unit-t
 ## Testing
 
 ```bash
-cd backend && npm test        # 33 vitest cases: scoring, streak, geo, rating
+cd backend && npm test        # 36 vitest cases: scoring, streak, geo, rating
 cd backend && npm run typecheck
 cd mobile  && npm run typecheck
 ```

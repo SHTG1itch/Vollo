@@ -17,16 +17,29 @@ export interface ScoreAnalysis {
  */
 const SUPER_TIEBREAK_TARGET = 10;
 
+export interface AnalyzeOptions {
+  /**
+   * Explicit signal that the FINAL set was a deciding match/super tiebreak
+   * (first to 10), counted as a single game-equivalent. When provided this
+   * overrides the score-magnitude guess — `true` marks only the last set as a
+   * tiebreak, `false` counts every set as real games (so a long advantage set
+   * like 12-10 keeps its games). When omitted, fall back to the magnitude
+   * heuristic (a side reaching ≥10) for backward compatibility.
+   */
+  finalSetTiebreak?: boolean;
+}
+
 /**
  * Analyse a score array from the logging player's perspective.
  *
  * Each set is [gamesForUser, gamesForOpponent], e.g. [6, 4]. A deciding
- * match-tiebreak such as [10, 8] is recognised (value > 7) and counted as a
- * single game-equivalent so it does not distort the MatchScore game margin.
+ * match-tiebreak such as [10, 8] is counted as a single game-equivalent so it
+ * does not distort the MatchScore game margin. Whether a set is such a tiebreak
+ * is driven by `opts.finalSetTiebreak` when given, else by the score magnitude.
  *
  *   analyzeScore([[6,4],[2,6],[7,6]]) -> win, 2-1 sets, 15-16 games
  */
-export function analyzeScore(score: ScoreArray): ScoreAnalysis {
+export function analyzeScore(score: ScoreArray, opts: AnalyzeOptions = {}): ScoreAnalysis {
   if (!Array.isArray(score) || score.length === 0) {
     throw new Error('score_array must contain at least one set');
   }
@@ -36,8 +49,10 @@ export function analyzeScore(score: ScoreArray): ScoreAnalysis {
   let gamesWon = 0;
   let gamesLost = 0;
   let isTiebreak = false;
+  const lastIdx = score.length - 1;
 
-  for (const set of score) {
+  for (let i = 0; i < score.length; i++) {
+    const set = score[i]!;
     if (!Array.isArray(set) || set.length !== 2) {
       throw new Error('each set must be a [you, opponent] pair');
     }
@@ -49,7 +64,16 @@ export function analyzeScore(score: ScoreArray): ScoreAnalysis {
       throw new Error('a set cannot end in a tie');
     }
 
-    if (me >= SUPER_TIEBREAK_TARGET || opp >= SUPER_TIEBREAK_TARGET) {
+    // Decide whether THIS set is a deciding super/match tiebreak. An explicit
+    // flag governs the final set and removes the magnitude ambiguity (e.g. a
+    // 12-10 advantage set vs a first-to-10 champions tiebreak); without a flag
+    // we keep the historical magnitude guess.
+    let setIsTiebreak: boolean;
+    if (opts.finalSetTiebreak === true) setIsTiebreak = i === lastIdx;
+    else if (opts.finalSetTiebreak === false) setIsTiebreak = false;
+    else setIsTiebreak = me >= SUPER_TIEBREAK_TARGET || opp >= SUPER_TIEBREAK_TARGET;
+
+    if (setIsTiebreak) {
       // A deciding super/match tiebreak: counts as one game-equivalent.
       isTiebreak = true;
       if (me > opp) {

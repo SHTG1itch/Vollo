@@ -53,6 +53,24 @@ describe('analyzeScore', () => {
     expect(a.gamesWon).toBe(11); // 6 + 4 + 1
   });
 
+  it('keeps a long advantage final set as real games when flagged not-a-tiebreak', () => {
+    // 12-10 is a third advantage set, not a champions tiebreak — its games count.
+    const a = analyzeScore([[6, 4], [4, 6], [12, 10]], { finalSetTiebreak: false });
+    expect(a.isTiebreak).toBe(false);
+    expect(a.result).toBe('win');
+    expect(a.setsWon).toBe(2);
+    expect(a.setsLost).toBe(1);
+    expect(a.gamesWon).toBe(22); // 6 + 4 + 12
+    expect(a.gamesLost).toBe(20); // 4 + 6 + 10
+  });
+
+  it('counts the final set as one game-equivalent when flagged a tiebreak', () => {
+    const a = analyzeScore([[6, 4], [4, 6], [12, 10]], { finalSetTiebreak: true });
+    expect(a.isTiebreak).toBe(true);
+    expect(a.gamesWon).toBe(11); // 6 + 4 + 1
+    expect(a.gamesLost).toBe(10); // 4 + 6 + 0
+  });
+
   it('decides an even-set match by games, and rejects a dead tie', () => {
     // 1-1 in sets but more games won → a win, not a silent loss.
     expect(analyzeScore([[6, 0], [4, 6]]).result).toBe('win');

@@ -58,7 +58,10 @@ matchesRouter.post(
     // surface that as a 400, not a 500.
     let analysis;
     try {
-      analysis = analyzeScore(body.score_array);
+      // The client's is_tiebreak flag (when present) authoritatively decides
+      // whether the final set was a deciding match-tiebreak, so the stored flag
+      // and the game counting can never disagree.
+      analysis = analyzeScore(body.score_array, { finalSetTiebreak: body.is_tiebreak });
     } catch (err) {
       throw ApiError.badRequest(err instanceof Error ? err.message : 'Invalid score');
     }
@@ -68,7 +71,7 @@ matchesRouter.post(
     }
 
     const playedAt = body.played_at ?? new Date().toISOString();
-    const isTiebreak = body.is_tiebreak ?? analysis.isTiebreak;
+    const isTiebreak = analysis.isTiebreak;
 
     // Capture the court's current controller BEFORE the new match shifts ranks.
     const previousControllerId = body.court_id ? await getCourtController(body.court_id) : null;

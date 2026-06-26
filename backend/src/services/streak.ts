@@ -15,13 +15,19 @@ export interface StreakComputation {
 /**
  * Pure temporal-heat-index calculation.
  *
- * Activity is bucketed into fixed `windowDays`-long windows counting back from
- * `nowMs` (bucket 0 = the most recent window). A streak is the run of
- * consecutive non-empty buckets starting at bucket 0 — i.e. the user logged at
- * least one match in every rolling window without a gap. The streak modifier
- * scales up by `modifierStep` per maintained window, capped at `modifierMax`:
+ * Activity is bucketed into FIXED, calendar-anchored `windowDays`-long windows
+ * (`floor(ts / windowMs)`), so a given match always maps to the same absolute
+ * bucket no matter when this runs. The current streak is the run of consecutive
+ * non-empty windows ending at the window containing `now`; the longest streak is
+ * the longest such run in history. The modifier scales up by `modifierStep` per
+ * maintained window, capped at `modifierMax`:
  *
  *   modifier = clamp(1 + weeks * step, 1, max)
+ *
+ * Anchoring to fixed boundaries (rather than rolling back from `now`) is what
+ * makes `longest` deterministic: with rolling buckets the same history produced
+ * different layouts on different days, and the DB's GREATEST() then ratcheted
+ * the stored longest ever upward (inflating it past any real streak).
  */
 export function computeStreak(
   playedAtMs: number[],
@@ -35,31 +41,24 @@ export function computeStreak(
   const windowMs = Math.max(1, opts.windowDays) * DAY_MS; // guard against a 0-day window → NaN buckets
   const lastMatchAtMs = Math.max(...playedAtMs);
 
-  // Mark which buckets (counting back from now) contain at least one match.
+  // Which fixed windows contain at least one match.
   const filled = new Set<number>();
-  let maxBucket = 0;
-  for (const ts of playedAtMs) {
-    const bucket = Math.floor((nowMs - ts) / windowMs);
-    if (bucket >= 0) {
-      filled.add(bucket);
-      if (bucket > maxBucket) maxBucket = bucket;
-    }
-  }
+  for (const ts of playedAtMs) filled.add(Math.floor(ts / windowMs));
+  const currentBucket = Math.floor(nowMs / windowMs);
 
-  // Current streak: consecutive filled buckets starting at 0.
+  // Current streak: consecutive filled windows ending at the current window.
   let currentStreakWeeks = 0;
-  while (filled.has(currentStreakWeeks)) currentStreakWeeks++;
+  while (filled.has(currentBucket - currentStreakWeeks)) currentStreakWeeks++;
 
-  // Longest streak: longest consecutive run of filled buckets in history.
+  // Longest streak: longest run of consecutive filled windows in history.
+  const sorted = [...filled].sort((a, b) => a - b);
   let longestStreakWeeks = 0;
   let run = 0;
-  for (let b = 0; b <= maxBucket; b++) {
-    if (filled.has(b)) {
-      run++;
-      if (run > longestStreakWeeks) longestStreakWeeks = run;
-    } else {
-      run = 0;
-    }
+  let prev: number | null = null;
+  for (const b of sorted) {
+    run = prev !== null && b === prev + 1 ? run + 1 : 1;
+    if (run > longestStreakWeeks) longestStreakWeeks = run;
+    prev = b;
   }
 
   const streakModifier = streakModifierFor(currentStreakWeeks, opts);
@@ -103,7 +102,10 @@ export async function recomputeUserStreak(
      VALUES ($1, $2, $3, $4, CASE WHEN $5::bigint IS NULL THEN NULL ELSE to_timestamp($5 / 1000.0) END)
      ON CONFLICT (user_id) DO UPDATE SET
        current_streak_weeks = EXCLUDED.current_streak_weeks,
-       longest_streak_weeks = GREATEST(user_streaks.longest_streak_weeks, EXCLUDED.longest_streak_weeks),
+       -- Plain assignment, not GREATEST: longest is now recomputed deterministically
+       -- from full history each time, so it self-corrects (e.g. after a deletion)
+       -- instead of ratcheting upward forever.
+       longest_streak_weeks = EXCLUDED.longest_streak_weeks,
        streak_modifier      = EXCLUDED.streak_modifier,
        last_match_at        = EXCLUDED.last_match_at`,
     [
