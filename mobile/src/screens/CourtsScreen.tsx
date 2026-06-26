@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from 'react';
-import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import * as Location from 'expo-location';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { api, ApiError } from '../api/client';
-import { Button, Card, Field, H2, Muted, Screen } from '../components/ui';
+import { Button, Card, ErrorState, Field, H2, Loading, Muted, Screen } from '../components/ui';
 import { SurfaceBadge } from '../components/SurfaceBadge';
 import { colors, font, radius, shadow, spacing, surfaceColors } from '../theme';
 import type { Court, GeocodeResult, Surface } from '../types';
@@ -17,19 +18,64 @@ export function CourtsScreen() {
   const [query, setQuery] = useState('');
   const [courts, setCourts] = useState<Court[]>([]);
   const [adding, setAdding] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const coords = useRef<{ lat: number; lng: number } | null>(null);
+  const token = useRef(0);
+  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const firstRender = useRef(true);
 
   const search = async (q: string) => {
+    const t = ++token.current; // ignore out-of-order responses
+    setLoading(true);
+    setError(null);
     try {
-      const { courts: c } = await api.getCourts(q.trim() ? { q: q.trim(), limit: 50 } : { limit: 50 });
-      setCourts(c);
-    } catch {
-      /* ignore */
+      const term = q.trim();
+      // Distance-sorted nearby list by default; the q path searches by name/city.
+      const params = term
+        ? { q: term, limit: 50 }
+        : coords.current
+          ? { ...coords.current, radius_km: 50, limit: 50 }
+          : { limit: 50 };
+      const { courts: c } = await api.getCourts(params);
+      if (t === token.current) setCourts(c);
+    } catch (e) {
+      if (t === token.current) setError(e instanceof ApiError ? e.message : 'Failed to load courts');
+    } finally {
+      if (t === token.current) setLoading(false);
     }
   };
 
+  // On mount: try for the user's location (for distance sort), then load.
   useEffect(() => {
-    void search('');
+    void (async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status === 'granted') {
+          const pos = await Location.getCurrentPositionAsync({});
+          coords.current = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        }
+      } catch {
+        /* no location — fall back to the unsorted list */
+      }
+      void search('');
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Debounce typing so the list filters as you type (the Go button still works).
+  useEffect(() => {
+    if (firstRender.current) {
+      firstRender.current = false;
+      return;
+    }
+    if (debounce.current) clearTimeout(debounce.current);
+    debounce.current = setTimeout(() => void search(query), 350);
+    return () => {
+      if (debounce.current) clearTimeout(debounce.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query]);
 
   return (
     <Screen>
@@ -52,27 +98,39 @@ export function CourtsScreen() {
 
       <View style={styles.searchRow}>
         <Field value={query} onChangeText={setQuery} placeholder="Search by name or city" onSubmitEditing={() => search(query)} style={{ flex: 1 }} />
-        <Button label="Go" onPress={() => search(query)} style={{ paddingHorizontal: spacing.lg }} />
+        {loading ? (
+          <View style={styles.searchSpinner}>
+            <ActivityIndicator color={colors.primary} />
+          </View>
+        ) : (
+          <Button label="Go" onPress={() => search(query)} style={{ paddingHorizontal: spacing.lg }} />
+        )}
       </View>
 
-      <FlatList
-        data={courts}
-        keyExtractor={(c) => c.id}
-        contentContainerStyle={{ padding: spacing.lg, paddingTop: 0, gap: spacing.sm }}
-        renderItem={({ item }) => (
-          <Pressable style={styles.courtRow} onPress={() => navigation.navigate('Court', { courtId: item.id })}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.courtName}>{item.name}</Text>
-              <Text style={styles.courtSub}>
-                {item.city ?? 'Unknown city'}
-                {item.distance_km != null ? ` · ${item.distance_km.toFixed(1)} km` : ''}
-              </Text>
-            </View>
-            <SurfaceBadge surface={item.surface} small />
-          </Pressable>
-        )}
-        ListEmptyComponent={<Muted style={{ padding: spacing.lg }}>No courts found.</Muted>}
-      />
+      {loading && courts.length === 0 ? (
+        <Loading label="Finding courts…" />
+      ) : error && courts.length === 0 ? (
+        <ErrorState message={error} onRetry={() => search(query)} />
+      ) : (
+        <FlatList
+          data={courts}
+          keyExtractor={(c) => c.id}
+          contentContainerStyle={{ padding: spacing.lg, paddingTop: 0, gap: spacing.sm }}
+          renderItem={({ item }) => (
+            <Pressable style={styles.courtRow} onPress={() => navigation.navigate('Court', { courtId: item.id })}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.courtName}>{item.name}</Text>
+                <Text style={styles.courtSub}>
+                  {item.city ?? 'Unknown city'}
+                  {item.distance_km != null ? ` · ${item.distance_km.toFixed(1)} km` : ''}
+                </Text>
+              </View>
+              <SurfaceBadge surface={item.surface} small />
+            </Pressable>
+          )}
+          ListEmptyComponent={<Muted style={{ padding: spacing.lg }}>No courts found.</Muted>}
+        />
+      )}
     </Screen>
   );
 }
@@ -150,6 +208,7 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: spacing.lg, paddingBottom: spacing.sm },
   back: { color: colors.primary, fontSize: 34, fontWeight: '700', marginTop: -4 },
   searchRow: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-end', paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
+  searchSpinner: { width: 56, height: 48, alignItems: 'center', justifyContent: 'center' },
   courtRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.md, borderWidth: 1, borderColor: colors.border,

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -26,7 +26,6 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 export function ProfileView({ username, isSelf }: { username: string; isSelf: boolean }) {
   const navigation = useNavigation<Nav>();
-  const logout = useAuth((s) => s.logout);
 
   const [profile, setProfile] = useState<ProfileResponse | null>(null);
   const [analytics, setAnalytics] = useState<ProfileAnalytics | null>(null);
@@ -37,13 +36,15 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
   const [h2h, setH2h] = useState<HeadToHead[]>([]);
   const [recent, setRecent] = useState<MatchCard[]>([]);
   const [following, setFollowing] = useState(false);
+  const [followLoading, setFollowLoading] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let active = true;
-    setLoading(true);
+    if (!profile) setLoading(true); // a pull-to-refresh keeps the screen, not a full loader
     setError(null);
     void (async () => {
       try {
@@ -73,29 +74,44 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
         // getProfile failed — distinguish a transient network error from a 404.
         if (active) setError(e instanceof Error ? e.message : 'Failed to load profile');
       } finally {
-        if (active) setLoading(false);
+        if (active) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     })();
     return () => {
       active = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [username, reloadKey]);
 
-  const confirmLogout = () =>
-    Alert.alert('Log out', 'Sign out of Vollo?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Log out', style: 'destructive', onPress: logout },
-    ]);
+  const onRefresh = () => {
+    setRefreshing(true);
+    setReloadKey((k) => k + 1);
+  };
+
+  const adjustFollowerCount = (delta: number) =>
+    setProfile((p) =>
+      p ? { ...p, stats: { ...p.stats, follower_count: Math.max(0, p.stats.follower_count + delta) } } : p,
+    );
 
   const toggleFollow = async () => {
-    if (!profile) return;
+    if (!profile || followLoading) return;
     const was = following;
+    // Optimistically flip the button AND the follower count, revert both on error.
     setFollowing(!was);
+    adjustFollowerCount(was ? -1 : 1);
+    setFollowLoading(true);
     try {
       if (was) await api.unfollow(username);
       else await api.follow(username);
     } catch {
       setFollowing(was);
+      adjustFollowerCount(was ? 1 : -1);
+      Alert.alert('Could not update', 'Please try again.');
+    } finally {
+      setFollowLoading(false);
     }
   };
 
@@ -109,7 +125,11 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
     ratings.length > 0 ? Math.round(ratings.reduce((s, r) => s + r.rating, 0) / ratings.length) : null;
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: colors.bg }} contentContainerStyle={styles.content}>
+    <ScrollView
+      style={{ flex: 1, backgroundColor: colors.bg }}
+      contentContainerStyle={styles.content}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+    >
       {/* Header */}
       <Card style={{ gap: spacing.md }}>
         <View style={styles.headerRow}>
@@ -132,10 +152,17 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
         {isSelf ? (
           <View style={{ flexDirection: 'row', gap: spacing.sm }}>
             <Button label="Edit profile" variant="secondary" onPress={() => navigation.navigate('EditProfile')} style={{ flex: 1, height: 42 }} />
-            <Button label="Log out" variant="ghost" onPress={confirmLogout} style={{ flex: 1, height: 42 }} />
+            <Button label="Settings" variant="ghost" onPress={() => navigation.navigate('Settings')} style={{ flex: 1, height: 42 }} />
           </View>
         ) : (
-          <Button label={following ? 'Following' : 'Follow'} variant={following ? 'secondary' : 'primary'} onPress={toggleFollow} style={{ height: 42 }} />
+          <Button
+            label={following ? 'Following' : 'Follow'}
+            variant={following ? 'secondary' : 'primary'}
+            onPress={toggleFollow}
+            loading={followLoading}
+            disabled={followLoading}
+            style={{ height: 42 }}
+          />
         )}
       </Card>
 
