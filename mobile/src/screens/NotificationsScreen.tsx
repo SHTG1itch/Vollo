@@ -1,13 +1,20 @@
 import React, { useEffect } from 'react';
-import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { RootStackParamList } from '../navigation/types';
 import { useNotifications } from '../store/notifications';
-import { EmptyState } from '../components/ui';
+import { EmptyState, ErrorState } from '../components/ui';
 import { colors, font, radius, shadow, spacing } from '../theme';
 import { timeAgo } from '../utils/format';
 
+type Nav = NativeStackNavigationProp<RootStackParamList>;
+
 export function NotificationsScreen() {
-  const { items, loading, fetch, markAllRead } = useNotifications();
+  const navigation = useNavigation<Nav>();
+  const insets = useSafeAreaInsets();
+  const { items, loading, error, fetch, markAllRead } = useNotifications();
 
   useEffect(() => {
     void fetch();
@@ -23,26 +30,46 @@ export function NotificationsScreen() {
     }, []),
   );
 
+  // Route a tapped notification to the relevant screen using its data payload.
+  const openTarget = (data: Record<string, unknown> | null | undefined) => {
+    const matchId = typeof data?.matchId === 'string' ? data.matchId : null;
+    const courtId = typeof data?.courtId === 'string' ? data.courtId : null;
+    if (matchId) navigation.navigate('MatchDetail', { matchId });
+    else if (courtId) navigation.navigate('Court', { courtId });
+  };
+
   return (
-    <View style={{ flex: 1, backgroundColor: colors.bg }}>
+    <View style={{ flex: 1, backgroundColor: colors.bg, paddingTop: insets.top }}>
       <Text style={styles.title}>Activity</Text>
-      <FlatList
-        data={items}
-        keyExtractor={(n) => n.id}
-        contentContainerStyle={{ padding: spacing.lg, paddingTop: 0, gap: spacing.sm }}
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={() => fetch()} tintColor={colors.primary} />}
-        renderItem={({ item }) => (
-          <View style={[styles.row, !item.read && styles.unread]}>
-            {!item.read ? <View style={styles.dot} /> : <View style={styles.dotPlaceholder} />}
-            <View style={{ flex: 1 }}>
-              <Text style={styles.rowTitle}>{item.title}</Text>
-              <Text style={styles.rowBody}>{item.body}</Text>
-              <Text style={styles.rowTime}>{timeAgo(item.created_at)}</Text>
-            </View>
-          </View>
-        )}
-        ListEmptyComponent={<EmptyState icon="🔔" title="No activity yet" subtitle="Kudos, comments and territory battles will show up here." />}
-      />
+      {error && items.length === 0 ? (
+        <ErrorState message={error} onRetry={() => fetch()} />
+      ) : (
+        <FlatList
+          data={items}
+          keyExtractor={(n) => n.id}
+          contentContainerStyle={{ padding: spacing.lg, paddingTop: 0, gap: spacing.sm }}
+          refreshControl={<RefreshControl refreshing={loading} onRefresh={() => fetch()} tintColor={colors.primary} />}
+          renderItem={({ item }) => {
+            const data = item.data as Record<string, unknown> | null | undefined;
+            const tappable = typeof data?.matchId === 'string' || typeof data?.courtId === 'string';
+            return (
+              <Pressable
+                disabled={!tappable}
+                onPress={() => openTarget(data)}
+                style={({ pressed }) => [styles.row, !item.read && styles.unread, pressed && tappable && { opacity: 0.85 }]}
+              >
+                {!item.read ? <View style={styles.dot} /> : <View style={styles.dotPlaceholder} />}
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.rowTitle}>{item.title}</Text>
+                  <Text style={styles.rowBody}>{item.body}</Text>
+                  <Text style={styles.rowTime}>{timeAgo(item.created_at)}</Text>
+                </View>
+              </Pressable>
+            );
+          }}
+          ListEmptyComponent={<EmptyState icon="🔔" title="No activity yet" subtitle="Kudos, comments and territory battles will show up here." />}
+        />
+      )}
     </View>
   );
 }

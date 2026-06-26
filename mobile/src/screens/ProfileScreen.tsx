@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { api } from '../api/client';
 import { useAuth } from '../store/auth';
-import { Avatar, Button, Card, Loading, Muted, Stat } from '../components/ui';
+import { Avatar, Button, Card, ErrorState, Loading, Muted, Stat } from '../components/ui';
 import { FormDots, ProgressBar, RallyDistribution, SplitBar } from '../components/charts';
 import { SurfaceBadge } from '../components/SurfaceBadge';
 import { colors, font, radius, spacing, surfaceColors } from '../theme';
@@ -37,10 +38,13 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
   const [recent, setRecent] = useState<MatchCard[]>([]);
   const [following, setFollowing] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let active = true;
     setLoading(true);
+    setError(null);
     void (async () => {
       try {
         const prof = await api.getProfile(username);
@@ -65,6 +69,9 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
         if (terr.status === 'fulfilled') setTerritories(terr.value.territories);
         if (hh.status === 'fulfilled') setH2h(hh.value.head_to_head);
         if (feed.status === 'fulfilled') setRecent(feed.value.matches);
+      } catch (e) {
+        // getProfile failed — distinguish a transient network error from a 404.
+        if (active) setError(e instanceof Error ? e.message : 'Failed to load profile');
       } finally {
         if (active) setLoading(false);
       }
@@ -72,7 +79,13 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
     return () => {
       active = false;
     };
-  }, [username]);
+  }, [username, reloadKey]);
+
+  const confirmLogout = () =>
+    Alert.alert('Log out', 'Sign out of Vollo?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Log out', style: 'destructive', onPress: logout },
+    ]);
 
   const toggleFollow = async () => {
     if (!profile) return;
@@ -87,10 +100,13 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
   };
 
   if (loading) return <Loading />;
+  if (error && !profile)
+    return <ErrorState message={error} onRetry={() => setReloadKey((k) => k + 1)} />;
   if (!profile) return <Muted style={{ padding: spacing.xl }}>Profile not found.</Muted>;
 
+  // No matches yet → no rating to average; show "—" rather than a fake 1000.
   const avgRating =
-    ratings.length > 0 ? Math.round(ratings.reduce((s, r) => s + r.rating, 0) / ratings.length) : 1000;
+    ratings.length > 0 ? Math.round(ratings.reduce((s, r) => s + r.rating, 0) / ratings.length) : null;
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: colors.bg }} contentContainerStyle={styles.content}>
@@ -116,7 +132,7 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
         {isSelf ? (
           <View style={{ flexDirection: 'row', gap: spacing.sm }}>
             <Button label="Edit profile" variant="secondary" onPress={() => navigation.navigate('EditProfile')} style={{ flex: 1, height: 42 }} />
-            <Button label="Log out" variant="ghost" onPress={logout} style={{ flex: 1, height: 42 }} />
+            <Button label="Log out" variant="ghost" onPress={confirmLogout} style={{ flex: 1, height: 42 }} />
           </View>
         ) : (
           <Button label={following ? 'Following' : 'Follow'} variant={following ? 'secondary' : 'primary'} onPress={toggleFollow} style={{ height: 42 }} />
@@ -127,8 +143,8 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
       <View style={{ flexDirection: 'row', gap: spacing.md }}>
         <Card style={styles.miniCard}>
           <Text style={styles.miniLabel}>VOLLO RATING</Text>
-          <Text style={styles.miniValue}>{avgRating}</Text>
-          {analytics ? <Text style={styles.miniSub}>{analytics.playstyle}</Text> : null}
+          <Text style={styles.miniValue}>{avgRating ?? '—'}</Text>
+          {analytics && avgRating != null ? <Text style={styles.miniSub}>{analytics.playstyle}</Text> : null}
         </Card>
         <Card style={styles.miniCard}>
           <Text style={styles.miniLabel}>STREAK</Text>
@@ -274,8 +290,13 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 
 export function MeScreen() {
   const user = useAuth((s) => s.user);
-  if (!user) return <Loading />;
-  return <ProfileView username={user.username} isSelf />;
+  const insets = useSafeAreaInsets();
+  // The Me tab has no navigation header — pad past the status bar/notch.
+  return (
+    <View style={{ flex: 1, backgroundColor: colors.bg, paddingTop: insets.top }}>
+      {user ? <ProfileView username={user.username} isSelf /> : <Loading />}
+    </View>
+  );
 }
 
 export function UserProfileScreen({ route }: NativeStackScreenProps<RootStackParamList, 'UserProfile'>) {

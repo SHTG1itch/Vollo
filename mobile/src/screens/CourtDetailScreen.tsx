@@ -3,7 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { api } from '../api/client';
-import { Avatar, Button, Card, Loading, Muted } from '../components/ui';
+import { Avatar, Button, Card, ErrorState, Loading, Muted } from '../components/ui';
 import { SurfaceBadge } from '../components/SurfaceBadge';
 import { colors, font, radius, shadow, spacing } from '../theme';
 import type { Court, LeaderboardEntry } from '../types';
@@ -16,24 +16,36 @@ export function CourtDetailScreen({ route, navigation }: Props) {
   const [controller, setController] = useState<{ display_name: string; username: string; score: number } | null>(null);
   const [board, setBoard] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError(null);
     void (async () => {
       try {
         const [{ court: c, controller: ctrl }, { leaderboard }] = await Promise.all([
           api.getCourt(courtId),
           api.getCourtLeaderboard(courtId),
         ]);
+        if (!active) return;
         setCourt(c);
         setController(ctrl);
         setBoard(leaderboard);
+      } catch (e) {
+        if (active) setError(e instanceof Error ? e.message : 'Failed to load court');
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
     })();
-  }, [courtId]);
+    return () => {
+      active = false;
+    };
+  }, [courtId, reloadKey]);
 
   if (loading) return <Loading />;
+  if (error && !court) return <ErrorState message={error} onRetry={() => setReloadKey((k) => k + 1)} />;
   if (!court) return <Muted style={{ padding: spacing.xl }}>Court not found.</Muted>;
 
   return (

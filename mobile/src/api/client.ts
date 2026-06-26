@@ -100,6 +100,16 @@ const qs = (params: Record<string, string | number | undefined>): string => {
   return entries.length ? `?${entries.map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join('&')}` : '';
 };
 
+export interface CommentItem {
+  id: string;
+  body: string;
+  created_at: string;
+  user_id: string;
+  username: string;
+  display_name: string;
+  avatar_url: string | null;
+}
+
 export interface CreateMatchPayload {
   opponent_id?: string;
   opponent_name?: string;
@@ -137,11 +147,9 @@ export const api = {
   removeKudos: (id: string) =>
     request<{ kudos_count: number; viewer_has_kudos: boolean }>(`/matches/${id}/kudos`, { method: 'DELETE' }),
   getComments: (id: string) =>
-    request<{ comments: Array<{ id: string; body: string; created_at: string; user_id: string; username: string; display_name: string; avatar_url: string | null }> }>(
-      `/matches/${id}/comments`,
-    ),
+    request<{ comments: CommentItem[] }>(`/matches/${id}/comments`),
   addComment: (id: string, body: string) =>
-    request<{ comment: unknown }>(`/matches/${id}/comments`, { method: 'POST', body: JSON.stringify({ body }) }),
+    request<{ comment: CommentItem }>(`/matches/${id}/comments`, { method: 'POST', body: JSON.stringify({ body }) }),
 
   // ── Courts ──
   getCourts: (params: { lat?: number; lng?: number; radius_km?: number; q?: string; limit?: number }) =>

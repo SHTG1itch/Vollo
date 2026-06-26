@@ -34,7 +34,17 @@ export function CourtsScreen() {
   return (
     <Screen>
       <View style={styles.header}>
-        <H2>Courts</H2>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+          <Pressable
+            onPress={() => navigation.goBack()}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+          >
+            <Text style={styles.back}>‹</Text>
+          </Pressable>
+          <H2>Courts</H2>
+        </View>
         <Button label={adding ? 'Cancel' : '＋ Add'} variant="ghost" onPress={() => setAdding((v) => !v)} style={{ height: 38 }} />
       </View>
 
@@ -138,6 +148,7 @@ function AddCourt({ onCreated }: { onCreated: (c: Court) => void }) {
 
 const styles = StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: spacing.lg, paddingBottom: spacing.sm },
+  back: { color: colors.primary, fontSize: 34, fontWeight: '700', marginTop: -4 },
   searchRow: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-end', paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
   courtRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',

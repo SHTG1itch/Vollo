@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import MapView, { Marker, Polygon, UrlTile, type Region } from 'react-native-maps';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -37,8 +38,9 @@ function polygonCoords(t: Territory): { latitude: number; longitude: number }[] 
 
 export function MapScreen() {
   const navigation = useNavigation<Nav>();
+  const insets = useSafeAreaInsets();
   const user = useAuth((s) => s.user);
-  const [region, setRegion] = useState<Region>(DEFAULT_REGION);
+  const mapRef = useRef<MapView>(null);
   const [territories, setTerritories] = useState<Territory[]>([]);
   const [courts, setCourts] = useState<Court[]>([]);
   const [selected, setSelected] = useState<Territory | null>(null);
@@ -71,7 +73,8 @@ export function MapScreen() {
         if (status === 'granted') {
           const pos = await Location.getCurrentPositionAsync({});
           start = { ...DEFAULT_REGION, latitude: pos.coords.latitude, longitude: pos.coords.longitude };
-          setRegion(start);
+          // Programmatic move via the ref — don't drive the map from state.
+          mapRef.current?.animateToRegion(start, 600);
         }
       } catch {
         /* default region */
@@ -80,8 +83,12 @@ export function MapScreen() {
     })();
   }, [load]);
 
+  // Clear any pending debounce when the screen unmounts.
+  useEffect(() => () => {
+    if (debounce.current) clearTimeout(debounce.current);
+  }, []);
+
   const onRegionChange = (r: Region) => {
-    setRegion(r);
     if (debounce.current) clearTimeout(debounce.current);
     debounce.current = setTimeout(() => void load(r), 600);
   };
@@ -89,9 +96,9 @@ export function MapScreen() {
   return (
     <View style={styles.container}>
       <MapView
+        ref={mapRef}
         style={StyleSheet.absoluteFill}
         initialRegion={DEFAULT_REGION}
-        region={region}
         onRegionChangeComplete={onRegionChange}
         mapType="none"
         showsUserLocation
@@ -128,11 +135,16 @@ export function MapScreen() {
       </MapView>
 
       {/* Title + add-court control */}
-      <View style={styles.topBar} pointerEvents="box-none">
+      <View style={[styles.topBar, { top: insets.top + spacing.sm }]} pointerEvents="box-none">
         <View style={styles.titlePill}>
           <Text style={styles.title}>🗺️ Domination Map</Text>
         </View>
-        <Pressable style={styles.addBtn} onPress={() => navigation.navigate('Courts')}>
+        <Pressable
+          style={styles.addBtn}
+          onPress={() => navigation.navigate('Courts')}
+          accessibilityRole="button"
+          accessibilityLabel="Add or browse courts"
+        >
           <Text style={styles.addBtnText}>＋ Courts</Text>
         </Pressable>
       </View>
@@ -156,7 +168,13 @@ export function MapScreen() {
           >
             <Text style={styles.detailBtnText}>View</Text>
           </Pressable>
-          <Pressable onPress={() => setSelected(null)} hitSlop={8} style={{ paddingHorizontal: spacing.sm }}>
+          <Pressable
+            onPress={() => setSelected(null)}
+            hitSlop={8}
+            style={{ paddingHorizontal: spacing.sm }}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss territory details"
+          >
             <Text style={styles.close}>✕</Text>
           </Pressable>
         </View>

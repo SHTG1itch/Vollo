@@ -3,7 +3,7 @@ import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { api } from '../api/client';
-import { Avatar, EmptyState, Loading } from '../components/ui';
+import { Avatar, EmptyState, ErrorState, Loading } from '../components/ui';
 import { colors, font, radius, shadow, spacing } from '../theme';
 import type { LeaderboardEntry } from '../types';
 
@@ -13,19 +13,30 @@ export function LeaderboardScreen({ route, navigation }: Props) {
   const { courtId } = route.params;
   const [board, setBoard] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError(null);
     void (async () => {
       try {
         const { leaderboard } = await api.getCourtLeaderboard(courtId);
-        setBoard(leaderboard);
+        if (active) setBoard(leaderboard);
+      } catch (e) {
+        if (active) setError(e instanceof Error ? e.message : 'Failed to load leaderboard');
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
     })();
-  }, [courtId]);
+    return () => {
+      active = false;
+    };
+  }, [courtId, reloadKey]);
 
   if (loading) return <Loading />;
+  if (error) return <ErrorState message={error} onRetry={() => setReloadKey((k) => k + 1)} />;
 
   return (
     <FlatList

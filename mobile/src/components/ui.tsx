@@ -177,6 +177,27 @@ export function EmptyState({ icon = '🎾', title, subtitle }: { icon?: string; 
   );
 }
 
+export function ErrorState({
+  title = 'Something went wrong',
+  message,
+  onRetry,
+}: {
+  title?: string;
+  message?: string | null;
+  onRetry?: () => void;
+}) {
+  return (
+    <View style={styles.center}>
+      <Text style={{ fontSize: 48, marginBottom: spacing.md }}>⚠️</Text>
+      <Text style={styles.emptyTitle}>{title}</Text>
+      {message ? <Text style={styles.dim}>{message}</Text> : null}
+      {onRetry ? (
+        <Button label="Try again" variant="secondary" onPress={onRetry} style={{ marginTop: spacing.md, minWidth: 160 }} />
+      ) : null}
+    </View>
+  );
+}
+
 export function Stat({ label, value, color = colors.text }: { label: string; value: string | number; color?: string }) {
   return (
     <View style={{ alignItems: 'center', flex: 1 }}>

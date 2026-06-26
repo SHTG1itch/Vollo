@@ -3,9 +3,10 @@ import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, Vi
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { api, ApiError } from '../api/client';
+import type { CommentItem } from '../api/client';
 import { useAuth } from '../store/auth';
 import { useFeed } from '../store/feed';
-import { Avatar, Button, Card, Field, Loading, Muted } from '../components/ui';
+import { Avatar, Button, Card, ErrorState, Field, Loading, Muted } from '../components/ui';
 import { SurfaceBadge } from '../components/SurfaceBadge';
 import { ProgressBar, RallyDistribution, SplitBar } from '../components/charts';
 import { KudosButton } from '../components/KudosButton';
@@ -14,7 +15,7 @@ import type { MatchCard, MatchStats } from '../types';
 import { formatScoreLine, timeAgo } from '../utils/format';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'MatchDetail'>;
-type Comment = { id: string; body: string; created_at: string; user_id: string; username: string; display_name: string; avatar_url: string | null };
+type Comment = CommentItem;
 
 export function MatchDetailScreen({ route, navigation }: Props) {
   const { matchId } = route.params;
@@ -24,20 +25,29 @@ export function MatchDetailScreen({ route, navigation }: Props) {
   const [draft, setDraft] = useState('');
   const [loading, setLoading] = useState(true);
   const [posting, setPosting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError(null);
     void (async () => {
       try {
         const [{ match: m }, { comments: c }] = await Promise.all([api.getMatch(matchId), api.getComments(matchId)]);
+        if (!active) return;
         setMatch(m);
         setComments(c);
-      } catch {
-        /* handled by empty state */
+      } catch (e) {
+        if (active) setError(e instanceof Error ? e.message : 'Failed to load match');
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
     })();
-  }, [matchId]);
+    return () => {
+      active = false;
+    };
+  }, [matchId, reloadKey]);
 
   const toggleKudos = async () => {
     if (!match) return;
@@ -55,19 +65,9 @@ export function MatchDetailScreen({ route, navigation }: Props) {
     if (!draft.trim() || !user) return;
     setPosting(true);
     try {
-      await api.addComment(matchId, draft.trim());
-      setComments((c) => [
-        ...c,
-        {
-          id: `temp-${Date.now()}`,
-          body: draft.trim(),
-          created_at: new Date().toISOString(),
-          user_id: user.id,
-          username: user.username,
-          display_name: user.display_name,
-          avatar_url: user.avatar_url,
-        },
-      ]);
+      const { comment } = await api.addComment(matchId, draft.trim());
+      // Use the server's authoritative comment (real id/timestamp), not a stub.
+      setComments((c) => [...c, comment]);
       setDraft('');
       setMatch((cur) => (cur ? { ...cur, comment_count: cur.comment_count + 1 } : cur));
     } catch (e) {
@@ -97,6 +97,7 @@ export function MatchDetailScreen({ route, navigation }: Props) {
   };
 
   if (loading) return <Loading />;
+  if (error && !match) return <ErrorState message={error} onRetry={() => setReloadKey((k) => k + 1)} />;
   if (!match) return <Muted style={{ padding: spacing.xl }}>Match not found.</Muted>;
 
   const win = match.result === 'win';

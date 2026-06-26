@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -26,6 +27,7 @@ const emptyStats = (): MatchStats => ({
 
 export function LogMatchScreen() {
   const navigation = useNavigation<Nav>();
+  const insets = useSafeAreaInsets();
   const prepend = useFeed((s) => s.prepend);
 
   const [surface, setSurface] = useState<Surface>('hard');
@@ -109,7 +111,11 @@ export function LogMatchScreen() {
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={[styles.content, { paddingTop: insets.top + spacing.lg }]}
+      keyboardShouldPersistTaps="handled"
+    >
       <H2>Log a match</H2>
 
       {/* Result preview */}
