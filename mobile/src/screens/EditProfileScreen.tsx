@@ -4,7 +4,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { api, ApiError } from '../api/client';
 import { useAuth } from '../store/auth';
-import { Button, Card, Field, Muted } from '../components/ui';
+import { Avatar, Button, Card, Field, Muted } from '../components/ui';
 import { colors, font, radius, spacing } from '../theme';
 import type { GeocodeResult } from '../types';
 
@@ -16,6 +16,7 @@ export function EditProfileScreen({ navigation }: Props) {
 
   const [displayName, setDisplayName] = useState(user?.display_name ?? '');
   const [bio, setBio] = useState(user?.bio ?? '');
+  const [avatarUrl, setAvatarUrl] = useState(user?.avatar_url ?? '');
   const [hand, setHand] = useState<'right' | 'left'>(user?.dominant_hand ?? 'right');
   const [homeQuery, setHomeQuery] = useState(user?.home_label ?? '');
   const [home, setHome] = useState<GeocodeResult | null>(null);
@@ -36,6 +37,8 @@ export function EditProfileScreen({ navigation }: Props) {
     setSaving(true);
     try {
       const body: Record<string, unknown> = { display_name: displayName.trim(), bio: bio.trim(), dominant_hand: hand };
+      const trimmedAvatar = avatarUrl.trim();
+      if (trimmedAvatar) body.avatar_url = trimmedAvatar;
       if (home) body.home = { lat: home.lat, lng: home.lng, label: home.label };
       const { user: updated } = await api.updateProfile(body);
       setUser(updated);
@@ -50,6 +53,12 @@ export function EditProfileScreen({ navigation }: Props) {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: colors.bg }} contentContainerStyle={styles.content}>
       <Card style={{ gap: spacing.md }}>
+        <View style={styles.avatarRow}>
+          <Avatar name={displayName || user?.username || '🎾'} uri={avatarUrl.trim() || null} size={64} />
+          <View style={{ flex: 1 }}>
+            <Field label="Avatar image URL" value={avatarUrl} onChangeText={setAvatarUrl} placeholder="https://…/photo.jpg" autoCapitalize="none" autoCorrect={false} />
+          </View>
+        </View>
         <Field label="Display name" value={displayName} onChangeText={setDisplayName} />
         <Field label="Bio" value={bio} onChangeText={setBio} placeholder="Tell players about your game" multiline style={{ height: 80, paddingTop: spacing.sm }} />
         <View style={{ gap: spacing.xs }}>
@@ -63,7 +72,18 @@ export function EditProfileScreen({ navigation }: Props) {
           </View>
         </View>
         <View style={{ gap: spacing.xs }}>
-          <Field label="Home base" value={homeQuery} onChangeText={setHomeQuery} placeholder="Your city" onSubmitEditing={findHome} />
+          <Field
+            label="Home base"
+            value={homeQuery}
+            onChangeText={(t) => {
+              setHomeQuery(t);
+              // Clear a previously-picked location so edited-but-unconfirmed text
+              // can't be saved with stale coordinates.
+              setHome(null);
+            }}
+            placeholder="Your city"
+            onSubmitEditing={findHome}
+          />
           <Button label="Find" variant="secondary" onPress={findHome} style={{ height: 40 }} />
           {results.map((r, i) => (
             <Pressable key={i} onPress={() => { setHome(r); setHomeQuery(r.label); setResults([]); }} style={styles.result}>
@@ -80,6 +100,7 @@ export function EditProfileScreen({ navigation }: Props) {
 
 const styles = StyleSheet.create({
   content: { padding: spacing.lg, gap: spacing.lg },
+  avatarRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   label: { color: colors.textDim, fontSize: font.small, fontWeight: '600', marginLeft: 2 },
   handChip: { flex: 1, paddingVertical: spacing.md, borderRadius: radius.md, alignItems: 'center', backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border },
   handChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },

@@ -26,6 +26,16 @@ function projectId(): string | undefined {
  */
 export async function registerForPush(): Promise<void> {
   try {
+    // Android requires an explicit channel or notifications are silently dropped.
+    if (Platform.OS === 'android') {
+      await Notifications.setNotificationChannelAsync('default', {
+        name: 'Default',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: '#0F7A3D',
+      });
+    }
+
     const settings = await Notifications.getPermissionsAsync();
     let granted = settings.granted;
     if (!granted) {
