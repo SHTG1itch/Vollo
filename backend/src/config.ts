@@ -35,6 +35,21 @@ function resolveJwtSecret(): string {
   return secret;
 }
 
+/**
+ * Resolve the CORS allowlist. Vollo's only client is the native app (not subject
+ * to CORS), so a wildcard isn't a credential-leak risk here — but a browser
+ * dashboard could be added later, so in production we surface a loud warning
+ * when the origin is left wide-open rather than silently shipping '*'.
+ */
+function resolveCorsOrigin(): string {
+  const origin = process.env.CORS_ORIGIN;
+  if (isProduction && (!origin || origin === '*')) {
+    console.warn('[config] CORS_ORIGIN is unset/“*” in production — set an explicit allowlist if you add a browser client.');
+    return '*';
+  }
+  return origin ?? '*';
+}
+
 export const config = {
   env,
   port: num(process.env.PORT, 4000),
@@ -76,7 +91,7 @@ export const config = {
   },
 
   cors: {
-    origin: process.env.CORS_ORIGIN ?? '*',
+    origin: resolveCorsOrigin(),
   },
 
   /** Run the cron sweeps inside the API process (single $0 web service). */

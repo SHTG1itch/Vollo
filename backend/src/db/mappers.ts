@@ -33,6 +33,17 @@ export function mapUser(r: Record<string, unknown>): User {
   };
 }
 
+/**
+ * Public view of a user — never exposes the private `email` (or any other
+ * account-only field). Used for everyone except the authenticated account owner
+ * so GET /users/:username can't be used to harvest email addresses.
+ */
+export function mapPublicUser(r: Record<string, unknown>): Omit<User, 'email'> {
+  const { email: _email, ...rest } = mapUser(r);
+  void _email;
+  return rest;
+}
+
 export function mapCourt(r: Record<string, unknown>): Court {
   return {
     id: r.id as string,

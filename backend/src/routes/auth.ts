@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import bcrypt from 'bcryptjs';
 import { query, queryOne } from '../db/pool.js';
 import { mapUser } from '../db/mappers.js';
 import { requireAuth, userId } from '../middleware/auth.js';
@@ -17,8 +18,10 @@ const USER_SELECT = `
 
 // A valid bcrypt hash compared against when the identifier is unknown, so login
 // takes the same amount of work whether or not the account exists (defeats the
-// timing-based user-enumeration oracle).
-const DUMMY_PASSWORD_HASH = '$2a$12$R9h/cIPz0gi.URNNX3kh2OPST9/PgBkqquzi.Ss7KIUgO2t0jWMUW';
+// timing-based user-enumeration oracle). Generated at the *configured* cost so
+// the dummy-compare cost always matches a real account's — a hardcoded cost-12
+// literal would leak account existence whenever BCRYPT_ROUNDS != 12.
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync('vollo-timing-equalizer', config.auth.bcryptRounds);
 
 export const authRouter = Router();
 

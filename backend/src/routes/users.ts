@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { query, queryOne } from '../db/pool.js';
-import { mapUser } from '../db/mappers.js';
+import { mapPublicUser, mapUser } from '../db/mappers.js';
 import { optionalAuth, requireAuth, userId } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';
 import { asyncHandler } from '../utils/async-handler.js';
@@ -112,8 +112,12 @@ usersRouter.get(
     );
     if (!row) throw ApiError.notFound('User not found');
 
+    // The account owner sees their full record (incl. email); everyone else gets
+    // the public projection so the endpoint can't be used to harvest emails.
+    const isSelf = viewerId != null && viewerId === (row.id as string);
+
     res.json({
-      user: mapUser(row),
+      user: isSelf ? mapUser(row) : mapPublicUser(row),
       stats: {
         match_count: Number(row.match_count),
         follower_count: Number(row.follower_count),

@@ -177,7 +177,13 @@ export interface HeadToHead {
 
 /** Head-to-head records against every opponent the user has faced. */
 export async function getHeadToHead(userId: string): Promise<HeadToHead[]> {
-  return query<HeadToHead>(
+  const rows = await query<{
+    opponent_id: string | null;
+    opponent_name: string;
+    matches: string;
+    wins: string;
+    losses: string;
+  }>(
     `SELECT opponent_id,
             COALESCE(o.display_name, m.opponent_name, 'Unknown') AS opponent_name,
             COUNT(*) AS matches,
@@ -190,4 +196,12 @@ export async function getHeadToHead(userId: string): Promise<HeadToHead[]> {
       ORDER BY matches DESC`,
     [userId],
   );
+  // COUNT() arrives from pg as a string — coerce so clients get real numbers.
+  return rows.map((r) => ({
+    opponent_id: r.opponent_id,
+    opponent_name: r.opponent_name,
+    matches: Number(r.matches),
+    wins: Number(r.wins),
+    losses: Number(r.losses),
+  }));
 }

@@ -54,19 +54,37 @@ export const matchStatsSchema = z.object({
   break_points_total: statCount,
 });
 
-export const createMatchSchema = z.object({
-  opponent_id: z.string().uuid().optional(),
-  opponent_name: z.string().trim().max(60).optional(),
-  court_id: z.string().uuid().optional(),
-  surface: surfaceSchema,
-  score_array: scoreArraySchema,
-  rpe_index: z.number().int().min(1).max(10).optional(),
-  duration_minutes: z.number().int().min(1).max(600).optional(),
-  notes: z.string().trim().max(500).optional(),
-  is_tiebreak: z.boolean().optional(),
-  played_at: z.string().datetime().optional(),
-  stats: matchStatsSchema.partial().optional(),
-});
+// Allow a little clock skew between the client and server, but reject matches
+// dated meaningfully in the future — they would pin to the top of the feed
+// forever and poison the trailing-window court leaderboard.
+const PLAYED_AT_SKEW_MS = 5 * 60_000;
+
+export const createMatchSchema = z
+  .object({
+    opponent_id: z.string().uuid().optional(),
+    opponent_name: z.string().trim().max(60).optional(),
+    court_id: z.string().uuid().optional(),
+    surface: surfaceSchema,
+    score_array: scoreArraySchema,
+    rpe_index: z.number().int().min(1).max(10).optional(),
+    duration_minutes: z.number().int().min(1).max(600).optional(),
+    notes: z.string().trim().max(500).optional(),
+    is_tiebreak: z.boolean().optional(),
+    played_at: z
+      .string()
+      .datetime()
+      .refine((v) => new Date(v).getTime() <= Date.now() + PLAYED_AT_SKEW_MS, {
+        message: 'played_at cannot be in the future',
+      })
+      .optional(),
+    stats: matchStatsSchema.partial().optional(),
+  })
+  // Tagging a registered opponent (opponent_id) and a free-text name are mutually
+  // exclusive — accepting both silently dropped the name. Make it an explicit 400.
+  .refine((b) => !(b.opponent_id && b.opponent_name), {
+    message: 'Provide either opponent_id or opponent_name, not both',
+    path: ['opponent_name'],
+  });
 
 export const createCourtSchema = z.object({
   name: z.string().trim().min(1).max(120),
@@ -121,12 +139,27 @@ export const courtsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(100),
 });
 
-export const bboxQuerySchema = z.object({
-  min_lng: z.coerce.number().min(-180).max(180).optional(),
-  min_lat: z.coerce.number().min(-90).max(90).optional(),
-  max_lng: z.coerce.number().min(-180).max(180).optional(),
-  max_lat: z.coerce.number().min(-90).max(90).optional(),
-});
+export const bboxQuerySchema = z
+  .object({
+    min_lng: z.coerce.number().min(-180).max(180).optional(),
+    min_lat: z.coerce.number().min(-90).max(90).optional(),
+    max_lng: z.coerce.number().min(-180).max(180).optional(),
+    max_lat: z.coerce.number().min(-90).max(90).optional(),
+  })
+  // A bounding box is all-or-nothing, and each axis must be min < max. A partial
+  // or inverted envelope is a client bug — reject it instead of silently falling
+  // back to an unbounded global listing.
+  .superRefine((v, ctx) => {
+    const present = [v.min_lng, v.min_lat, v.max_lng, v.max_lat].filter((x) => x != null).length;
+    if (present > 0 && present < 4) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'bbox requires all of min_lng, min_lat, max_lng, max_lat' });
+      return;
+    }
+    if (present === 4) {
+      if (v.min_lng! >= v.max_lng!) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'min_lng must be < max_lng', path: ['min_lng'] });
+      if (v.min_lat! >= v.max_lat!) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'min_lat must be < max_lat', path: ['min_lat'] });
+    }
+  });
 
 export const geocodeQuerySchema = z.object({
   q: z.string().trim().min(1).max(200),

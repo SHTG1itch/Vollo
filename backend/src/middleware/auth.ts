@@ -14,8 +14,12 @@ declare global {
 
 function extractToken(req: Request): string | null {
   const header = req.headers.authorization;
-  if (header && header.startsWith('Bearer ')) return header.slice(7);
-  return null;
+  if (!header) return null;
+  // Parse case-insensitively and tolerate extra whitespace, e.g. "bearer  <tok>".
+  const [scheme, ...rest] = header.trim().split(/\s+/);
+  if (scheme?.toLowerCase() !== 'bearer') return null;
+  const token = rest.join(' ').trim();
+  return token.length > 0 ? token : null;
 }
 
 /** Reject the request unless a valid bearer token is present. */
