@@ -34,7 +34,11 @@ export function RegisterScreen({ navigation }: Props) {
     }
   };
 
-  const valid = displayName && username.length >= 3 && email.includes('@') && password.length >= 8;
+  // Mirror the backend's rules so most rejections are caught before the request.
+  const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+  const usernameOk = /^[a-zA-Z0-9_]{3,20}$/.test(username.trim());
+  const displayOk = displayName.trim().length >= 1 && displayName.trim().length <= 60;
+  const valid = displayOk && usernameOk && emailOk && password.length >= 8 && password.length <= 72;
 
   return (
     <Screen edges={['top', 'bottom']}>

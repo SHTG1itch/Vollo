@@ -1,6 +1,23 @@
 import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
 import { api } from '../api/client';
+
+// Show notifications even when the app is foregrounded.
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
+  }),
+});
+
+/** The EAS project id is required by getExpoPushTokenAsync in standalone builds. */
+function projectId(): string | undefined {
+  return Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId ?? undefined;
+}
 
 /**
  * Best-effort Expo push registration. Expo's free push service relays to APNs
@@ -17,7 +34,8 @@ export async function registerForPush(): Promise<void> {
     }
     if (!granted) return;
 
-    const tokenResponse = await Notifications.getExpoPushTokenAsync();
+    const pid = projectId();
+    const tokenResponse = await Notifications.getExpoPushTokenAsync(pid ? { projectId: pid } : undefined);
     if (tokenResponse?.data) {
       await api.registerPushToken(tokenResponse.data, Platform.OS);
     }

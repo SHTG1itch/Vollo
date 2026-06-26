@@ -5,11 +5,11 @@
     "scheme": "vollo",
     "version": "0.1.0",
     "orientation": "portrait",
-    "userInterfaceStyle": "dark",
+    "userInterfaceStyle": "light",
     "newArchEnabled": false,
-    "backgroundColor": "#0B141A",
+    "backgroundColor": "#F4F6F3",
     "splash": {
-      "backgroundColor": "#0B141A",
+      "backgroundColor": "#F4F6F3",
       "resizeMode": "contain"
     },
     "assetBundlePatterns": ["**/*"],
