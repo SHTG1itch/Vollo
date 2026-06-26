@@ -1,6 +1,6 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { colors, font, radius, spacing } from '../theme';
+import { colors, font, radius, shadow, spacing } from '../theme';
 import type { MatchCard as MatchCardType } from '../types';
 import { formatScoreLine, timeAgo } from '../utils/format';
 import { Avatar } from './ui';
@@ -40,7 +40,7 @@ export function MatchCard({
 
       {/* Result + score */}
       <View style={styles.scoreRow}>
-        <View style={[styles.resultTag, { backgroundColor: win ? colors.primarySoft : 'rgba(255,107,107,0.16)' }]}>
+        <View style={[styles.resultTag, { backgroundColor: win ? colors.primarySoft : colors.lossSoft }]}>
           <Text style={[styles.resultText, { color: win ? colors.win : colors.loss }]}>
             {win ? 'WIN' : 'LOSS'}
           </Text>
@@ -89,6 +89,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     gap: spacing.sm,
+    ...shadow.card,
   },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   authorRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexShrink: 1 },

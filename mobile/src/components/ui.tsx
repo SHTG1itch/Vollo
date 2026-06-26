@@ -10,7 +10,7 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { SafeAreaView, type Edge } from 'react-native-safe-area-context';
-import { colors, font, radius, spacing } from '../theme';
+import { colors, font, radius, shadow, spacing } from '../theme';
 
 export function Screen({
   children,
@@ -65,12 +65,12 @@ export function Button({
       ]}
     >
       {loading ? (
-        <ActivityIndicator color={isPrimary ? colors.black : colors.primary} />
+        <ActivityIndicator color={isPrimary ? colors.onPrimary : colors.primary} />
       ) : (
         <Text
           style={[
             styles.btnText,
-            isPrimary && { color: colors.black },
+            isPrimary && { color: colors.onPrimary },
             (variant === 'ghost' || variant === 'secondary') && { color: colors.primary },
             isDanger && { color: colors.white },
           ]}
@@ -112,7 +112,7 @@ export function Badge({
         filled ? { backgroundColor: color } : { borderColor: color, borderWidth: 1 },
       ]}
     >
-      <Text style={[styles.badgeText, { color: filled ? colors.black : color }]}>{label}</Text>
+      <Text style={[styles.badgeText, { color: filled ? colors.white : color }]}>{label}</Text>
     </View>
   );
 }
@@ -204,6 +204,7 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     borderWidth: 1,
     borderColor: colors.border,
+    ...shadow.card,
   },
   btn: {
     height: 50,
@@ -242,7 +243,7 @@ const styles = StyleSheet.create({
   segmentItem: { flex: 1, paddingVertical: spacing.sm, alignItems: 'center', borderRadius: radius.sm },
   segmentItemActive: { backgroundColor: colors.primary },
   segmentText: { color: colors.textDim, fontWeight: '600', fontSize: font.small },
-  segmentTextActive: { color: colors.black, fontWeight: '800' },
+  segmentTextActive: { color: colors.onPrimary, fontWeight: '800' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl, gap: spacing.xs },
   dim: { color: colors.textDim, fontSize: font.small, textAlign: 'center' },
   emptyTitle: { color: colors.text, fontSize: font.h3, fontWeight: '700' },

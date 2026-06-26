@@ -86,11 +86,11 @@ export function RallyDistribution({
   long: number;
 }) {
   const total = short + medium + long || 1;
-  const seg = (n: number, color: string, label: string) => (
+  const seg = (n: number, color: string, label: string, textColor: string) => (
     <View style={{ flex: n / total || 0.0001, minWidth: n > 0 ? 28 : 0 }}>
       {n > 0 ? (
         <View style={[styles.rallySeg, { backgroundColor: color }]}>
-          <Text style={styles.rallySegText}>{Math.round((n / total) * 100)}%</Text>
+          <Text style={[styles.rallySegText, { color: textColor }]}>{Math.round((n / total) * 100)}%</Text>
         </View>
       ) : null}
       <Text style={styles.rallyLabel}>{label}</Text>
@@ -99,9 +99,9 @@ export function RallyDistribution({
   return (
     <View>
       <View style={{ flexDirection: 'row', gap: 4 }}>
-        {seg(short, colors.primary, 'Short 1-4')}
-        {seg(medium, colors.accent, 'Med 5-8')}
-        {seg(long, colors.warning, 'Long 9+')}
+        {seg(short, colors.primary, 'Short 1-4', colors.onPrimary)}
+        {seg(medium, colors.accent, 'Med 5-8', colors.onAccent)}
+        {seg(long, colors.warning, 'Long 9+', colors.onAccent)}
       </View>
     </View>
   );
@@ -114,7 +114,7 @@ const styles = StyleSheet.create({
   track: { height: 9, backgroundColor: colors.surfaceAlt, borderRadius: radius.pill, overflow: 'hidden' },
   fill: { height: '100%', borderRadius: radius.pill },
   formDot: { width: 22, height: 22, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
-  formDotText: { color: colors.black, fontWeight: '800', fontSize: font.tiny },
+  formDotText: { color: colors.white, fontWeight: '800', fontSize: font.tiny },
   rallySeg: {
     height: 30,
     borderRadius: radius.sm,
