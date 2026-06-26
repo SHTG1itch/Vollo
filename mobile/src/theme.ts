@@ -1,33 +1,40 @@
-// Vollo design tokens. Dark, court-at-night aesthetic with neon tennis-green
-// accents — the same #32CD32 lime the domination polygons use on the map.
+// Vollo design tokens. A bright, Strava-style "fresh court" aesthetic: light
+// off-white feed, white elevated cards, and a tennis identity built from a rich
+// grass/court green (the brand hero, used the way Strava uses orange) paired
+// with an optic-yellow tennis-ball accent.
 
 import type { Surface } from './types';
 
 export const colors = {
-  bg: '#0B141A',
-  surface: '#13212B',
-  surfaceAlt: '#1B2C38',
-  border: '#243845',
-  primary: '#32CD32', // neon tennis green
-  primaryDim: '#2BA52B',
-  primarySoft: 'rgba(50, 205, 50, 0.16)',
-  accent: '#E8FF59', // tennis-ball yellow-green
-  text: '#EAF2F0',
-  textDim: '#9DB2BD',
-  textFaint: '#5E7787',
-  win: '#32CD32',
-  loss: '#FF6B6B',
-  warning: '#FFC857',
-  danger: '#FF5C5C',
+  bg: '#F4F6F3', // light, faintly green-grey feed background
+  surface: '#FFFFFF', // cards, sheets, nav + tab bars
+  surfaceAlt: '#EDF1EC', // inputs, segmented controls, inactive chips
+  border: '#E4E8E2', // hairline separators
+  primary: '#0F7A3D', // grass/court green — the brand hero
+  primaryDim: '#0A5E2E', // pressed / darker variant
+  primarySoft: 'rgba(15, 122, 61, 0.12)', // soft green wash (active chips, win tag)
+  onPrimary: '#FFFFFF', // text / icons on top of a primary fill
+  accent: '#D7F205', // optic-yellow tennis ball — energetic accent
+  accentSoft: 'rgba(215, 242, 5, 0.20)',
+  onAccent: '#15241B', // dark text on top of an optic-yellow fill
+  text: '#15241B', // near-black with a green undertone
+  textDim: '#566159', // secondary copy
+  textFaint: '#8A968D', // labels, timestamps, captions
+  win: '#0F7A3D', // win = brand green
+  loss: '#E04A3C', // warm coral-red, legible on light
+  lossSoft: 'rgba(224, 74, 60, 0.12)',
+  warning: '#E8990C', // amber (tiebreaks, long rallies)
+  danger: '#E0432B',
+  rival: '#8B7BD8', // opponents' territory on the map
   white: '#FFFFFF',
-  black: '#000000',
+  black: '#0B130D',
 } as const;
 
 export const surfaceColors: Record<Surface, string> = {
-  hard: '#2E86DE', // blue hard court
-  clay: '#D2691E', // terracotta
-  grass: '#3FA34D', // green
-  indoor: '#8E7CC3', // purple indoor
+  hard: '#2477C9', // blue hard court
+  clay: '#C05B22', // terracotta
+  grass: '#2E9E48', // green
+  indoor: '#7E6CC4', // purple indoor
 };
 
 export const surfaceLabel: Record<Surface, string> = {
@@ -63,6 +70,25 @@ export const font = {
   tiny: 11,
 } as const;
 
-/** Semi-transparent neon-green fill for the territory polygons (≈20% opacity). */
-export const TERRITORY_FILL = 'rgba(50, 205, 50, 0.20)';
-export const TERRITORY_STROKE = '#32CD32';
+// Soft elevation for white cards on the light feed — the subtle lift that gives
+// the Strava activity feed its depth without heavy borders.
+export const shadow = {
+  card: {
+    shadowColor: '#0B130D',
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+  },
+  bar: {
+    shadowColor: '#0B130D',
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: -2 },
+    elevation: 8,
+  },
+} as const;
+
+/** Semi-transparent green fill for your territory polygons (≈20% opacity). */
+export const TERRITORY_FILL = 'rgba(15, 122, 61, 0.20)';
+export const TERRITORY_STROKE = '#0F7A3D';
