@@ -16,7 +16,8 @@ services:
       POSTGRES_PASSWORD: vollo
       POSTGRES_DB: vollo
     ports:
-      - "5432:5432"
+      # Bind to loopback only so the dev DB isn't exposed on the LAN.
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
