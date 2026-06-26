@@ -7,7 +7,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { api } from '../api/client';
 import { useAuth } from '../store/auth';
-import { colors, font, radius, spacing, surfaceColors } from '../theme';
+import { colors, font, radius, spacing, surfaceColors, TERRITORY_FILL, TERRITORY_STROKE } from '../theme';
 import type { Court, Territory } from '../types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -24,7 +24,7 @@ const DEFAULT_REGION: Region = {
 
 /** Deterministic colour per owner so rival territories are distinguishable. */
 function ownerColor(userId: string, self: boolean): { fill: string; stroke: string } {
-  if (self) return { fill: 'rgba(50, 205, 50, 0.28)', stroke: '#32CD32' };
+  if (self) return { fill: TERRITORY_FILL, stroke: TERRITORY_STROKE };
   let hash = 0;
   for (let i = 0; i < userId.length; i++) hash = (hash * 31 + userId.charCodeAt(i)) % 360;
   return { fill: `hsla(${hash}, 70%, 55%, 0.22)`, stroke: `hsl(${hash}, 70%, 60%)` };
@@ -164,7 +164,7 @@ export function MapScreen() {
         <View style={styles.legend}>
           <View style={[styles.legendDot, { backgroundColor: colors.primary }]} />
           <Text style={styles.legendText}>Your territory</Text>
-          <View style={[styles.legendDot, { backgroundColor: '#c084fc', marginLeft: spacing.md }]} />
+          <View style={[styles.legendDot, { backgroundColor: colors.rival, marginLeft: spacing.md }]} />
           <Text style={styles.legendText}>Rivals</Text>
         </View>
       )}
@@ -193,7 +193,7 @@ const styles = StyleSheet.create({
   },
   title: { color: colors.text, fontWeight: '800', fontSize: font.small },
   addBtn: { backgroundColor: colors.primary, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.pill },
-  addBtnText: { color: colors.black, fontWeight: '800', fontSize: font.small },
+  addBtnText: { color: colors.onPrimary, fontWeight: '800', fontSize: font.small },
   detailCard: {
     position: 'absolute',
     bottom: spacing.xl,

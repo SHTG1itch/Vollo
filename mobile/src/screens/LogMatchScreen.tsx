@@ -262,10 +262,10 @@ function StatGroup({ title, children }: { title: string; children: React.ReactNo
 function CourtChip({ label, sub, active, onPress }: { label: string; sub?: string; active: boolean; onPress: () => void }) {
   return (
     <Pressable onPress={onPress} style={[styles.courtChip, active && styles.courtChipActive]}>
-      <Text style={[styles.courtChipText, active && { color: colors.black }]} numberOfLines={1}>
+      <Text style={[styles.courtChipText, active && { color: colors.onPrimary }]} numberOfLines={1}>
         {label}
       </Text>
-      {sub ? <Text style={[styles.courtChipSub, active && { color: colors.black }]}>{sub}</Text> : null}
+      {sub ? <Text style={[styles.courtChipSub, active && { color: colors.onPrimary }]}>{sub}</Text> : null}
     </Pressable>
   );
 }
@@ -287,7 +287,7 @@ const styles = StyleSheet.create({
   },
   rpePillActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   rpeText: { color: colors.textDim, fontWeight: '700' },
-  rpeTextActive: { color: colors.black, fontWeight: '800' },
+  rpeTextActive: { color: colors.onPrimary, fontWeight: '800' },
   statsToggle: { paddingVertical: spacing.sm },
   statsToggleText: { color: colors.primary, fontWeight: '700', fontSize: font.body },
   courtChip: {

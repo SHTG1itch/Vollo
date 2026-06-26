@@ -57,7 +57,7 @@ export function EditProfileScreen({ navigation }: Props) {
           <View style={{ flexDirection: 'row', gap: spacing.sm }}>
             {(['right', 'left'] as const).map((h) => (
               <Pressable key={h} onPress={() => setHand(h)} style={[styles.handChip, hand === h && styles.handChipActive]}>
-                <Text style={[styles.handText, hand === h && { color: colors.black }]}>{h === 'right' ? 'Right' : 'Left'}-handed</Text>
+                <Text style={[styles.handText, hand === h && { color: colors.onPrimary }]}>{h === 'right' ? 'Right' : 'Left'}-handed</Text>
               </Pressable>
             ))}
           </View>
