@@ -3,7 +3,7 @@ import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
-import { DarkTheme, NavigationContainer, type Theme } from '@react-navigation/native';
+import { DefaultTheme, NavigationContainer, type Theme } from '@react-navigation/native';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { useAuth } from './src/store/auth';
 import { useNotifications } from './src/store/notifications';
@@ -11,9 +11,9 @@ import { registerForPush } from './src/services/push';
 import { colors } from './src/theme';
 
 const navTheme: Theme = {
-  ...DarkTheme,
+  ...DefaultTheme,
   colors: {
-    ...DarkTheme.colors,
+    ...DefaultTheme.colors,
     primary: colors.primary,
     background: colors.bg,
     card: colors.surface,
@@ -49,7 +49,7 @@ export default function App() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <StatusBar style="light" />
+        <StatusBar style="dark" />
         <NavigationContainer theme={navTheme}>
           <RootNavigator />
         </NavigationContainer>
