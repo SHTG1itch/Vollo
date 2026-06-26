@@ -149,8 +149,10 @@ compass district naming) lives in `backend/src/utils/geo.ts` and is fully unit-t
 
 ## Beyond the spec (added features)
 
-- **Per-surface Vollo Rating** — Elo with a game-margin multiplier; mirrored to a
-  registered opponent.
+- **Per-surface Vollo Rating** — Elo with a game-margin multiplier. Only the
+  logging player's rating moves: a unilateral log never mutates a tagged
+  opponent's rating (that would let anyone tank another player's record). The
+  exact delta is stored per match so deleting a match backs it out precisely.
 - **Achievements / badges** — Clay Grinder, Comeback King, Territory Lord, On Fire…
 - **Head-to-head rivalries**, **comments**, **follows**, and a following-only feed.
 - **Playstyle labeling** — "Clay Court Grinder" vs "Hard Court Specialist" from your

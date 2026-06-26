@@ -116,13 +116,8 @@ matchesRouter.post(
       // where a crash could leave the match stuck at score 0.
       const streak = await recomputeUserStreak(uid, client);
       const score = matchScore(analysis.gamesWon, analysis.gamesLost, streak.streakModifier);
-      await client.query('UPDATE matches SET streak_modifier = $1, match_score = $2 WHERE id = $3', [
-        streak.streakModifier,
-        score,
-        id,
-      ]);
 
-      await applyMatchToRatings(client, {
+      const { userDelta } = await applyMatchToRatings(client, {
         userId: uid,
         opponentId: body.opponent_id ?? null,
         surface: body.surface,
@@ -131,14 +126,28 @@ matchesRouter.post(
         gamesLost: analysis.gamesLost,
       });
 
+      // Persist streak modifier, court score, and the exact Elo delta together so
+      // a later deletion can back the rating out precisely.
+      await client.query(
+        'UPDATE matches SET streak_modifier = $1, match_score = $2, user_rating_delta = $3 WHERE id = $4',
+        [streak.streakModifier, score, userDelta, id],
+      );
+
       return id;
     });
 
-    // Re-run the domination engine for everyone affected by this court.
-    if (body.court_id) {
-      await recomputeAfterMatch({ courtId: body.court_id, loggerUserId: uid, previousControllerId });
+    // Post-commit side effects must NOT fail the request: the match is already
+    // durably committed, so a PostGIS-hull or achievement hiccup that 500'd here
+    // would invite a client retry that double-logs the match. Best-effort only —
+    // the 6-hourly territory sweep is the backstop for any missed recompute.
+    try {
+      if (body.court_id) {
+        await recomputeAfterMatch({ courtId: body.court_id, loggerUserId: uid, previousControllerId });
+      }
+      await evaluateAchievements(uid);
+    } catch (err) {
+      console.error('[matches] post-commit side effects failed', err instanceof Error ? err.message : err);
     }
-    await evaluateAchievements(uid);
 
     // Notify a registered opponent that they were tagged in a match.
     if (body.opponent_id && body.opponent_id !== uid) {
@@ -182,8 +191,9 @@ matchesRouter.delete(
       result: import('../types/index.js').MatchResult;
       games_won: number;
       games_lost: number;
+      user_rating_delta: number | null;
     }>(
-      `SELECT user_id, court_id, opponent_id, surface, result, games_won, games_lost
+      `SELECT user_id, court_id, opponent_id, surface, result, games_won, games_lost, user_rating_delta
          FROM matches WHERE id = $1`,
       [req.params.id],
     );
@@ -199,11 +209,11 @@ matchesRouter.delete(
       await client.query('DELETE FROM matches WHERE id = $1', [req.params.id]);
       await reverseMatchFromRatings(client, {
         userId: uid,
-        opponentId: match.opponent_id,
         surface: match.surface,
         result: match.result,
         gamesWon: Number(match.games_won),
         gamesLost: Number(match.games_lost),
+        appliedDelta: match.user_rating_delta == null ? null : Number(match.user_rating_delta),
       });
       await recomputeUserStreak(uid, client);
     });

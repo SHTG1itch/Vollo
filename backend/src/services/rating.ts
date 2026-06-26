@@ -51,30 +51,44 @@ async function currentRating(db: Queryable, userId: string, surface: Surface): P
   return rows[0] ? Number(rows[0].rating) : DEFAULT_RATING;
 }
 
-async function upsertRating(
+/**
+ * Apply a signed rating delta *relatively* (rating = rating + delta) so two
+ * matches logged concurrently compose instead of clobbering one another — a
+ * plain read-modify-write of an absolute value loses one of the updates.
+ */
+async function applyRatingDelta(
   db: Queryable,
   userId: string,
   surface: Surface,
-  rating: number,
+  delta: number,
   result: MatchResult,
 ): Promise<void> {
+  const win = result === 'win' ? 1 : 0;
+  const loss = result === 'loss' ? 1 : 0;
+  const seed = DEFAULT_RATING + delta; // rating for a brand-new (insert) row
   await db.query(
     `INSERT INTO user_ratings (user_id, surface, rating, matches_played, wins, losses, peak_rating)
-     VALUES ($1, $2, $3, 1, $4, $5, $3)
+     VALUES ($1, $2, $3, 1, $4, $5, GREATEST($6, $3))
      ON CONFLICT (user_id, surface) DO UPDATE SET
-       rating         = $3,
+       rating         = user_ratings.rating + $7,
        matches_played = user_ratings.matches_played + 1,
        wins           = user_ratings.wins   + $4,
        losses         = user_ratings.losses + $5,
-       peak_rating    = GREATEST(user_ratings.peak_rating, $3)`,
-    [userId, surface, rating, result === 'win' ? 1 : 0, result === 'loss' ? 1 : 0],
+       peak_rating    = GREATEST(user_ratings.peak_rating, user_ratings.rating + $7)`,
+    [userId, surface, seed, win, loss, DEFAULT_RATING, delta],
   );
 }
 
 /**
- * Apply a match result to per-surface Elo ratings. Updates the logging player
- * always, and the opponent too when they are a registered user (their result is
- * the mirror image). Runs inside the caller's transaction for consistency.
+ * Apply a match result to the logging player's per-surface Elo and return the
+ * exact delta applied (the caller persists it on the match row for an exact
+ * reversal on delete). Runs inside the caller's transaction for consistency.
+ *
+ * The opponent's rating is intentionally NOT mutated: a unilateral log must not
+ * move another player's competitive rating/record without their consent, and a
+ * tagged opponent has no mirrored match row to explain such a change. The
+ * opponent rating is still read (when registered) to compute the logger's
+ * expected score. opponent_id remains a link for head-to-head and notifications.
  */
 export async function applyMatchToRatings(
   db: Queryable,
@@ -86,70 +100,61 @@ export async function applyMatchToRatings(
     gamesWon: number;
     gamesLost: number;
   },
-): Promise<void> {
+): Promise<{ userDelta: number }> {
   const { userId, opponentId, surface, result, gamesWon, gamesLost } = args;
 
   const userR = await currentRating(db, userId, surface);
   const oppR = opponentId ? await currentRating(db, opponentId, surface) : DEFAULT_RATING;
 
-  const newUserR = nextRating(userR, oppR, result, gamesWon, gamesLost);
-  await upsertRating(db, userId, surface, newUserR, result);
-
-  if (opponentId) {
-    const oppResult: MatchResult = result === 'win' ? 'loss' : 'win';
-    const newOppR = nextRating(oppR, userR, oppResult, gamesLost, gamesWon);
-    await upsertRating(db, opponentId, surface, newOppR, oppResult);
-  }
+  const userDelta = Math.round(ratingDelta(userR, oppR, result, gamesWon, gamesLost));
+  await applyRatingDelta(db, userId, surface, userDelta, result);
+  return { userDelta };
 }
 
 /**
- * Reverse a match's effect on ratings when it is deleted: exactly decrement the
- * win/loss/matches counters and back out the Elo delta (estimated from current
- * ratings — close to the original for a recently-logged match). `peak_rating` is
- * left as the historical high-water mark. Runs inside the caller's transaction.
+ * Reverse a match's effect on the logger's rating when it is deleted. Uses the
+ * exact delta persisted at log time when available (precise); for legacy matches
+ * logged before deltas were stored it falls back to a best-effort estimate from
+ * the current rating. `peak_rating` is left as the historical high-water mark.
+ * Runs inside the caller's transaction.
  */
 export async function reverseMatchFromRatings(
   db: Queryable,
   args: {
     userId: string;
-    opponentId: string | null;
     surface: Surface;
     result: MatchResult;
     gamesWon: number;
     gamesLost: number;
+    appliedDelta?: number | null;
   },
 ): Promise<void> {
-  const { userId, opponentId, surface, result, gamesWon, gamesLost } = args;
+  const { userId, surface, result, gamesWon, gamesLost, appliedDelta } = args;
 
-  const userR = await currentRating(db, userId, surface);
-  const oppR = opponentId ? await currentRating(db, opponentId, surface) : DEFAULT_RATING;
-
-  const userDelta = ratingDelta(userR, oppR, result, gamesWon, gamesLost);
-  await downsertRating(db, userId, surface, Math.round(userR - userDelta), result);
-
-  if (opponentId) {
-    const oppResult: MatchResult = result === 'win' ? 'loss' : 'win';
-    const oppDelta = ratingDelta(oppR, userR, oppResult, gamesLost, gamesWon);
-    await downsertRating(db, opponentId, surface, Math.round(oppR - oppDelta), oppResult);
+  let delta = appliedDelta ?? null;
+  if (delta == null) {
+    const userR = await currentRating(db, userId, surface);
+    delta = Math.round(ratingDelta(userR, DEFAULT_RATING, result, gamesWon, gamesLost));
   }
+  await reverseRatingDelta(db, userId, surface, delta, result);
 }
 
 /** Undo one match from an existing rating row (no-op if the row is absent). */
-async function downsertRating(
+async function reverseRatingDelta(
   db: Queryable,
   userId: string,
   surface: Surface,
-  rating: number,
+  delta: number,
   result: MatchResult,
 ): Promise<void> {
   await db.query(
     `UPDATE user_ratings SET
-       rating         = $3,
+       rating         = user_ratings.rating - $3,
        matches_played = GREATEST(0, matches_played - 1),
        wins           = GREATEST(0, wins   - $4),
        losses         = GREATEST(0, losses - $5)
      WHERE user_id = $1 AND surface = $2`,
-    [userId, surface, rating, result === 'win' ? 1 : 0, result === 'loss' ? 1 : 0],
+    [userId, surface, delta, result === 'win' ? 1 : 0, result === 'loss' ? 1 : 0],
   );
 }
 
