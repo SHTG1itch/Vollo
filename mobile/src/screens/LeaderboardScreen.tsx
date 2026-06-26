@@ -4,7 +4,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { api } from '../api/client';
 import { Avatar, EmptyState, Loading } from '../components/ui';
-import { colors, font, radius, spacing } from '../theme';
+import { colors, font, radius, shadow, spacing } from '../theme';
 import type { LeaderboardEntry } from '../types';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Leaderboard'>;
@@ -46,7 +46,7 @@ export function LeaderboardScreen({ route, navigation }: Props) {
                 {item.matches_played} matches · {item.wins}W {item.losses}L · {item.games_won}-{item.games_lost} games
               </Text>
             </View>
-            <Text style={styles.score}>{item.score}</Text>
+            <Text style={[styles.score, item.rank === 1 && styles.scoreLeader]}>{item.score}</Text>
           </Pressable>
         );
       }}
@@ -57,10 +57,11 @@ export function LeaderboardScreen({ route, navigation }: Props) {
 
 const styles = StyleSheet.create({
   title: { color: colors.text, fontWeight: '800', fontSize: font.h3, marginBottom: spacing.sm },
-  row: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, backgroundColor: colors.surface, borderRadius: radius.md, padding: spacing.md, borderWidth: 1, borderColor: colors.border },
+  row: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, backgroundColor: colors.surface, borderRadius: radius.md, padding: spacing.md, borderWidth: 1, borderColor: colors.border, ...shadow.card },
   rowControlled: { borderColor: colors.primary },
   rank: { color: colors.textDim, fontWeight: '800', width: 34, fontSize: font.body, textAlign: 'center' },
   name: { color: colors.text, fontWeight: '700' },
   sub: { color: colors.textFaint, fontSize: font.tiny, marginTop: 2 },
   score: { color: colors.primary, fontWeight: '800', fontSize: font.body },
+  scoreLeader: { color: colors.onAccent, backgroundColor: colors.accent, paddingHorizontal: spacing.sm, paddingVertical: 2, borderRadius: radius.pill, overflow: 'hidden' },
 });

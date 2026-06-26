@@ -4,7 +4,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { useAuth } from '../store/auth';
 import { Button, Field, H1, Muted, Screen } from '../components/ui';
-import { colors, font, spacing } from '../theme';
+import { colors, font, radius, shadow, spacing } from '../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Register'>;
 
@@ -40,7 +40,7 @@ export function RegisterScreen({ navigation }: Props) {
     <Screen edges={['top', 'bottom']}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-          <View style={{ gap: spacing.xs }}>
+          <View style={styles.header}>
             <H1>Join Vollo</H1>
             <Muted>Your tennis story starts here.</Muted>
           </View>
@@ -77,6 +77,15 @@ export function RegisterScreen({ navigation }: Props) {
 
 const styles = StyleSheet.create({
   container: { flexGrow: 1, justifyContent: 'center', padding: spacing.xl, gap: spacing.xl },
-  form: { gap: spacing.md },
+  header: { alignItems: 'center', gap: spacing.xs },
+  form: {
+    gap: spacing.md,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadow.card,
+  },
   error: { color: colors.loss, fontSize: font.small, textAlign: 'center' },
 });

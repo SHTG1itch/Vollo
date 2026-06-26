@@ -6,7 +6,7 @@ import type { RootStackParamList } from '../navigation/types';
 import { api, ApiError } from '../api/client';
 import { Button, Card, Field, H2, Muted, Screen } from '../components/ui';
 import { SurfaceBadge } from '../components/SurfaceBadge';
-import { colors, font, radius, spacing, surfaceColors } from '../theme';
+import { colors, font, radius, shadow, spacing, surfaceColors } from '../theme';
 import type { Court, GeocodeResult, Surface } from '../types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -141,10 +141,11 @@ const styles = StyleSheet.create({
   searchRow: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-end', paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
   courtRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    backgroundColor: colors.surface, borderRadius: radius.md, padding: spacing.md, borderWidth: 1, borderColor: colors.border,
+    backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.md, borderWidth: 1, borderColor: colors.border,
+    ...shadow.card,
   },
   courtName: { color: colors.text, fontWeight: '700', fontSize: font.body },
-  courtSub: { color: colors.textFaint, fontSize: font.tiny, marginTop: 2 },
+  courtSub: { color: colors.textFaint, fontSize: font.small, marginTop: 2 },
   addCard: { margin: spacing.lg, marginTop: 0, gap: spacing.md },
   surfaceChip: { padding: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border },
   result: { backgroundColor: colors.surfaceAlt, borderRadius: radius.sm, padding: spacing.sm, borderWidth: 1, borderColor: colors.border },

@@ -85,7 +85,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
   },
-  title: { color: colors.text, fontSize: font.h1, fontWeight: '800' },
+  title: { color: colors.text, fontSize: font.h1, fontWeight: '800', letterSpacing: -0.5 },
   list: { padding: spacing.lg, paddingTop: 0 },
 });

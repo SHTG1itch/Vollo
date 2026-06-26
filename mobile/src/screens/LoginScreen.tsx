@@ -4,7 +4,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { useAuth } from '../store/auth';
 import { Button, Field, H1, Muted, Screen } from '../components/ui';
-import { colors, font, spacing } from '../theme';
+import { colors, font, radius, shadow, spacing } from '../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Login'>;
 
@@ -69,7 +69,24 @@ const styles = StyleSheet.create({
   container: { flexGrow: 1, justifyContent: 'center', padding: spacing.xl, gap: spacing.xxl },
   brand: { alignItems: 'center', gap: spacing.xs },
   logo: { fontSize: 56 },
-  form: { gap: spacing.md },
-  error: { color: colors.loss, fontSize: font.small, textAlign: 'center' },
+  form: {
+    gap: spacing.md,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadow.card,
+  },
+  error: {
+    color: colors.loss,
+    fontSize: font.small,
+    fontWeight: '600',
+    textAlign: 'center',
+    backgroundColor: colors.lossSoft,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.md,
+  },
   hint: { marginTop: spacing.lg },
 });

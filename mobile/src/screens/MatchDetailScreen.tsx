@@ -128,7 +128,7 @@ export function MatchDetailScreen({ route, navigation }: Props) {
             {match.court_name ? <Text style={styles.meta}>📍 {match.court_name}</Text> : null}
             {match.rpe_index ? <Text style={styles.meta}>🔥 RPE {match.rpe_index}</Text> : null}
             {match.duration_minutes ? <Text style={styles.meta}>⏱ {match.duration_minutes}m</Text> : null}
-            <Text style={styles.meta}>⚡ {match.match_score > 0 ? '+' : ''}{match.match_score} pts</Text>
+            <Text style={styles.metaScore}>⚡ {match.match_score > 0 ? '+' : ''}{match.match_score} pts</Text>
           </View>
           {match.notes ? <Text style={styles.notes}>“{match.notes}”</Text> : null}
 
@@ -203,10 +203,11 @@ const styles = StyleSheet.create({
   score: { color: colors.text, fontSize: font.h2, fontWeight: '800', letterSpacing: 1 },
   metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, marginTop: spacing.xs },
   meta: { color: colors.textDim, fontSize: font.small },
+  metaScore: { color: colors.primary, fontSize: font.small, fontWeight: '700' },
   notes: { color: colors.textDim, fontStyle: 'italic', marginTop: spacing.xs },
   actions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: spacing.sm },
   cardTitle: { color: colors.text, fontWeight: '800', fontSize: font.h3 },
-  subhead: { color: colors.textDim, fontWeight: '700', fontSize: font.small },
+  subhead: { color: colors.textFaint, fontWeight: '700', fontSize: font.tiny, letterSpacing: 0.5, textTransform: 'uppercase' },
   serveRow: { flexDirection: 'row', justifyContent: 'space-between' },
   serveStat: { color: colors.text, fontSize: font.small, fontWeight: '600' },
   commentsTitle: { color: colors.text, fontWeight: '800', fontSize: font.h3 },

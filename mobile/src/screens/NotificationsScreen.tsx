@@ -3,7 +3,7 @@ import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useNotifications } from '../store/notifications';
 import { EmptyState } from '../components/ui';
-import { colors, font, radius, spacing } from '../theme';
+import { colors, font, radius, shadow, spacing } from '../theme';
 import { timeAgo } from '../utils/format';
 
 export function NotificationsScreen() {
@@ -49,8 +49,8 @@ export function NotificationsScreen() {
 
 const styles = StyleSheet.create({
   title: { color: colors.text, fontSize: font.h1, fontWeight: '800', padding: spacing.lg },
-  row: { flexDirection: 'row', gap: spacing.md, backgroundColor: colors.surface, borderRadius: radius.md, padding: spacing.md, borderWidth: 1, borderColor: colors.border },
-  unread: { borderColor: colors.primary, backgroundColor: colors.surfaceAlt },
+  row: { flexDirection: 'row', gap: spacing.md, backgroundColor: colors.surface, borderRadius: radius.md, padding: spacing.md, borderWidth: 1, borderColor: colors.border, ...shadow.card },
+  unread: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
   dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.primary, marginTop: 6 },
   dotPlaceholder: { width: 8 },
   rowTitle: { color: colors.text, fontWeight: '700', fontSize: font.body },

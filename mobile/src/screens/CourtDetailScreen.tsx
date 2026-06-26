@@ -5,7 +5,7 @@ import type { RootStackParamList } from '../navigation/types';
 import { api } from '../api/client';
 import { Avatar, Button, Card, Loading, Muted } from '../components/ui';
 import { SurfaceBadge } from '../components/SurfaceBadge';
-import { colors, font, spacing } from '../theme';
+import { colors, font, radius, shadow, spacing } from '../theme';
 import type { Court, LeaderboardEntry } from '../types';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Court'>;
@@ -97,15 +97,15 @@ const styles = StyleSheet.create({
   titleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.sm },
   name: { color: colors.text, fontSize: font.h2, fontWeight: '800', flex: 1 },
   controllerBox: {
-    flexDirection: 'row', alignItems: 'center', gap: spacing.md, backgroundColor: colors.primarySoft,
-    borderRadius: 12, padding: spacing.md, marginTop: spacing.sm,
+    flexDirection: 'row', alignItems: 'center', gap: spacing.md, backgroundColor: colors.accentSoft,
+    borderRadius: radius.md, padding: spacing.md, marginTop: spacing.sm,
   },
   crown: { fontSize: 24 },
   controllerLabel: { color: colors.textDim, fontSize: font.tiny, textTransform: 'uppercase', letterSpacing: 0.5 },
   controllerName: { color: colors.text, fontWeight: '800', fontSize: font.body },
   boardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   boardTitle: { color: colors.text, fontWeight: '800', fontSize: font.h3 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, backgroundColor: colors.surface, borderRadius: 12, padding: spacing.md, borderWidth: 1, borderColor: colors.border },
+  row: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, backgroundColor: colors.surface, borderRadius: radius.md, padding: spacing.md, borderWidth: 1, borderColor: colors.border, ...shadow.card },
   rank: { color: colors.textDim, fontWeight: '800', width: 30, fontSize: font.body },
   rowName: { color: colors.text, fontWeight: '700' },
   rowSub: { color: colors.textFaint, fontSize: font.tiny },

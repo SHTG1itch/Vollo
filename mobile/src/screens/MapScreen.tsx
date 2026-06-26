@@ -7,7 +7,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { api } from '../api/client';
 import { useAuth } from '../store/auth';
-import { colors, font, radius, spacing, surfaceColors, TERRITORY_FILL, TERRITORY_STROKE } from '../theme';
+import { colors, font, radius, shadow, spacing, surfaceColors, TERRITORY_FILL, TERRITORY_STROKE } from '../theme';
 import type { Court, Territory } from '../types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -190,9 +190,10 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
     borderWidth: 1,
     borderColor: colors.border,
+    ...shadow.card,
   },
   title: { color: colors.text, fontWeight: '800', fontSize: font.small },
-  addBtn: { backgroundColor: colors.primary, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.pill },
+  addBtn: { backgroundColor: colors.primary, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.pill, ...shadow.card },
   addBtnText: { color: colors.onPrimary, fontWeight: '800', fontSize: font.small },
   detailCard: {
     position: 'absolute',
@@ -207,6 +208,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     borderWidth: 1,
     borderColor: colors.primary,
+    ...shadow.card,
   },
   detailDistrict: { color: colors.text, fontWeight: '800', fontSize: font.h3 },
   detailOwner: { color: colors.textDim, fontSize: font.small, marginTop: 2 },
@@ -226,6 +228,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
     borderWidth: 1,
     borderColor: colors.border,
+    ...shadow.card,
   },
   legendDot: { width: 10, height: 10, borderRadius: 5 },
   legendText: { color: colors.textDim, fontSize: font.tiny },

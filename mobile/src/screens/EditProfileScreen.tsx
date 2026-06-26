@@ -57,7 +57,7 @@ export function EditProfileScreen({ navigation }: Props) {
           <View style={{ flexDirection: 'row', gap: spacing.sm }}>
             {(['right', 'left'] as const).map((h) => (
               <Pressable key={h} onPress={() => setHand(h)} style={[styles.handChip, hand === h && styles.handChipActive]}>
-                <Text style={[styles.handText, hand === h && { color: colors.onPrimary }]}>{h === 'right' ? 'Right' : 'Left'}-handed</Text>
+                <Text style={[styles.handText, hand === h && styles.handTextActive]}>{h === 'right' ? 'Right' : 'Left'}-handed</Text>
               </Pressable>
             ))}
           </View>
@@ -84,6 +84,7 @@ const styles = StyleSheet.create({
   handChip: { flex: 1, paddingVertical: spacing.md, borderRadius: radius.md, alignItems: 'center', backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border },
   handChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   handText: { color: colors.textDim, fontWeight: '700' },
-  result: { backgroundColor: colors.surfaceAlt, borderRadius: radius.sm, padding: spacing.sm, borderWidth: 1, borderColor: colors.border },
+  handTextActive: { color: colors.onPrimary, fontWeight: '800' },
+  result: { backgroundColor: colors.surfaceAlt, borderRadius: radius.sm, padding: spacing.md, borderWidth: 1, borderColor: colors.border },
   resultText: { color: colors.textDim, fontSize: font.small },
 });
