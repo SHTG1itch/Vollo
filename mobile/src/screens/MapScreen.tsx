@@ -44,6 +44,7 @@ export function MapScreen() {
   const [territories, setTerritories] = useState<Territory[]>([]);
   const [courts, setCourts] = useState<Court[]>([]);
   const [selected, setSelected] = useState<Territory | null>(null);
+  const [locationOff, setLocationOff] = useState(false);
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(async (r: Region) => {
@@ -75,12 +76,32 @@ export function MapScreen() {
           start = { ...DEFAULT_REGION, latitude: pos.coords.latitude, longitude: pos.coords.longitude };
           // Programmatic move via the ref — don't drive the map from state.
           mapRef.current?.animateToRegion(start, 600);
+        } else {
+          setLocationOff(true);
         }
       } catch {
-        /* default region */
+        setLocationOff(true);
       }
       void load(start);
     })();
+  }, [load]);
+
+  // Re-request location and recenter the map on the user.
+  const recenter = useCallback(async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        setLocationOff(true);
+        return;
+      }
+      setLocationOff(false);
+      const pos = await Location.getCurrentPositionAsync({});
+      const region = { ...DEFAULT_REGION, latitude: pos.coords.latitude, longitude: pos.coords.longitude };
+      mapRef.current?.animateToRegion(region, 600);
+      void load(region);
+    } catch {
+      /* keep current view */
+    }
   }, [load]);
 
   // Clear any pending debounce when the screen unmounts.
@@ -149,6 +170,23 @@ export function MapScreen() {
         </Pressable>
       </View>
 
+      {/* Location-off hint */}
+      {locationOff ? (
+        <View style={[styles.banner, { top: insets.top + 52 }]} pointerEvents="box-none">
+          <Text style={styles.bannerText}>📍 Location is off — showing a default area.</Text>
+        </View>
+      ) : null}
+
+      {/* Recenter on me */}
+      <Pressable
+        style={styles.recenter}
+        onPress={recenter}
+        accessibilityRole="button"
+        accessibilityLabel="Recenter map on my location"
+      >
+        <Text style={styles.recenterIcon}>◎</Text>
+      </Pressable>
+
       {/* Selected territory card */}
       {selected ? (
         <View style={styles.detailCard}>
@@ -181,8 +219,14 @@ export function MapScreen() {
       ) : (
         <View style={styles.legend}>
           <View style={[styles.legendDot, { backgroundColor: colors.primary }]} />
-          <Text style={styles.legendText}>Your territory</Text>
-          <View style={[styles.legendDot, { backgroundColor: colors.rival, marginLeft: spacing.md }]} />
+          <Text style={styles.legendText}>You</Text>
+          {/* Each rival gets a distinct hashed hue, so show a few sample colours
+              rather than one swatch the rendered polygons never actually use. */}
+          <View style={styles.rivalDots}>
+            <View style={[styles.legendDot, { backgroundColor: 'hsl(20, 70%, 60%)' }]} />
+            <View style={[styles.legendDot, { backgroundColor: 'hsl(140, 70%, 60%)', marginLeft: -3 }]} />
+            <View style={[styles.legendDot, { backgroundColor: 'hsl(260, 70%, 60%)', marginLeft: -3 }]} />
+          </View>
           <Text style={styles.legendText}>Rivals</Text>
         </View>
       )}
@@ -249,5 +293,35 @@ const styles = StyleSheet.create({
     ...shadow.card,
   },
   legendDot: { width: 10, height: 10, borderRadius: 5 },
+  rivalDots: { flexDirection: 'row', alignItems: 'center', marginLeft: spacing.md },
   legendText: { color: colors.textDim, fontSize: font.tiny },
+  banner: {
+    position: 'absolute',
+    left: spacing.lg,
+    right: spacing.lg,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    ...shadow.card,
+  },
+  bannerText: { color: colors.textDim, fontSize: font.small, fontWeight: '600' },
+  recenter: {
+    position: 'absolute',
+    right: spacing.lg,
+    bottom: 96,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadow.card,
+  },
+  recenterIcon: { color: colors.primary, fontSize: 22, fontWeight: '800' },
 });

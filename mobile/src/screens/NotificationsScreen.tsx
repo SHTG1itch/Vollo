@@ -1,11 +1,11 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { useNotifications } from '../store/notifications';
-import { EmptyState, ErrorState } from '../components/ui';
+import { EmptyState, ErrorState, Loading } from '../components/ui';
 import { colors, font, radius, shadow, spacing } from '../theme';
 import { timeAgo } from '../utils/format';
 
@@ -16,14 +16,11 @@ export function NotificationsScreen() {
   const insets = useSafeAreaInsets();
   const { items, loading, error, fetch, markAllRead } = useNotifications();
 
-  useEffect(() => {
-    void fetch();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Mark everything read shortly after the screen gains focus.
+  // Refetch every time the tab gains focus so the badge/list reflect reality,
+  // then mark everything read shortly after.
   useFocusEffect(
     React.useCallback(() => {
+      void fetch();
       const t = setTimeout(() => void markAllRead(), 1200);
       return () => clearTimeout(t);
       // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -43,6 +40,8 @@ export function NotificationsScreen() {
       <Text style={styles.title}>Activity</Text>
       {error && items.length === 0 ? (
         <ErrorState message={error} onRetry={() => fetch()} />
+      ) : loading && items.length === 0 ? (
+        <Loading label="Loading activity…" />
       ) : (
         <FlatList
           data={items}
