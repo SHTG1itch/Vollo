@@ -20,6 +20,13 @@ interface FeedState {
   reset: () => void;
 }
 
+// A monotonic token so a slow fetch for a previous scope can't overwrite the
+// results of a newer one (e.g. rapid Global↔Following toggles).
+let fetchToken = 0;
+// matchIds with a kudos request in flight — guards against racing add/remove
+// from rapid double-taps.
+const kudosInFlight = new Set<string>();
+
 export const useFeed = create<FeedState>((set, get) => ({
   matches: [],
   scope: 'global',
@@ -31,19 +38,24 @@ export const useFeed = create<FeedState>((set, get) => ({
 
   setScope: (scope) => {
     if (scope === get().scope) return;
-    set({ scope, matches: [], cursor: null });
-    void get().fetch(true);
+    // Show the loader (not the empty state) while the new scope loads.
+    set({ scope, matches: [], cursor: null, loading: true, error: null });
+    void get().fetch(false);
   },
 
   fetch: async (refresh = false) => {
+    const token = ++fetchToken;
+    const scope = get().scope;
     set(refresh ? { refreshing: true, error: null } : { loading: true, error: null });
     try {
-      const { matches, next_cursor } = await api.getFeed({ scope: get().scope, limit: 20 });
+      const { matches, next_cursor } = await api.getFeed({ scope, limit: 20 });
+      if (token !== fetchToken) return; // a newer fetch superseded this one
       set({ matches, cursor: next_cursor });
     } catch (e) {
+      if (token !== fetchToken) return;
       set({ error: e instanceof Error ? e.message : 'Failed to load feed' });
     } finally {
-      set({ loading: false, refreshing: false });
+      if (token === fetchToken) set({ loading: false, refreshing: false });
     }
   },
 
@@ -65,6 +77,9 @@ export const useFeed = create<FeedState>((set, get) => ({
 
   // Optimistic: flip the UI immediately, reconcile with the server, revert on error.
   toggleKudos: async (matchId) => {
+    // Ignore a tap while a request for this match is already in flight, so a
+    // rapid double-tap can't fire racing add/remove calls that desync the count.
+    if (kudosInFlight.has(matchId)) return;
     const target = get().matches.find((m) => m.id === matchId);
     if (!target) return;
     const wasKudosed = target.viewer_has_kudos ?? false;
@@ -79,6 +94,7 @@ export const useFeed = create<FeedState>((set, get) => ({
       });
 
     applyDelta(!wasKudosed);
+    kudosInFlight.add(matchId);
 
     try {
       const res = wasKudosed ? await api.removeKudos(matchId) : await api.addKudos(matchId);
@@ -91,6 +107,8 @@ export const useFeed = create<FeedState>((set, get) => ({
     } catch {
       // Revert just this item — don't clobber concurrent feed updates.
       applyDelta(wasKudosed);
+    } finally {
+      kudosInFlight.delete(matchId);
     }
   },
 

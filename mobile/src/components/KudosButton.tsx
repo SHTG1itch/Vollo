@@ -7,6 +7,7 @@ import Animated, {
   withSpring,
 } from 'react-native-reanimated';
 import { colors, font, radius, spacing } from '../theme';
+import { formatCount } from '../utils/format';
 
 /**
  * The tennis-ball "Kudos" button. A tap fires the bounce animation immediately
@@ -33,7 +34,7 @@ export function KudosButton({
   return (
     <Pressable onPress={handle} style={[styles.btn, active && styles.btnActive]} hitSlop={8}>
       <Animated.Text style={[styles.ball, animStyle, !active && styles.ballInactive]}>🎾</Animated.Text>
-      <Text style={[styles.count, active && styles.countActive]}>{count}</Text>
+      <Text style={[styles.count, active && styles.countActive]}>{formatCount(count)}</Text>
     </Pressable>
   );
 }

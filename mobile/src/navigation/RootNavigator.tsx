@@ -11,6 +11,7 @@ import { CourtsScreen } from '../screens/CourtsScreen';
 import { LeaderboardScreen } from '../screens/LeaderboardScreen';
 import { UserProfileScreen } from '../screens/ProfileScreen';
 import { EditProfileScreen } from '../screens/EditProfileScreen';
+import { UserSearchScreen } from '../screens/UserSearchScreen';
 import { colors } from '../theme';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -37,6 +38,7 @@ export function RootNavigator() {
           <Stack.Screen name="Leaderboard" component={LeaderboardScreen} options={{ title: 'Leaderboard' }} />
           <Stack.Screen name="UserProfile" component={UserProfileScreen} options={{ title: 'Player' }} />
           <Stack.Screen name="EditProfile" component={EditProfileScreen} options={{ title: 'Edit profile' }} />
+          <Stack.Screen name="UserSearch" component={UserSearchScreen} options={{ headerShown: false }} />
         </Stack.Group>
       ) : (
         <Stack.Group screenOptions={{ headerShown: false }}>

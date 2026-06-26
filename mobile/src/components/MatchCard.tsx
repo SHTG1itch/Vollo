@@ -2,7 +2,7 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font, radius, shadow, spacing } from '../theme';
 import type { MatchCard as MatchCardType } from '../types';
-import { formatScoreLine, timeAgo } from '../utils/format';
+import { formatCount, formatScoreLine, timeAgo } from '../utils/format';
 import { Avatar } from './ui';
 import { KudosButton } from './KudosButton';
 import { SurfaceBadge } from './SurfaceBadge';
@@ -23,7 +23,7 @@ export function MatchCard({
     match.opponent_display_name ?? match.opponent_name ?? 'an unrecorded opponent';
 
   return (
-    <Pressable onPress={onPress} style={styles.card}>
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.card, pressed && { opacity: 0.92 }]}>
       {/* Header */}
       <View style={styles.header}>
         <Pressable style={styles.authorRow} onPress={onPressAuthor} hitSlop={6}>
@@ -74,7 +74,7 @@ export function MatchCard({
         <KudosButton active={match.viewer_has_kudos ?? false} count={match.kudos_count} onPress={onKudos} />
         <View style={styles.comments}>
           <Text style={styles.commentIcon}>💬</Text>
-          <Text style={styles.commentCount}>{match.comment_count}</Text>
+          <Text style={styles.commentCount}>{formatCount(match.comment_count)}</Text>
         </View>
       </View>
     </Pressable>

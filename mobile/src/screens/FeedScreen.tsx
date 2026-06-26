@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -9,14 +9,14 @@ import { useFeed } from '../store/feed';
 import { useAuth } from '../store/auth';
 import { MatchCard } from '../components/MatchCard';
 import { EmptyState, ErrorState, Loading, SegmentedControl } from '../components/ui';
-import { colors, font, spacing } from '../theme';
+import { colors, font, radius, spacing } from '../theme';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 export function FeedScreen() {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
-  const { matches, scope, loading, refreshing, error, fetch, loadMore, setScope, toggleKudos } = useFeed();
+  const { matches, scope, loading, refreshing, loadingMore, error, fetch, loadMore, setScope, toggleKudos } = useFeed();
   const user = useAuth((s) => s.user);
 
   useEffect(() => {
@@ -30,15 +30,26 @@ export function FeedScreen() {
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
         <Text style={styles.title}>Feed</Text>
-        <View style={{ width: 200 }}>
-          <SegmentedControl
-            options={[
-              { label: 'Global', value: 'global' },
-              { label: 'Following', value: 'following' },
-            ]}
-            value={scope}
-            onChange={(v) => setScope(v)}
-          />
+        <View style={styles.headerActions}>
+          <View style={{ width: 168 }}>
+            <SegmentedControl
+              options={[
+                { label: 'Global', value: 'global' },
+                { label: 'Following', value: 'following' },
+              ]}
+              value={scope}
+              onChange={(v) => setScope(v)}
+            />
+          </View>
+          <Pressable
+            onPress={() => navigation.navigate('UserSearch')}
+            hitSlop={8}
+            style={styles.searchBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Find players"
+          >
+            <Text style={styles.searchIcon}>🔍</Text>
+          </Pressable>
         </View>
       </View>
 
@@ -58,6 +69,13 @@ export function FeedScreen() {
           }
           onEndReachedThreshold={0.5}
           onEndReached={() => loadMore()}
+          ListFooterComponent={
+            loadingMore ? (
+              <View style={{ paddingVertical: spacing.lg }}>
+                <ActivityIndicator color={colors.primary} />
+              </View>
+            ) : null
+          }
           renderItem={({ item }) => (
             <MatchCard
               match={item}
@@ -74,6 +92,11 @@ export function FeedScreen() {
             <EmptyState
               title={scope === 'following' ? 'No matches from people you follow yet' : 'No matches yet'}
               subtitle={scope === 'following' ? 'Follow players to see their matches here.' : 'Log your first match to get started.'}
+              action={
+                scope === 'following'
+                  ? { label: 'Find players', onPress: () => navigation.navigate('UserSearch') }
+                  : { label: 'Log a match', onPress: () => navigation.navigate('Tabs', { screen: 'Log' }) }
+              }
             />
           }
         />
@@ -95,5 +118,17 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   title: { color: colors.text, fontSize: font.h1, fontWeight: '800', letterSpacing: -0.5 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  searchBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceAlt,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  searchIcon: { fontSize: 16 },
   list: { padding: spacing.lg, paddingTop: 0 },
 });

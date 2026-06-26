@@ -18,6 +18,8 @@ export type RootStackParamList = {
   Leaderboard: { courtId: string; courtName?: string };
   UserProfile: { username: string };
   EditProfile: undefined;
+  UserSearch: undefined;
+  Settings: undefined;
 };
 
 declare global {
