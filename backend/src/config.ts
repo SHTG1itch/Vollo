@@ -11,19 +11,47 @@ function bool(value: string | undefined, fallback: boolean): boolean {
   return value === 'true' || value === '1' || value === 'yes';
 }
 
+const env = process.env.NODE_ENV ?? 'development';
+const isProduction = env === 'production';
+
+const DEV_JWT_SECRET = 'dev-only-change-me';
+
+/**
+ * Resolve the JWT signing secret. In production we refuse to boot with a
+ * missing/empty/weak secret: shipping the public dev default would let anyone
+ * forge tokens for any user. In development we fall back to the dev secret.
+ */
+function resolveJwtSecret(): string {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    if (isProduction) {
+      throw new Error('JWT_SECRET must be set (and ≥32 chars) in production.');
+    }
+    return DEV_JWT_SECRET;
+  }
+  if (isProduction && (secret === DEV_JWT_SECRET || secret.length < 32)) {
+    throw new Error('JWT_SECRET must be a strong, non-default secret of ≥32 chars in production.');
+  }
+  return secret;
+}
+
 export const config = {
-  env: process.env.NODE_ENV ?? 'development',
+  env,
   port: num(process.env.PORT, 4000),
 
   database: {
     url: process.env.DATABASE_URL ?? 'postgres://vollo:vollo@localhost:5432/vollo',
     ssl: bool(process.env.DATABASE_SSL, false),
+    // Verify the server certificate. Default off to stay compatible with the
+    // self-signed certs some free-tier providers use; set DATABASE_SSL_STRICT=true
+    // (and provide a CA the host trusts) to harden against MITM in production.
+    sslStrict: bool(process.env.DATABASE_SSL_STRICT, false),
   },
 
   auth: {
-    jwtSecret: process.env.JWT_SECRET ?? 'dev-only-change-me',
+    jwtSecret: resolveJwtSecret(),
     jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? '30d',
-    bcryptRounds: num(process.env.BCRYPT_ROUNDS, 10),
+    bcryptRounds: num(process.env.BCRYPT_ROUNDS, 12),
   },
 
   geocoder: {

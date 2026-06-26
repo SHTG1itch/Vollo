@@ -12,8 +12,16 @@ export const registerSchema = z.object({
     .min(3)
     .max(20)
     .regex(/^[a-zA-Z0-9_]+$/, 'username may only contain letters, numbers and underscores'),
-  email: z.string().trim().email(),
-  password: z.string().min(8).max(100),
+  email: z.string().trim().email().max(254),
+  // bcrypt only hashes the first 72 bytes; reject longer so two passwords that
+  // share a 72-byte prefix can't silently collide.
+  password: z
+    .string()
+    .min(8)
+    .max(72)
+    .refine((p) => new TextEncoder().encode(p).length <= 72, {
+      message: 'password must be at most 72 bytes',
+    }),
   display_name: z.string().trim().min(1).max(60),
 });
 
@@ -22,24 +30,28 @@ export const loginSchema = z.object({
   password: z.string().min(1),
 });
 
+// A single match can't realistically exceed a few hundred of any one event;
+// cap each counter so bad input can't store absurd values that skew analytics.
+const statCount = z.number().int().min(0).max(1000).default(0);
+
 export const matchStatsSchema = z.object({
-  first_serve_in: z.number().int().min(0).default(0),
-  first_serve_total: z.number().int().min(0).default(0),
-  second_serve_in: z.number().int().min(0).default(0),
-  second_serve_total: z.number().int().min(0).default(0),
-  aces: z.number().int().min(0).default(0),
-  double_faults: z.number().int().min(0).default(0),
-  forehand_winners: z.number().int().min(0).default(0),
-  forehand_errors: z.number().int().min(0).default(0),
-  backhand_winners: z.number().int().min(0).default(0),
-  backhand_errors: z.number().int().min(0).default(0),
-  volley_winners: z.number().int().min(0).default(0),
-  volley_errors: z.number().int().min(0).default(0),
-  rally_short: z.number().int().min(0).default(0),
-  rally_medium: z.number().int().min(0).default(0),
-  rally_long: z.number().int().min(0).default(0),
-  break_points_won: z.number().int().min(0).default(0),
-  break_points_total: z.number().int().min(0).default(0),
+  first_serve_in: statCount,
+  first_serve_total: statCount,
+  second_serve_in: statCount,
+  second_serve_total: statCount,
+  aces: statCount,
+  double_faults: statCount,
+  forehand_winners: statCount,
+  forehand_errors: statCount,
+  backhand_winners: statCount,
+  backhand_errors: statCount,
+  volley_winners: statCount,
+  volley_errors: statCount,
+  rally_short: statCount,
+  rally_medium: statCount,
+  rally_long: statCount,
+  break_points_won: statCount,
+  break_points_total: statCount,
 });
 
 export const createMatchSchema = z.object({
@@ -93,7 +105,12 @@ export const pushTokenSchema = z.object({
 export const feedQuerySchema = z.object({
   scope: z.enum(['global', 'following']).default('global'),
   limit: z.coerce.number().int().min(1).max(50).default(20),
-  before: z.string().datetime().optional(), // cursor: played_at of last seen item
+  // Opaque keyset cursor (encodes the last seen played_at + id); decoded server-side.
+  before: z.string().max(200).optional(),
+});
+
+export const notificationIdsSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1).max(200),
 });
 
 export const courtsQuerySchema = z.object({

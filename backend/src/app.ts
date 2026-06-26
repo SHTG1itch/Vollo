@@ -11,10 +11,14 @@ import { courtsRouter } from './routes/courts.js';
 import { territoriesRouter } from './routes/territories.js';
 import { notificationsRouter } from './routes/notifications.js';
 import { errorHandler, notFound } from './middleware/error.js';
+import { rateLimit } from './middleware/rate-limit.js';
 
 /** Build the configured Express application (no listener attached). */
 export function createApp(): express.Express {
   const app = express();
+
+  // Behind Render's proxy; trust the first hop so req.ip is the real client.
+  app.set('trust proxy', 1);
 
   app.use(helmet());
   app.use(
@@ -25,7 +29,12 @@ export function createApp(): express.Express {
   app.use(express.json({ limit: '1mb' }));
   if (config.env !== 'test') app.use(morgan('dev'));
 
-  app.get('/health', (_req, res) => res.json({ status: 'ok', env: config.env }));
+  // Global request ceiling — a cheap abuse backstop for the single $0 instance.
+  if (config.env !== 'test') {
+    app.use(rateLimit({ windowMs: 60_000, max: 200 }));
+  }
+
+  app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
   app.get('/', (_req, res) =>
     res.json({

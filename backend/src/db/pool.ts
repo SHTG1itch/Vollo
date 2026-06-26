@@ -12,7 +12,9 @@ const { Pool } = pg;
  */
 export const pool = new Pool({
   connectionString: config.database.url,
-  ssl: config.database.ssl ? { rejectUnauthorized: false } : undefined,
+  ssl: config.database.ssl
+    ? { rejectUnauthorized: config.database.sslStrict }
+    : undefined,
   max: 10,
   idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 10_000,

@@ -13,10 +13,12 @@ export async function verifyPassword(plain: string, hash: string): Promise<boole
 
 export function signToken(claims: AuthClaims): string {
   return jwt.sign(claims, config.auth.jwtSecret, {
+    algorithm: 'HS256',
     expiresIn: config.auth.jwtExpiresIn as jwt.SignOptions['expiresIn'],
   });
 }
 
 export function verifyToken(token: string): AuthClaims {
-  return jwt.verify(token, config.auth.jwtSecret) as AuthClaims;
+  // Pin the algorithm so a forged token cannot downgrade/confuse verification.
+  return jwt.verify(token, config.auth.jwtSecret, { algorithms: ['HS256'] }) as AuthClaims;
 }
