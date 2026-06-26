@@ -58,7 +58,7 @@ export function LoginScreen({ navigation }: Props) {
             <Button label="Create an account" variant="ghost" onPress={() => navigation.navigate('Register')} />
           </View>
 
-          <Muted style={styles.hint}>Demo: srivats / volley123</Muted>
+          {__DEV__ ? <Muted style={styles.hint}>Demo: srivats / volley123</Muted> : null}
         </ScrollView>
       </KeyboardAvoidingView>
     </Screen>

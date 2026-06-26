@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   ActivityIndicator,
+  Image,
   Pressable,
   StyleSheet,
   Text,
@@ -118,14 +119,28 @@ export function Badge({
 }
 
 export function Avatar({ name, uri, size = 40 }: { name: string; uri?: string | null; size?: number }) {
-  const initials = name
-    .split(' ')
-    .map((w) => w[0])
-    .slice(0, 2)
-    .join('')
-    .toUpperCase();
+  const dims = { width: size, height: size, borderRadius: size / 2 };
+  // Real photo when we have one — falling back to initials only when absent.
+  if (uri && uri.trim()) {
+    return (
+      <Image
+        source={{ uri }}
+        style={[styles.avatar, dims]}
+        accessibilityLabel={name}
+        accessibilityIgnoresInvertColors
+      />
+    );
+  }
+  const initials =
+    (name ?? '')
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((w) => w[0])
+      .slice(0, 2)
+      .join('')
+      .toUpperCase() || '🎾';
   return (
-    <View style={[styles.avatar, { width: size, height: size, borderRadius: size / 2 }]}>
+    <View style={[styles.avatar, dims]} accessibilityLabel={name}>
       <Text style={[styles.avatarText, { fontSize: size * 0.4 }]}>{initials}</Text>
     </View>
   );
@@ -167,12 +182,25 @@ export function Loading({ label }: { label?: string }) {
   );
 }
 
-export function EmptyState({ icon = '🎾', title, subtitle }: { icon?: string; title: string; subtitle?: string }) {
+export function EmptyState({
+  icon = '🎾',
+  title,
+  subtitle,
+  action,
+}: {
+  icon?: string;
+  title: string;
+  subtitle?: string;
+  action?: { label: string; onPress: () => void };
+}) {
   return (
     <View style={styles.center}>
       <Text style={{ fontSize: 48, marginBottom: spacing.md }}>{icon}</Text>
       <Text style={styles.emptyTitle}>{title}</Text>
       {subtitle ? <Text style={styles.dim}>{subtitle}</Text> : null}
+      {action ? (
+        <Button label={action.label} onPress={action.onPress} style={{ marginTop: spacing.lg, minWidth: 200 }} />
+      ) : null}
     </View>
   );
 }

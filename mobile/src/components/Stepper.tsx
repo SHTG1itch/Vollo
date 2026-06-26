@@ -22,11 +22,25 @@ export function Stepper({
     <View style={styles.row}>
       {label ? <Text style={styles.label}>{label}</Text> : null}
       <View style={styles.controls}>
-        <Pressable onPress={() => set(value - step)} style={styles.btn} hitSlop={6}>
+        <Pressable
+          onPress={() => set(value - step)}
+          style={styles.btn}
+          hitSlop={6}
+          accessibilityRole="button"
+          accessibilityLabel={label ? `Decrease ${label}` : 'Decrease'}
+        >
           <Text style={styles.btnText}>−</Text>
         </Pressable>
-        <Text style={styles.value}>{value}</Text>
-        <Pressable onPress={() => set(value + step)} style={styles.btn} hitSlop={6}>
+        <Text style={styles.value} accessibilityLabel={label ? `${label}: ${value}` : String(value)}>
+          {value}
+        </Text>
+        <Pressable
+          onPress={() => set(value + step)}
+          style={styles.btn}
+          hitSlop={6}
+          accessibilityRole="button"
+          accessibilityLabel={label ? `Increase ${label}` : 'Increase'}
+        >
           <Text style={styles.btnText}>+</Text>
         </Pressable>
       </View>

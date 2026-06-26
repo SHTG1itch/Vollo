@@ -110,6 +110,14 @@ export interface CommentItem {
   avatar_url: string | null;
 }
 
+export interface UserSearchResult {
+  id: string;
+  username: string;
+  display_name: string;
+  avatar_url: string | null;
+  viewer_is_following: boolean;
+}
+
 export interface CreateMatchPayload {
   opponent_id?: string;
   opponent_name?: string;
@@ -171,6 +179,9 @@ export const api = {
     request<{ territories: Territory[] }>(`/territories/user/${userId}`),
 
   // ── Users / profiles ──
+  searchUsers: (q: string, limit = 20) =>
+    request<{ users: UserSearchResult[] }>(`/users/search${qs({ q, limit })}`),
+  deleteAccount: () => request<void>('/users/me', { method: 'DELETE' }),
   getProfile: (username: string) => request<ProfileResponse>(`/users/${username}`),
   updateProfile: (body: Record<string, unknown>) =>
     request<{ user: AuthResponse['user'] }>('/users/me', { method: 'PATCH', body: JSON.stringify(body) }),
