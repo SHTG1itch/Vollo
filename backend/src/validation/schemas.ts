@@ -84,6 +84,24 @@ export const createMatchSchema = z
   .refine((b) => !(b.opponent_id && b.opponent_name), {
     message: 'Provide either opponent_id or opponent_name, not both',
     path: ['opponent_name'],
+  })
+  // Reject internally-impossible stat lines (a subset can't exceed its total)
+  // rather than storing numbers that skew analytics.
+  .superRefine((b, ctx) => {
+    const s = b.stats;
+    if (!s) return;
+    const pairs: [keyof typeof s, keyof typeof s][] = [
+      ['first_serve_in', 'first_serve_total'],
+      ['second_serve_in', 'second_serve_total'],
+      ['break_points_won', 'break_points_total'],
+    ];
+    for (const [part, total] of pairs) {
+      const a = s[part];
+      const t = s[total];
+      if (a != null && t != null && a > t) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `${String(part)} cannot exceed ${String(total)}`, path: ['stats', part] });
+      }
+    }
   });
 
 export const createCourtSchema = z.object({

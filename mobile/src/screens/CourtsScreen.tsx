@@ -7,7 +7,7 @@ import type { RootStackParamList } from '../navigation/types';
 import { api, ApiError } from '../api/client';
 import { Button, Card, ErrorState, Field, H2, Loading, Muted, Screen } from '../components/ui';
 import { SurfaceBadge } from '../components/SurfaceBadge';
-import { colors, font, radius, shadow, spacing, surfaceColors } from '../theme';
+import { colors, font, radius, shadow, spacing, surfaceColors, surfaceColorsSoft } from '../theme';
 import type { Court, GeocodeResult, Surface } from '../types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -184,7 +184,7 @@ function AddCourt({ onCreated }: { onCreated: (c: Court) => void }) {
           <Pressable
             key={s}
             onPress={() => setSurface(s)}
-            style={[styles.surfaceChip, surface === s && { borderColor: surfaceColors[s], backgroundColor: `${surfaceColors[s]}22` }]}
+            style={[styles.surfaceChip, surface === s && { borderColor: surfaceColors[s], backgroundColor: surfaceColorsSoft[s] }]}
           >
             <SurfaceBadge surface={s} small />
           </Pressable>

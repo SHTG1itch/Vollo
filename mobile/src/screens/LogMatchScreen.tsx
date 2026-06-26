@@ -11,7 +11,7 @@ import { Avatar, Button, Card, Field, H2, Muted } from '../components/ui';
 import { ScoreInput } from '../components/ScoreInput';
 import { Stepper } from '../components/Stepper';
 import { SurfaceBadge } from '../components/SurfaceBadge';
-import { colors, font, radius, spacing, surfaceColors } from '../theme';
+import { colors, font, radius, spacing, surfaceColors, surfaceColorsSoft } from '../theme';
 import type { Court, MatchStats, ScoreArray, Surface } from '../types';
 import { analyzeLocal } from '../utils/format';
 
@@ -195,7 +195,7 @@ export function LogMatchScreen() {
               }}
               style={[
                 styles.surfaceChip,
-                surface === s && { borderColor: surfaceColors[s], backgroundColor: `${surfaceColors[s]}22` },
+                surface === s && { borderColor: surfaceColors[s], backgroundColor: surfaceColorsSoft[s] },
               ]}
             >
               <SurfaceBadge surface={s} small />

@@ -86,16 +86,17 @@ export function RallyDistribution({
   long: number;
 }) {
   const total = short + medium + long || 1;
-  const seg = (n: number, color: string, label: string, textColor: string) => (
-    <View style={{ flex: n / total || 0.0001, minWidth: n > 0 ? 28 : 0 }}>
-      {n > 0 ? (
+  // Skip an empty bucket entirely (label included) so we never show a lone label
+  // hanging under no bar.
+  const seg = (n: number, color: string, label: string, textColor: string) =>
+    n > 0 ? (
+      <View style={{ flex: n / total, minWidth: 28 }}>
         <View style={[styles.rallySeg, { backgroundColor: color }]}>
           <Text style={[styles.rallySegText, { color: textColor }]}>{Math.round((n / total) * 100)}%</Text>
         </View>
-      ) : null}
-      <Text style={styles.rallyLabel}>{label}</Text>
-    </View>
-  );
+        <Text style={styles.rallyLabel}>{label}</Text>
+      </View>
+    ) : null;
   return (
     <View>
       <View style={{ flexDirection: 'row', gap: 4 }}>

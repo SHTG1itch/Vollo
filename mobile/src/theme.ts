@@ -44,6 +44,15 @@ export const surfaceLabel: Record<Surface, string> = {
   indoor: 'Indoor',
 };
 
+/** Soft (~13% alpha) surface fills for selected chips — centralised so screens
+ * don't hand-build `${surfaceColors[s]}22` hex-alpha strings inline. */
+export const surfaceColorsSoft: Record<Surface, string> = {
+  hard: 'rgba(36, 119, 201, 0.13)',
+  clay: 'rgba(192, 91, 34, 0.13)',
+  grass: 'rgba(46, 158, 72, 0.13)',
+  indoor: 'rgba(126, 108, 196, 0.13)',
+};
+
 export const spacing = {
   xs: 4,
   sm: 8,
