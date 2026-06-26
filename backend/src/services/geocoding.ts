@@ -7,6 +7,9 @@ export interface GeocodeResult {
   city: string | null;
 }
 
+/** Abort a geocoding request that hangs so it can't tie up the API indefinitely. */
+const GEOCODE_TIMEOUT_MS = 8000;
+
 /**
  * Forward geocode a free-text address to coordinates using a free provider.
  * Nominatim (OpenStreetMap) is the default; Geoapify is used when configured.
@@ -29,6 +32,7 @@ async function geocodeNominatim(q: string, limit: number): Promise<GeocodeResult
 
   const res = await fetch(url, {
     headers: { 'User-Agent': config.geocoder.nominatimUserAgent, Accept: 'application/json' },
+    signal: AbortSignal.timeout(GEOCODE_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`nominatim responded ${res.status}`);
   const rows = (await res.json()) as Array<{
@@ -53,7 +57,10 @@ async function geocodeGeoapify(q: string, limit: number): Promise<GeocodeResult[
   url.searchParams.set('limit', String(limit));
   url.searchParams.set('apiKey', config.geocoder.geoapifyApiKey);
 
-  const res = await fetch(url, { headers: { Accept: 'application/json' } });
+  const res = await fetch(url, {
+    headers: { Accept: 'application/json' },
+    signal: AbortSignal.timeout(GEOCODE_TIMEOUT_MS),
+  });
   if (!res.ok) throw new Error(`geoapify responded ${res.status}`);
   const json = (await res.json()) as {
     features: Array<{ properties: { formatted: string; lat: number; lon: number; city?: string } }>;

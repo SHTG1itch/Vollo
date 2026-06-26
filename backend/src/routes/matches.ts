@@ -7,8 +7,8 @@ import { asyncHandler } from '../utils/async-handler.js';
 import { ApiError } from '../utils/errors.js';
 import { commentSchema, createMatchSchema } from '../validation/schemas.js';
 import { analyzeScore, matchScore } from '../services/scoring.js';
-import { getStreakModifier, recomputeUserStreak } from '../services/streak.js';
-import { applyMatchToRatings } from '../services/rating.js';
+import { recomputeUserStreak } from '../services/streak.js';
+import { applyMatchToRatings, reverseMatchFromRatings } from '../services/rating.js';
 import { evaluateAchievements } from '../services/achievements.js';
 import { getCourtController, recomputeAfterMatch } from '../services/territory.js';
 import { notify } from '../services/notifications.js';
@@ -53,7 +53,20 @@ matchesRouter.post(
   asyncHandler(async (req, res) => {
     const uid = userId(req);
     const body = req.body as import('../validation/schemas.js').CreateMatchInput;
-    const analysis = analyzeScore(body.score_array);
+
+    // A score that passes Zod can still be an invalid scoreline (e.g. a tie) —
+    // surface that as a 400, not a 500.
+    let analysis;
+    try {
+      analysis = analyzeScore(body.score_array);
+    } catch (err) {
+      throw ApiError.badRequest(err instanceof Error ? err.message : 'Invalid score');
+    }
+
+    if (body.opponent_id && body.opponent_id === uid) {
+      throw ApiError.badRequest('You cannot log a match against yourself');
+    }
+
     const playedAt = body.played_at ?? new Date().toISOString();
     const isTiebreak = body.is_tiebreak ?? analysis.isTiebreak;
 
@@ -98,6 +111,17 @@ matchesRouter.post(
         );
       }
 
+      // Recompute the streak inside the transaction (it now sees this match) so
+      // the final match_score is written atomically with the insert — no window
+      // where a crash could leave the match stuck at score 0.
+      const streak = await recomputeUserStreak(uid, client);
+      const score = matchScore(analysis.gamesWon, analysis.gamesLost, streak.streakModifier);
+      await client.query('UPDATE matches SET streak_modifier = $1, match_score = $2 WHERE id = $3', [
+        streak.streakModifier,
+        score,
+        id,
+      ]);
+
       await applyMatchToRatings(client, {
         userId: uid,
         opponentId: body.opponent_id ?? null,
@@ -110,16 +134,6 @@ matchesRouter.post(
       return id;
     });
 
-    // Streak modifier reflects activity *including* this match → fuels retention.
-    await recomputeUserStreak(uid);
-    const modifier = await getStreakModifier(uid);
-    const score = matchScore(analysis.gamesWon, analysis.gamesLost, modifier);
-    await query('UPDATE matches SET streak_modifier = $1, match_score = $2 WHERE id = $3', [
-      modifier,
-      score,
-      matchId,
-    ]);
-
     // Re-run the domination engine for everyone affected by this court.
     if (body.court_id) {
       await recomputeAfterMatch({ courtId: body.court_id, loggerUserId: uid, previousControllerId });
@@ -130,7 +144,7 @@ matchesRouter.post(
     if (body.opponent_id && body.opponent_id !== uid) {
       void notify({
         userId: body.opponent_id,
-        type: 'follow',
+        type: 'match_tagged',
         title: '🎾 You were in a match',
         body: `${req.user!.username} logged a match against you.`,
         data: { matchId },
@@ -160,17 +174,42 @@ matchesRouter.delete(
   requireAuth,
   asyncHandler(async (req, res) => {
     const uid = userId(req);
-    const match = await queryOne<{ user_id: string; court_id: string | null }>(
-      'SELECT user_id, court_id FROM matches WHERE id = $1',
+    const match = await queryOne<{
+      user_id: string;
+      court_id: string | null;
+      opponent_id: string | null;
+      surface: import('../types/index.js').Surface;
+      result: import('../types/index.js').MatchResult;
+      games_won: number;
+      games_lost: number;
+    }>(
+      `SELECT user_id, court_id, opponent_id, surface, result, games_won, games_lost
+         FROM matches WHERE id = $1`,
       [req.params.id],
     );
     if (!match) throw ApiError.notFound('Match not found');
     if (match.user_id !== uid) throw ApiError.forbidden('You can only delete your own matches');
 
-    await query('DELETE FROM matches WHERE id = $1', [req.params.id]);
-    await recomputeUserStreak(uid);
+    // Capture the controller before the delete shifts ranks, so the takeover
+    // notification only fires if control actually changes.
+    const previousControllerId = match.court_id ? await getCourtController(match.court_id) : null;
+
+    // Delete and back out the rating impact atomically.
+    await withTransaction(async (client) => {
+      await client.query('DELETE FROM matches WHERE id = $1', [req.params.id]);
+      await reverseMatchFromRatings(client, {
+        userId: uid,
+        opponentId: match.opponent_id,
+        surface: match.surface,
+        result: match.result,
+        gamesWon: Number(match.games_won),
+        gamesLost: Number(match.games_lost),
+      });
+      await recomputeUserStreak(uid, client);
+    });
+
     if (match.court_id) {
-      await recomputeAfterMatch({ courtId: match.court_id, loggerUserId: uid, previousControllerId: null });
+      await recomputeAfterMatch({ courtId: match.court_id, loggerUserId: uid, previousControllerId });
     }
     res.status(204).end();
   }),

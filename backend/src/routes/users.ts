@@ -133,18 +133,22 @@ usersRouter.post(
     const uid = userId(req);
     const targetId = await resolveUserId(req.params.username);
     if (targetId === uid) throw ApiError.badRequest('You cannot follow yourself');
-    await query(
-      'INSERT INTO follows (follower_id, following_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+    const inserted = await queryOne(
+      `INSERT INTO follows (follower_id, following_id) VALUES ($1, $2)
+       ON CONFLICT DO NOTHING RETURNING follower_id`,
       [uid, targetId],
     );
-    void notify({
-      userId: targetId,
-      type: 'follow',
-      title: '👋 New follower',
-      body: `${req.user!.username} started following you.`,
-      data: { followerId: uid },
-      push: false,
-    });
+    // Only notify on a genuinely new follow — re-tapping shouldn't spam the user.
+    if (inserted) {
+      void notify({
+        userId: targetId,
+        type: 'follow',
+        title: '👋 New follower',
+        body: `${req.user!.username} started following you.`,
+        data: { followerId: uid },
+        push: false,
+      });
+    }
     res.status(201).json({ ok: true });
   }),
 );

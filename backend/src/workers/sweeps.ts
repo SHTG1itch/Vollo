@@ -1,4 +1,4 @@
-import { query } from '../db/pool.js';
+import { pool, query } from '../db/pool.js';
 import { recomputeUserStreak } from '../services/streak.js';
 import { recomputeUserTerritories } from '../services/territory.js';
 import { evaluateAchievements } from '../services/achievements.js';
@@ -11,11 +11,18 @@ import { evaluateAchievements } from '../services/achievements.js';
  */
 export async function runStreakSweep(nowMs = Date.now()): Promise<number> {
   const users = await query<{ id: string }>('SELECT id FROM users');
+  let ok = 0;
   for (const u of users) {
-    await recomputeUserStreak(u.id, nowMs);
+    // Isolate each user so one failure doesn't abort the rest of the sweep.
+    try {
+      await recomputeUserStreak(u.id, pool, nowMs);
+      ok++;
+    } catch (err) {
+      console.error(`[worker] streak recompute failed for ${u.id}`, err instanceof Error ? err.message : err);
+    }
   }
-  console.log(`[worker] streak sweep recomputed ${users.length} user(s)`);
-  return users.length;
+  console.log(`[worker] streak sweep recomputed ${ok}/${users.length} user(s)`);
+  return ok;
 }
 
 /**
@@ -25,10 +32,16 @@ export async function runStreakSweep(nowMs = Date.now()): Promise<number> {
  */
 export async function runTerritorySweep(): Promise<number> {
   const users = await query<{ id: string }>('SELECT id FROM users');
+  let ok = 0;
   for (const u of users) {
-    await recomputeUserTerritories(u.id);
-    await evaluateAchievements(u.id);
+    try {
+      await recomputeUserTerritories(u.id);
+      await evaluateAchievements(u.id);
+      ok++;
+    } catch (err) {
+      console.error(`[worker] territory recompute failed for ${u.id}`, err instanceof Error ? err.message : err);
+    }
   }
-  console.log(`[worker] territory sweep recomputed ${users.length} user(s)`);
-  return users.length;
+  console.log(`[worker] territory sweep recomputed ${ok}/${users.length} user(s)`);
+  return ok;
 }

@@ -14,6 +14,7 @@ export type NotificationType =
   | 'territory_changed'
   | 'court_taken'
   | 'court_dethroned'
+  | 'match_tagged'
   | 'rank_up'
   | 'achievement'
   | 'streak_milestone';

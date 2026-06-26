@@ -19,8 +19,8 @@ export function marginMultiplier(gamesWon: number, gamesLost: number): number {
   return 1 + Math.log1p(margin) / Math.log(13); // ~1.0 at margin 0, ~2.0 at margin 12
 }
 
-/** New Elo rating for one player after a match. */
-export function nextRating(
+/** The (unrounded) Elo delta a match applies to one player. */
+export function ratingDelta(
   rating: number,
   opponentRating: number,
   result: MatchResult,
@@ -29,8 +29,18 @@ export function nextRating(
 ): number {
   const actual = result === 'win' ? 1 : 0;
   const expected = expectedScore(rating, opponentRating);
-  const delta = K_FACTOR * marginMultiplier(gamesWon, gamesLost) * (actual - expected);
-  return Math.round(rating + delta);
+  return K_FACTOR * marginMultiplier(gamesWon, gamesLost) * (actual - expected);
+}
+
+/** New Elo rating for one player after a match. */
+export function nextRating(
+  rating: number,
+  opponentRating: number,
+  result: MatchResult,
+  gamesWon: number,
+  gamesLost: number,
+): number {
+  return Math.round(rating + ratingDelta(rating, opponentRating, result, gamesWon, gamesLost));
 }
 
 async function currentRating(db: Queryable, userId: string, surface: Surface): Promise<number> {
@@ -90,6 +100,57 @@ export async function applyMatchToRatings(
     const newOppR = nextRating(oppR, userR, oppResult, gamesLost, gamesWon);
     await upsertRating(db, opponentId, surface, newOppR, oppResult);
   }
+}
+
+/**
+ * Reverse a match's effect on ratings when it is deleted: exactly decrement the
+ * win/loss/matches counters and back out the Elo delta (estimated from current
+ * ratings — close to the original for a recently-logged match). `peak_rating` is
+ * left as the historical high-water mark. Runs inside the caller's transaction.
+ */
+export async function reverseMatchFromRatings(
+  db: Queryable,
+  args: {
+    userId: string;
+    opponentId: string | null;
+    surface: Surface;
+    result: MatchResult;
+    gamesWon: number;
+    gamesLost: number;
+  },
+): Promise<void> {
+  const { userId, opponentId, surface, result, gamesWon, gamesLost } = args;
+
+  const userR = await currentRating(db, userId, surface);
+  const oppR = opponentId ? await currentRating(db, opponentId, surface) : DEFAULT_RATING;
+
+  const userDelta = ratingDelta(userR, oppR, result, gamesWon, gamesLost);
+  await downsertRating(db, userId, surface, Math.round(userR - userDelta), result);
+
+  if (opponentId) {
+    const oppResult: MatchResult = result === 'win' ? 'loss' : 'win';
+    const oppDelta = ratingDelta(oppR, userR, oppResult, gamesLost, gamesWon);
+    await downsertRating(db, opponentId, surface, Math.round(oppR - oppDelta), oppResult);
+  }
+}
+
+/** Undo one match from an existing rating row (no-op if the row is absent). */
+async function downsertRating(
+  db: Queryable,
+  userId: string,
+  surface: Surface,
+  rating: number,
+  result: MatchResult,
+): Promise<void> {
+  await db.query(
+    `UPDATE user_ratings SET
+       rating         = $3,
+       matches_played = GREATEST(0, matches_played - 1),
+       wins           = GREATEST(0, wins   - $4),
+       losses         = GREATEST(0, losses - $5)
+     WHERE user_id = $1 AND surface = $2`,
+    [userId, surface, rating, result === 'win' ? 1 : 0, result === 'loss' ? 1 : 0],
+  );
 }
 
 export async function getRatings(userId: string): Promise<SurfaceRating[]> {

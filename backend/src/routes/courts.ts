@@ -1,10 +1,12 @@
 import { Router } from 'express';
 import { query, queryOne } from '../db/pool.js';
-import { mapCourt } from '../db/mappers.js';
+import { mapCourt, toIso } from '../db/mappers.js';
 import { optionalAuth, requireAuth, userId } from '../middleware/auth.js';
 import { validateBody, validateQuery, validatedQuery } from '../middleware/validate.js';
+import { rateLimit } from '../middleware/rate-limit.js';
 import { asyncHandler } from '../utils/async-handler.js';
 import { ApiError } from '../utils/errors.js';
+import { config } from '../config.js';
 import { courtsQuerySchema, createCourtSchema, geocodeQuerySchema } from '../validation/schemas.js';
 import { geocode } from '../services/geocoding.js';
 import type { LeaderboardEntry } from '../types/index.js';
@@ -12,17 +14,29 @@ import type { z } from 'zod';
 
 export const courtsRouter = Router();
 
+// Protect the free-tier geocoder quota / shared User-Agent from abuse.
+const geocodeLimiter = rateLimit({ windowMs: 60_000, max: 30 });
+
 const COURT_COLS = `id, name, description, surface, ST_Y(geom) AS lat, ST_X(geom) AS lng,
                     address, city, osm_id, created_by, created_at`;
 
 // ─── Geocode proxy (free Nominatim / Geoapify) ─────────────────────────────
+// Authenticated + throttled so the shared free-tier quota can't be drained by
+// anonymous traffic. Provider failures degrade to a clean 502, not a 500.
 courtsRouter.get(
   '/geocode',
+  ...(config.env === 'test' ? [] : [geocodeLimiter]),
+  requireAuth,
   validateQuery(geocodeQuerySchema),
   asyncHandler(async (req, res) => {
     const { q, limit } = validatedQuery<z.infer<typeof geocodeQuerySchema>>(req);
-    const results = await geocode(q, limit);
-    res.json({ results });
+    try {
+      const results = await geocode(q, limit);
+      res.json({ results });
+    } catch (err) {
+      console.warn('[geocode] provider error', err instanceof Error ? err.message : err);
+      throw new ApiError(502, 'geocode_failed', 'Address lookup is temporarily unavailable');
+    }
   }),
 );
 
@@ -143,7 +157,7 @@ courtsRouter.get(
       games_won: Number(r.games_won),
       games_lost: Number(r.games_lost),
       rank: Number(r.rank),
-      last_played_at: String(r.last_played_at),
+      last_played_at: toIso(r.last_played_at),
     }));
     res.json({ leaderboard });
   }),

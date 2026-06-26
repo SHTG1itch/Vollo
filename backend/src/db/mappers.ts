@@ -3,6 +3,20 @@
 // fields the client expects to be numbers.
 import type { Court, Match, MatchCard, User } from '../types/index.js';
 
+/**
+ * `pg` returns timestamptz columns as JS `Date` objects. `String(date)` yields a
+ * locale string like "Thu Jan 01 2024 ..." — not ISO — which breaks both clients
+ * and the feed cursor contract. Always serialize timestamps as ISO 8601.
+ */
+export function toIso(v: unknown): string {
+  if (v instanceof Date) return v.toISOString();
+  if (typeof v === 'string') {
+    const d = new Date(v);
+    return Number.isNaN(d.getTime()) ? v : d.toISOString();
+  }
+  return String(v);
+}
+
 export function mapUser(r: Record<string, unknown>): User {
   return {
     id: r.id as string,
@@ -15,7 +29,7 @@ export function mapUser(r: Record<string, unknown>): User {
     home_lat: r.home_lat != null ? Number(r.home_lat) : null,
     home_lng: r.home_lng != null ? Number(r.home_lng) : null,
     home_label: (r.home_label as string | null) ?? null,
-    created_at: String(r.created_at),
+    created_at: toIso(r.created_at),
   };
 }
 
@@ -31,7 +45,7 @@ export function mapCourt(r: Record<string, unknown>): Court {
     city: (r.city as string | null) ?? null,
     osm_id: (r.osm_id as string | null) ?? null,
     created_by: (r.created_by as string | null) ?? null,
-    created_at: String(r.created_at),
+    created_at: toIso(r.created_at),
   };
 }
 
@@ -55,8 +69,8 @@ function mapMatchBase(r: Record<string, unknown>): Match {
     duration_minutes: r.duration_minutes != null ? Number(r.duration_minutes) : null,
     notes: (r.notes as string | null) ?? null,
     is_tiebreak: Boolean(r.is_tiebreak),
-    played_at: String(r.played_at),
-    created_at: String(r.created_at),
+    played_at: toIso(r.played_at),
+    created_at: toIso(r.created_at),
   };
 }
 

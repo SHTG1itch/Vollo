@@ -6,14 +6,49 @@ import { validateQuery, validatedQuery } from '../middleware/validate.js';
 import { asyncHandler } from '../utils/async-handler.js';
 import { ApiError } from '../utils/errors.js';
 import { feedQuerySchema } from '../validation/schemas.js';
+import type { MatchCard } from '../types/index.js';
 import type { z } from 'zod';
 
 export const feedRouter = Router();
 
+/** Opaque keyset cursor encoding the last seen (played_at, id) pair. */
+interface Cursor {
+  t: string;
+  id: string;
+}
+
+function encodeCursor(c: Cursor): string {
+  return Buffer.from(JSON.stringify(c), 'utf8').toString('base64url');
+}
+
+function decodeCursor(raw: string): Cursor {
+  try {
+    const parsed = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'));
+    if (
+      typeof parsed?.t === 'string' &&
+      typeof parsed?.id === 'string' &&
+      !Number.isNaN(new Date(parsed.t).getTime())
+    ) {
+      return { t: parsed.t, id: parsed.id };
+    }
+  } catch {
+    /* fall through */
+  }
+  throw ApiError.badRequest('Invalid pagination cursor');
+}
+
+/** Build the next-page cursor when (and only when) a further page exists. */
+function nextCursor(rows: MatchCard[], hasMore: boolean): string | null {
+  if (!hasMore || rows.length === 0) return null;
+  const last = rows[rows.length - 1]!;
+  return encodeCursor({ t: last.played_at, id: last.id });
+}
+
 /**
  * Paginated match-card feed. `scope=global` shows everyone; `scope=following`
- * shows the viewer + people they follow. Cursor pagination by played_at keeps
- * scrolling cheap for FlashList on the client.
+ * shows the viewer + people they follow. Keyset pagination by (played_at, id)
+ * keeps scrolling cheap and avoids skipping/duplicating rows that share a
+ * timestamp.
  */
 feedRouter.get(
   '/',
@@ -35,10 +70,11 @@ feedRouter.get(
       );
     }
     if (before) {
-      params.push(before);
-      conditions.push(`mf.played_at < $${++p}`);
+      const cursor = decodeCursor(before);
+      params.push(cursor.t, cursor.id);
+      conditions.push(`(mf.played_at, mf.id) < ($${++p}::timestamptz, $${++p}::uuid)`);
     }
-    params.push(limit);
+    params.push(limit + 1); // fetch one extra to detect a further page
     const limitIdx = ++p;
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -49,14 +85,14 @@ feedRouter.get(
               END AS viewer_has_kudos
          FROM match_feed mf
          ${where}
-        ORDER BY mf.played_at DESC
+        ORDER BY mf.played_at DESC, mf.id DESC
         LIMIT $${limitIdx}`,
       params,
     );
 
-    const matches = rows.map(mapMatchCard);
-    const nextCursor = matches.length === limit ? matches[matches.length - 1]!.played_at : null;
-    res.json({ matches, next_cursor: nextCursor });
+    const hasMore = rows.length > limit;
+    const matches = rows.slice(0, limit).map(mapMatchCard);
+    res.json({ matches, next_cursor: nextCursor(matches, hasMore) });
   }),
 );
 
@@ -69,12 +105,15 @@ feedRouter.get(
     const { limit, before } = validatedQuery<z.infer<typeof feedQuerySchema>>(req);
     const viewerId = req.user?.sub ?? null;
     const params: unknown[] = [viewerId, req.params.userId];
+    let p = params.length;
     let extra = '';
     if (before) {
-      params.push(before);
-      extra = `AND mf.played_at < $3`;
+      const cursor = decodeCursor(before);
+      params.push(cursor.t, cursor.id);
+      extra = `AND (mf.played_at, mf.id) < ($${++p}::timestamptz, $${++p}::uuid)`;
     }
-    params.push(limit);
+    params.push(limit + 1);
+    const limitIdx = ++p;
     const rows = await query<Record<string, unknown>>(
       `SELECT mf.*,
               CASE WHEN $1::uuid IS NULL THEN false
@@ -82,12 +121,12 @@ feedRouter.get(
               END AS viewer_has_kudos
          FROM match_feed mf
         WHERE mf.user_id = $2 ${extra}
-        ORDER BY mf.played_at DESC
-        LIMIT $${params.length}`,
+        ORDER BY mf.played_at DESC, mf.id DESC
+        LIMIT $${limitIdx}`,
       params,
     );
-    const matches = rows.map(mapMatchCard);
-    const nextCursor = matches.length === limit ? matches[matches.length - 1]!.played_at : null;
-    res.json({ matches, next_cursor: nextCursor });
+    const hasMore = rows.length > limit;
+    const matches = rows.slice(0, limit).map(mapMatchCard);
+    res.json({ matches, next_cursor: nextCursor(matches, hasMore) });
   }),
 );

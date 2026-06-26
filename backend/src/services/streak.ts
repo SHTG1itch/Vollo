@@ -1,5 +1,6 @@
 import { config } from '../config.js';
-import { query, queryOne } from '../db/pool.js';
+import { pool, query, queryOne } from '../db/pool.js';
+import type { Queryable } from '../db/pool.js';
 import type { StreakState } from '../types/index.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -31,7 +32,7 @@ export function computeStreak(
     return { currentStreakWeeks: 0, longestStreakWeeks: 0, streakModifier: 1, lastMatchAtMs: null };
   }
 
-  const windowMs = opts.windowDays * DAY_MS;
+  const windowMs = Math.max(1, opts.windowDays) * DAY_MS; // guard against a 0-day window → NaN buckets
   const lastMatchAtMs = Math.max(...playedAtMs);
 
   // Mark which buckets (counting back from now) contain at least one match.
@@ -84,18 +85,22 @@ export async function getStreakModifier(userId: string): Promise<number> {
  * Recompute and persist a user's streak from their full match history.
  * Called after logging a match and from the rolling cron worker.
  */
-export async function recomputeUserStreak(userId: string, nowMs = Date.now()): Promise<StreakComputation> {
-  const rows = await query<{ played_at: string }>(
+export async function recomputeUserStreak(
+  userId: string,
+  db: Queryable = pool,
+  nowMs = Date.now(),
+): Promise<StreakComputation> {
+  const { rows } = await db.query<{ played_at: string }>(
     'SELECT played_at FROM matches WHERE user_id = $1',
     [userId],
   );
   const playedAtMs = rows.map((r) => new Date(r.played_at).getTime());
   const result = computeStreak(playedAtMs, nowMs);
 
-  await query(
+  await db.query(
     `INSERT INTO user_streaks
        (user_id, current_streak_weeks, longest_streak_weeks, streak_modifier, last_match_at)
-     VALUES ($1, $2, $3, $4, to_timestamp($5 / 1000.0))
+     VALUES ($1, $2, $3, $4, CASE WHEN $5::bigint IS NULL THEN NULL ELSE to_timestamp($5 / 1000.0) END)
      ON CONFLICT (user_id) DO UPDATE SET
        current_streak_weeks = EXCLUDED.current_streak_weeks,
        longest_streak_weeks = GREATEST(user_streaks.longest_streak_weeks, EXCLUDED.longest_streak_weeks),
@@ -106,7 +111,8 @@ export async function recomputeUserStreak(userId: string, nowMs = Date.now()): P
       result.currentStreakWeeks,
       result.longestStreakWeeks,
       result.streakModifier,
-      result.lastMatchAtMs ?? nowMs,
+      // NULL when the user has no matches, rather than fabricating "now".
+      result.lastMatchAtMs,
     ],
   );
   return result;

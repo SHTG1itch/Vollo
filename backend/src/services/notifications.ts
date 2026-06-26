@@ -53,12 +53,18 @@ async function sendPush(
     data,
   }));
 
-  const res = await fetch(EXPO_PUSH_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify(messages),
-  });
-  if (!res.ok) {
-    throw new Error(`expo push responded ${res.status}`);
+  // Expo accepts at most 100 messages per request — chunk accordingly, and bound
+  // each request with a timeout so a slow relay can't hang the caller.
+  for (let i = 0; i < messages.length; i += 100) {
+    const chunk = messages.slice(i, i + 100);
+    const res = await fetch(EXPO_PUSH_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(chunk),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) {
+      throw new Error(`expo push responded ${res.status}`);
+    }
   }
 }

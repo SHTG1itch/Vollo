@@ -38,6 +38,28 @@ describe('analyzeScore', () => {
     expect(a.gamesLost).toBe(10); // 4 + 6 + 0
   });
 
+  it('counts an advantage set as real games, not a tiebreak', () => {
+    // 8-6 is a legitimate advantage set, not a match tiebreak — its games count.
+    const a = analyzeScore([[6, 4], [8, 6]]);
+    expect(a.isTiebreak).toBe(false);
+    expect(a.result).toBe('win');
+    expect(a.gamesWon).toBe(14); // 6 + 8
+    expect(a.gamesLost).toBe(10); // 4 + 6
+  });
+
+  it('still treats a first-to-10 super tiebreak as one game-equivalent', () => {
+    const a = analyzeScore([[6, 4], [4, 6], [10, 3]]);
+    expect(a.isTiebreak).toBe(true);
+    expect(a.gamesWon).toBe(11); // 6 + 4 + 1
+  });
+
+  it('decides an even-set match by games, and rejects a dead tie', () => {
+    // 1-1 in sets but more games won → a win, not a silent loss.
+    expect(analyzeScore([[6, 0], [4, 6]]).result).toBe('win');
+    // 1-1 sets and equal games has no winner.
+    expect(() => analyzeScore([[6, 4], [4, 6]])).toThrow();
+  });
+
   it('rejects ties and empty scores', () => {
     expect(() => analyzeScore([[6, 6]])).toThrow();
     expect(() => analyzeScore([])).toThrow();

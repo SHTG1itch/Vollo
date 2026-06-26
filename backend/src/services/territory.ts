@@ -33,7 +33,7 @@ export async function getControlledCourts(userId: string): Promise<ControlledCou
             ST_Y(c.geom) AS lat, ST_X(c.geom) AS lng
        FROM court_leaderboard cl
        JOIN courts c ON c.id = cl.court_id
-      WHERE cl.user_id = $1 AND cl.rank <= 2`,
+      WHERE cl.user_id = $1 AND cl.rank <= 2 AND cl.score > 0`,
     [userId],
   );
 }
@@ -232,7 +232,7 @@ async function emitCourtTakeoverNotifications(
   previousControllerId: string | null,
 ): Promise<void> {
   const controller = await queryOne<{ user_id: string }>(
-    `SELECT user_id FROM court_leaderboard WHERE court_id = $1 AND rank = 1
+    `SELECT user_id FROM court_leaderboard WHERE court_id = $1 AND rank = 1 AND score > 0
      ORDER BY score DESC LIMIT 1`,
     [courtId],
   );
@@ -275,7 +275,7 @@ async function homeReference(userId: string, controlled: ControlledCourt[]): Pro
 /** The current rank-1 controller of a court (for capturing pre-match state). */
 export async function getCourtController(courtId: string): Promise<string | null> {
   const row = await queryOne<{ user_id: string }>(
-    `SELECT user_id FROM court_leaderboard WHERE court_id = $1 AND rank = 1
+    `SELECT user_id FROM court_leaderboard WHERE court_id = $1 AND rank = 1 AND score > 0
      ORDER BY score DESC LIMIT 1`,
     [courtId],
   );

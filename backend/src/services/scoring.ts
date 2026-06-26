@@ -9,8 +9,13 @@ export interface ScoreAnalysis {
   isTiebreak: boolean;
 }
 
-/** A value above this in a "set" slot is treated as a match/super tiebreak. */
-const TIEBREAK_THRESHOLD = 7;
+/**
+ * A deciding match/super tiebreak is first-to-10 (win by two), so the winning
+ * value in that slot is ≥10. Using 10 — rather than "anything over 7" — avoids
+ * misclassifying a legitimate advantage set like 8-6 or 9-7 as a tiebreak and
+ * silently dropping its games.
+ */
+const SUPER_TIEBREAK_TARGET = 10;
 
 /**
  * Analyse a score array from the logging player's perspective.
@@ -44,8 +49,8 @@ export function analyzeScore(score: ScoreArray): ScoreAnalysis {
       throw new Error('a set cannot end in a tie');
     }
 
-    if (me > setsTopGuard(opp) || opp > setsTopGuard(me)) {
-      // A super/match tiebreak (value over 7): counts as one game-equivalent.
+    if (me >= SUPER_TIEBREAK_TARGET || opp >= SUPER_TIEBREAK_TARGET) {
+      // A deciding super/match tiebreak: counts as one game-equivalent.
       isTiebreak = true;
       if (me > opp) {
         gamesWon += 1;
@@ -64,7 +69,7 @@ export function analyzeScore(score: ScoreArray): ScoreAnalysis {
   }
 
   return {
-    result: setsWon > setsLost ? 'win' : 'loss',
+    result: decideResult(setsWon, setsLost, gamesWon, gamesLost),
     setsWon,
     setsLost,
     gamesWon,
@@ -73,9 +78,21 @@ export function analyzeScore(score: ScoreArray): ScoreAnalysis {
   };
 }
 
-/** A normal set tops out at 7 (7-6). Anything strictly above is a tiebreak. */
-function setsTopGuard(_other: number): number {
-  return TIEBREAK_THRESHOLD;
+/**
+ * Decide the match result. Sets decide it; if sets are even (an incomplete
+ * scoreline the schema can't fully rule out), fall back to games; if everything
+ * ties, the match has no winner and is rejected rather than silently logged as a
+ * loss.
+ */
+function decideResult(
+  setsWon: number,
+  setsLost: number,
+  gamesWon: number,
+  gamesLost: number,
+): MatchResult {
+  if (setsWon !== setsLost) return setsWon > setsLost ? 'win' : 'loss';
+  if (gamesWon !== gamesLost) return gamesWon > gamesLost ? 'win' : 'loss';
+  throw new Error('match has no decisive winner');
 }
 
 /**
