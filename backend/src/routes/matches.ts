@@ -2,10 +2,10 @@ import { Router } from 'express';
 import { query, queryOne, withTransaction } from '../db/pool.js';
 import { mapMatchCard } from '../db/mappers.js';
 import { optionalAuth, requireAuth, userId } from '../middleware/auth.js';
-import { validateBody } from '../middleware/validate.js';
+import { validateBody, validateQuery, validatedQuery } from '../middleware/validate.js';
 import { asyncHandler } from '../utils/async-handler.js';
 import { ApiError } from '../utils/errors.js';
-import { commentSchema, createMatchSchema } from '../validation/schemas.js';
+import { commentSchema, commentsQuerySchema, createMatchSchema } from '../validation/schemas.js';
 import { analyzeScore, matchScore } from '../services/scoring.js';
 import { recomputeUserStreak } from '../services/streak.js';
 import { applyMatchToRatings, reverseMatchFromRatings } from '../services/rating.js';
@@ -239,15 +239,17 @@ matchesRouter.post(
     ]);
     if (!match) throw ApiError.notFound('Match not found');
 
-    await query(
-      'INSERT INTO kudos (match_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+    // ON CONFLICT DO NOTHING ... RETURNING tells us whether this was a *new*
+    // kudos, so re-tapping (or a toggle replay) doesn't re-notify the owner.
+    const inserted = await queryOne<{ id: string }>(
+      'INSERT INTO kudos (match_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING id',
       [req.params.id, uid],
     );
     const countRow = await queryOne<{ c: string }>('SELECT COUNT(*) AS c FROM kudos WHERE match_id = $1', [
       req.params.id,
     ]);
 
-    if (match.user_id !== uid) {
+    if (inserted && match.user_id !== uid) {
       void notify({
         userId: match.user_id,
         type: 'kudos',
@@ -277,15 +279,29 @@ matchesRouter.delete(
 // ─── Comments ──────────────────────────────────────────────────────────────
 matchesRouter.get(
   '/:id/comments',
+  optionalAuth,
+  validateQuery(commentsQuerySchema),
   asyncHandler(async (req, res) => {
-    const comments = await query(
+    const { limit, before } = validatedQuery<import('zod').infer<typeof commentsQuerySchema>>(req);
+    // Page the newest `limit` (optionally older than `before`), then return them
+    // oldest-first for natural reading order — bounding an otherwise unlimited scan.
+    const params: unknown[] = [req.params.id];
+    let extra = '';
+    if (before) {
+      params.push(before);
+      extra = `AND c.created_at < $${params.length}`;
+    }
+    params.push(limit);
+    const rows = await query(
       `SELECT c.id, c.body, c.created_at, c.user_id,
               u.username, u.display_name, u.avatar_url
          FROM comments c JOIN users u ON u.id = c.user_id
-        WHERE c.match_id = $1 ORDER BY c.created_at ASC`,
-      [req.params.id],
+        WHERE c.match_id = $1 ${extra}
+        ORDER BY c.created_at DESC
+        LIMIT $${params.length}`,
+      params,
     );
-    res.json({ comments });
+    res.json({ comments: rows.reverse() });
   }),
 );
 

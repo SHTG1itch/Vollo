@@ -295,6 +295,9 @@ export async function listTerritories(bbox?: {
     where = 'WHERE t.geom && ST_MakeEnvelope($1, $2, $3, $4, 4326)';
     params.push(bbox.minLng, bbox.minLat, bbox.maxLng, bbox.maxLat);
   }
+  // Cap an unbounded (no-bbox) listing so a global request can't stream every
+  // polygon on the planet; the map always sends a bbox, so this only bounds the
+  // fallback. Largest territories first stay the most interesting.
   const rows = await query<TerritoryRow>(
     `SELECT t.id, t.user_id, ST_AsGeoJSON(t.geom) AS geojson,
             ST_Y(t.center_geom) AS center_lat, ST_X(t.center_geom) AS center_lng,
@@ -303,7 +306,8 @@ export async function listTerritories(bbox?: {
        FROM territories t
        JOIN users u ON u.id = t.user_id
        ${where}
-       ORDER BY t.area_sqkm DESC`,
+       ORDER BY t.area_sqkm DESC
+       LIMIT 500`,
     params,
   );
   return rows.map(mapTerritoryRow);

@@ -46,6 +46,7 @@ export function createApp(): express.Express {
         'POST /api/auth/login',
         'GET  /api/auth/me',
         'GET  /api/feed?scope=global|following',
+        'GET  /api/users/search?q=',
         'POST /api/matches',
         'GET  /api/courts?lat=&lng=&radius_km=',
         'GET  /api/courts/:id/leaderboard',

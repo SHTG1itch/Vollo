@@ -33,6 +33,12 @@ export async function notify(input: NotifyInput): Promise<void> {
   }
 }
 
+interface ExpoTicket {
+  status?: 'ok' | 'error';
+  message?: string;
+  details?: { error?: string };
+}
+
 async function sendPush(
   userId: string,
   title: string,
@@ -53,18 +59,41 @@ async function sendPush(
     data,
   }));
 
+  const deadTokens: string[] = [];
+
   // Expo accepts at most 100 messages per request — chunk accordingly, and bound
-  // each request with a timeout so a slow relay can't hang the caller.
+  // each request with a timeout so a slow relay can't hang the caller. A failure
+  // in one chunk must not abort the others.
   for (let i = 0; i < messages.length; i += 100) {
     const chunk = messages.slice(i, i + 100);
-    const res = await fetch(EXPO_PUSH_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify(chunk),
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!res.ok) {
-      throw new Error(`expo push responded ${res.status}`);
+    try {
+      const res = await fetch(EXPO_PUSH_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(chunk),
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!res.ok) {
+        console.warn(`[notify] expo push responded ${res.status}`);
+        continue;
+      }
+      // Tickets line up positionally with the chunk. A DeviceNotRegistered ticket
+      // means the token is dead — prune it so we stop fanning out to it.
+      const payload = (await res.json()) as { data?: ExpoTicket[] };
+      const tickets = payload.data ?? [];
+      tickets.forEach((ticket, j) => {
+        if (ticket.status === 'error' && ticket.details?.error === 'DeviceNotRegistered') {
+          deadTokens.push(chunk[j]!.to);
+        }
+      });
+    } catch (err) {
+      console.warn('[notify] push chunk failed', err instanceof Error ? err.message : err);
     }
+  }
+
+  if (deadTokens.length > 0) {
+    await query('DELETE FROM push_tokens WHERE token = ANY($1::text[])', [deadTokens]).catch((err) =>
+      console.warn('[notify] failed to prune dead tokens', err instanceof Error ? err.message : err),
+    );
   }
 }

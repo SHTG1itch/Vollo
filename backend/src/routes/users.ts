@@ -2,10 +2,11 @@ import { Router } from 'express';
 import { query, queryOne } from '../db/pool.js';
 import { mapPublicUser, mapUser } from '../db/mappers.js';
 import { optionalAuth, requireAuth, userId } from '../middleware/auth.js';
-import { validateBody } from '../middleware/validate.js';
+import { validateBody, validateQuery, validatedQuery } from '../middleware/validate.js';
 import { asyncHandler } from '../utils/async-handler.js';
 import { ApiError } from '../utils/errors.js';
-import { pushTokenSchema, updateProfileSchema } from '../validation/schemas.js';
+import { pushTokenSchema, updateProfileSchema, userSearchQuerySchema } from '../validation/schemas.js';
+import type { z } from 'zod';
 import { getProfileAnalytics, getHeadToHead } from '../services/analytics.js';
 import { getRatings } from '../services/rating.js';
 import { getAchievements } from '../services/achievements.js';
@@ -64,6 +65,35 @@ usersRouter.patch(
   }),
 );
 
+// ─── Search players (discovery) ─────────────────────────────────────────────
+// Defined before GET /:username so "search" isn't swallowed as a username.
+usersRouter.get(
+  '/search',
+  requireAuth,
+  validateQuery(userSearchQuerySchema),
+  asyncHandler(async (req, res) => {
+    const uid = userId(req);
+    const { q, limit } = validatedQuery<z.infer<typeof userSearchQuerySchema>>(req);
+    const users = await query<{
+      id: string;
+      username: string;
+      display_name: string;
+      avatar_url: string | null;
+      viewer_is_following: boolean;
+    }>(
+      `SELECT u.id, u.username, u.display_name, u.avatar_url,
+              EXISTS(SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.following_id = u.id) AS viewer_is_following
+         FROM users u
+        WHERE u.id <> $1
+          AND (u.username ILIKE '%' || $2 || '%' OR u.display_name ILIKE '%' || $2 || '%')
+        ORDER BY (u.username ILIKE $2 || '%' OR u.display_name ILIKE $2 || '%') DESC, u.username ASC
+        LIMIT $3`,
+      [uid, q, limit],
+    );
+    res.json({ users });
+  }),
+);
+
 // ─── Push token registration (Expo) ────────────────────────────────────────
 usersRouter.post(
   '/me/push-token',
@@ -72,12 +102,25 @@ usersRouter.post(
   asyncHandler(async (req, res) => {
     const uid = userId(req);
     const { token, platform } = req.body as import('zod').infer<typeof pushTokenSchema>;
+    // token is globally unique: registering it (re)assigns the device to the
+    // logging-in user and evicts the previous owner, so the prior account stops
+    // receiving this device's pushes.
     await query(
       `INSERT INTO push_tokens (user_id, token, platform) VALUES ($1, $2, $3)
-       ON CONFLICT (user_id, token) DO UPDATE SET platform = EXCLUDED.platform`,
+       ON CONFLICT (token) DO UPDATE SET user_id = EXCLUDED.user_id, platform = EXCLUDED.platform, created_at = now()`,
       [uid, token, platform ?? 'expo'],
     );
     res.status(201).json({ ok: true });
+  }),
+);
+
+// ─── Delete own account (cascades to all owned data via FKs) ────────────────
+usersRouter.delete(
+  '/me',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    await query('DELETE FROM users WHERE id = $1', [userId(req)]);
+    res.status(204).end();
   }),
 );
 

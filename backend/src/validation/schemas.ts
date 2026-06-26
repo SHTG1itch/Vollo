@@ -166,6 +166,16 @@ export const geocodeQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(10).default(5),
 });
 
+export const userSearchQuerySchema = z.object({
+  q: z.string().trim().min(1).max(60),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+});
+
+export const commentsQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  before: z.string().datetime().optional(),
+});
+
 export type CreateMatchInput = z.infer<typeof createMatchSchema>;
 export type CreateCourtInput = z.infer<typeof createCourtSchema>;
 export type RegisterInput = z.infer<typeof registerSchema>;

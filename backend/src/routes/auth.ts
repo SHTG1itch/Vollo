@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type RequestHandler } from 'express';
 import bcrypt from 'bcryptjs';
 import { query, queryOne } from '../db/pool.js';
 import { mapUser } from '../db/mappers.js';
@@ -25,18 +25,22 @@ const DUMMY_PASSWORD_HASH = bcrypt.hashSync('vollo-timing-equalizer', config.aut
 
 export const authRouter = Router();
 
-// Throttle credential endpoints hard to blunt brute-force / account spam.
-// Disabled under test so the suite isn't rate-limited.
-if (config.env !== 'test') {
-  authRouter.use(rateLimit({
-    windowMs: 15 * 60_000,
-    max: 20,
-    message: 'Too many authentication attempts, please try again later',
-  }));
-}
+// Throttle only the credential-submitting endpoints (login/register) to blunt
+// brute-force / account spam. Applying it to the whole router (incl. GET /me)
+// let a busy authenticated session burn the same 20-per-15min bucket and lock
+// itself out. No-op under test so the suite isn't rate-limited.
+const credentialLimiter: RequestHandler =
+  config.env === 'test'
+    ? (_req, _res, next) => next()
+    : rateLimit({
+        windowMs: 15 * 60_000,
+        max: 20,
+        message: 'Too many authentication attempts, please try again later',
+      });
 
 authRouter.post(
   '/register',
+  credentialLimiter,
   validateBody(registerSchema),
   asyncHandler(async (req, res) => {
     const { username, email, password, display_name } = req.body;
@@ -66,6 +70,7 @@ authRouter.post(
 
 authRouter.post(
   '/login',
+  credentialLimiter,
   validateBody(loginSchema),
   asyncHandler(async (req, res) => {
     const { identifier, password } = req.body;

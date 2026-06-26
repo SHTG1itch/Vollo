@@ -174,7 +174,9 @@ compass district naming) lives in `backend/src/utils/geo.ts` and is fully unit-t
 | `GET /api/courts/:id/leaderboard` | 30-day court leaderboard |
 | `GET /api/courts/geocode?q=` | Free Nominatim/Geoapify geocoding |
 | `GET /api/territories?min_lng=&min_lat=&max_lng=&max_lat=` | Territory polygons (GeoJSON) |
+| `GET /api/users/search?q=` | Find players by name/username (to follow / tag) |
 | `GET /api/users/:username/analytics` | Full performance profile |
+| `DELETE /api/users/me` | Delete your account (cascades all owned data) |
 
 ---
 

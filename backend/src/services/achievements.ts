@@ -29,7 +29,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { code: 'clay_grinder',  title: 'Clay Grinder',    description: 'Won 10 matches on clay.',                  icon: '🟠', earned: (s) => s.clayWins >= 10 },
   { code: 'grass_server',  title: 'Grass Server',    description: 'Won 10 matches on grass.',                 icon: '🟢', earned: (s) => s.grassWins >= 10 },
   { code: 'hard_hitter',   title: 'Hard Hitter',     description: 'Won 10 matches on hard court.',            icon: '🔵', earned: (s) => s.hardWins >= 10 },
-  { code: 'night_owl',     title: 'Indoor Specialist', description: 'Won 10 matches indoors.',                icon: '🏟️', earned: (s) => s.indoorWins >= 10 },
+  { code: 'indoor_specialist', title: 'Indoor Specialist', description: 'Won 10 matches indoors.',            icon: '🏟️', earned: (s) => s.indoorWins >= 10 },
   { code: 'comeback_king', title: 'Comeback King',   description: 'Won a match after dropping the first set.', icon: '🔄', earned: (s) => s.hasComeback },
   { code: 'iron_arm',      title: 'Iron Arm',        description: 'Logged a match at maximum exertion (RPE 10).', icon: '💪', earned: (s) => s.maxRpe >= 10 },
   { code: 'on_fire',       title: 'On Fire',         description: 'Held a 4-week activity streak.',           icon: '🔥', earned: (s) => s.streakWeeks >= 4 },
