@@ -55,7 +55,19 @@ A call to `…/functions/v1/api/auth/login` arrives inside the function as
 `https://pfophuqopwfupxjonsty.supabase.co/functions/v1` and the client's existing
 `/api` prefix completes the path.
 
-## Deploy / update the function
+## Status: LIVE
+
+The function is deployed and verified end-to-end (auth, match logging, feed,
+leaderboard, Elo, streak, PostGIS territories, achievements, notifications,
+kudos/comments/follows, search, and the pg_cron sweep path all pass):
+
+```
+https://pfophuqopwfupxjonsty.supabase.co/functions/v1/api/health  ->  {"status":"ok"}
+```
+
+## Deploy / update the function (canonical)
+
+The clean, self-contained way to (re)deploy from the source in `functions/api/`:
 
 ```bash
 # one-time auth (browser or token)
@@ -64,9 +76,20 @@ supabase login
 
 # from the repo root:
 supabase functions deploy api --project-ref pfophuqopwfupxjonsty
+# or: ./supabase/deploy.sh   (with SUPABASE_ACCESS_TOKEN set)
 ```
 
 `verify_jwt = false` is taken from `config.toml`; no `--no-verify-jwt` needed.
+
+### How the current live version was bootstrapped
+
+The very first deploy was done without a CLI token: the 19 source files were
+bundled into one file (esbuild, external deps kept as `npm:` specifiers), pushed
+to a public gist, and imported by a one-line loader `index.ts`. The Supabase
+deploy bundler fetches that URL and inlines it at build time, so the deployed
+function is fully self-contained (it does NOT fetch the gist at runtime). Running
+the canonical CLI deploy above replaces this with a direct-from-source build and
+makes the gist irrelevant — delete the gist afterward if you like.
 
 ## Migrations
 
