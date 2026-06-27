@@ -1,0 +1,10 @@
+# Vollo — Supabase project configuration.
+# The backend runs entirely on Supabase free tier: Postgres + PostGIS for data,
+# a single Edge Function ("api") for the application logic, and pg_cron for the
+# periodic sweeps. No paid resources are used.
+project_id = "pfophuqopwfupxjonsty"
+
+[functions.api]
+# Custom HS256 bearer auth is enforced inside the function, and several routes
+# are public (login/register/feed), so the platform JWT gate is disabled.
+verify_jwt = false
