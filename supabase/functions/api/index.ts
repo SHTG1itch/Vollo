@@ -335,7 +335,9 @@ app.post('/api/matches', requireAuth, async (c) => {
         body.opponent_id ? null : body.opponent_name ?? null,
         body.court_id ?? null,
         body.surface,
-        JSON.stringify(body.score_array),
+        // Pass the raw array: postgres.js detects the jsonb param and serializes
+        // it itself, so a manual JSON.stringify here would double-encode it.
+        body.score_array,
         analysis.result,
         analysis.setsWon,
         analysis.setsLost,

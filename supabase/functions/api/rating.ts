@@ -66,14 +66,17 @@ async function applyRatingDelta(
   const loss = result === 'loss' ? 1 : 0;
   const seed = DEFAULT_RATING + delta; // rating for a brand-new (insert) row
   await db.query(
+    // Explicit casts: postgres.js sends params untyped, so a param reused across
+    // numeric contexts (e.g. $3 as the rating column and inside GREATEST) can
+    // trip "inconsistent types deduced for parameter". Pinning types avoids it.
     `INSERT INTO user_ratings (user_id, surface, rating, matches_played, wins, losses, peak_rating)
-     VALUES ($1, $2, $3, 1, $4, $5, GREATEST($6, $3))
+     VALUES ($1, $2, $3::numeric, 1, $4::int, $5::int, GREATEST($6::numeric, $3::numeric))
      ON CONFLICT (user_id, surface) DO UPDATE SET
-       rating         = user_ratings.rating + $7,
+       rating         = user_ratings.rating + $7::numeric,
        matches_played = user_ratings.matches_played + 1,
-       wins           = user_ratings.wins   + $4,
-       losses         = user_ratings.losses + $5,
-       peak_rating    = GREATEST(user_ratings.peak_rating, user_ratings.rating + $7)`,
+       wins           = user_ratings.wins   + $4::int,
+       losses         = user_ratings.losses + $5::int,
+       peak_rating    = GREATEST(user_ratings.peak_rating, user_ratings.rating + $7::numeric)`,
     [userId, surface, seed, win, loss, DEFAULT_RATING, delta],
   );
 }
@@ -139,10 +142,10 @@ async function reverseRatingDelta(
 ): Promise<void> {
   await db.query(
     `UPDATE user_ratings SET
-       rating         = user_ratings.rating - $3,
+       rating         = user_ratings.rating - $3::numeric,
        matches_played = GREATEST(0, matches_played - 1),
-       wins           = GREATEST(0, wins   - $4),
-       losses         = GREATEST(0, losses - $5)
+       wins           = GREATEST(0, wins   - $4::int),
+       losses         = GREATEST(0, losses - $5::int)
      WHERE user_id = $1 AND surface = $2`,
     [userId, surface, delta, result === 'win' ? 1 : 0, result === 'loss' ? 1 : 0],
   );

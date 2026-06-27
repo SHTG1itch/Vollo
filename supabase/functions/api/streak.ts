@@ -88,7 +88,7 @@ export async function recomputeUserStreak(
   await db.query(
     `INSERT INTO user_streaks
        (user_id, current_streak_weeks, longest_streak_weeks, streak_modifier, last_match_at)
-     VALUES ($1, $2, $3, $4, CASE WHEN $5::bigint IS NULL THEN NULL ELSE to_timestamp($5 / 1000.0) END)
+     VALUES ($1, $2::int, $3::int, $4::numeric, CASE WHEN $5::bigint IS NULL THEN NULL ELSE to_timestamp($5::bigint / 1000.0) END)
      ON CONFLICT (user_id) DO UPDATE SET
        current_streak_weeks = EXCLUDED.current_streak_weeks,
        longest_streak_weeks = EXCLUDED.longest_streak_weeks,

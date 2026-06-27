@@ -21,9 +21,11 @@ export async function notify(input: NotifyInput): Promise<void> {
   const { userId, type, title, body, data = {}, push = true } = input;
 
   await query(
+    // Pass the raw object: postgres.js serializes jsonb params itself, so a
+    // manual JSON.stringify here would double-encode it into a jsonb string.
     `INSERT INTO notifications (user_id, type, title, body, data)
      VALUES ($1, $2, $3, $4, $5::jsonb)`,
-    [userId, type, title, body, JSON.stringify(data)],
+    [userId, type, title, body, data],
   );
 
   if (push) {

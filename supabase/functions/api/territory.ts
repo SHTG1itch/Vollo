@@ -114,8 +114,8 @@ export async function recomputeUserTerritories(userId: string): Promise<void> {
         `INSERT INTO territories
            (user_id, geom, center_geom, court_count, area_sqkm, district_name, court_ids)
          VALUES ($1,
-                 ST_SetSRID(ST_GeomFromGeoJSON($2), 4326),
-                 ST_SetSRID(ST_GeomFromGeoJSON($3), 4326),
+                 ST_SetSRID(ST_GeomFromGeoJSON($2::text), 4326),
+                 ST_SetSRID(ST_GeomFromGeoJSON($3::text), 4326),
                  $4, $5, $6, $7::uuid[])`,
         [
           userId,
