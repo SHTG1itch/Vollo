@@ -37,6 +37,7 @@ export function AddCourtScreen({ route, navigation }: Props) {
 
   const [name, setName] = useState('');
   const [surface, setSurface] = useState<Surface>('hard');
+  const [courtCount, setCourtCount] = useState('1');
   const [addressQuery, setAddressQuery] = useState('');
   // Independent flags: the address "Find" and the "Add court" submit are separate
   // async actions, so one finishing must not re-enable the other mid-flight.
@@ -141,11 +142,14 @@ export function AddCourtScreen({ route, navigation }: Props) {
         /* no label — the court still saves with its coordinates */
       }
 
+      // Clamp to a sane facility size; courts at one venue form a single sector.
+      const count = Math.min(60, Math.max(1, parseInt(courtCount, 10) || 1));
       const { court } = await api.createCourt({
         name: trimmed,
         surface,
         lat: center.current.lat,
         lng: center.current.lng,
+        court_count: count,
         ...(city ? { city } : {}),
         ...(address ? { address } : {}),
       });
@@ -212,6 +216,17 @@ export function AddCourtScreen({ route, navigation }: Props) {
                 <SurfaceBadge surface={s} small />
               </Pressable>
             ))}
+          </View>
+
+          <View style={styles.countRow}>
+            <Field
+              label="Courts here"
+              value={courtCount}
+              onChangeText={(v) => setCourtCount(v.replace(/[^0-9]/g, ''))}
+              keyboardType="number-pad"
+              style={{ width: 96 }}
+            />
+            <Text style={styles.countHint}>All courts at one venue count as a single domination sector.</Text>
           </View>
 
           <View style={styles.searchRow}>
@@ -281,6 +296,8 @@ const styles = StyleSheet.create({
   recenterIcon: { color: colors.primary, fontSize: 22, fontWeight: '800' },
   form: { margin: spacing.lg, gap: spacing.md },
   surfaceRow: { flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' },
+  countRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  countHint: { flex: 1, color: colors.textDim, fontSize: font.small },
   surfaceChip: { padding: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border },
   searchRow: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-end' },
 });

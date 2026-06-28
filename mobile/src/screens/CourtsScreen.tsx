@@ -150,6 +150,7 @@ export function CourtsScreen() {
                 <Text style={styles.courtSub}>
                   {item.city ?? 'Unknown city'}
                   {item.distance_km != null ? ` · ${item.distance_km.toFixed(1)} km` : ''}
+                  {item.court_count > 1 ? ` · ${item.court_count} courts` : ''}
                 </Text>
               </View>
               <SurfaceBadge surface={item.surface} small />
