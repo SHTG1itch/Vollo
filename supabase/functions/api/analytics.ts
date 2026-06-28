@@ -37,12 +37,14 @@ export interface ProfileAnalytics {
 
 /** The complete multi-dimensional performance profile for a user. */
 export async function getProfileAnalytics(userId: string): Promise<ProfileAnalytics> {
+  // Analytics only reflect matches that count — pending (unverified) and
+  // rejected matches are excluded everywhere below for competitive integrity.
   const overallRow = await queryOne<{ matches: string; wins: string; losses: string; avg_rpe: string | null }>(
     `SELECT COUNT(*) AS matches,
             COUNT(*) FILTER (WHERE result='win')  AS wins,
             COUNT(*) FILTER (WHERE result='loss') AS losses,
             AVG(rpe_index) AS avg_rpe
-       FROM matches WHERE user_id = $1`,
+       FROM matches WHERE user_id = $1 AND verification_status IN ('auto', 'verified')`,
     [userId],
   );
 
@@ -55,7 +57,7 @@ export async function getProfileAnalytics(userId: string): Promise<ProfileAnalyt
             COUNT(*) FILTER (WHERE result='loss') AS losses,
             COALESCE(SUM(games_won),0)  AS games_won,
             COALESCE(SUM(games_lost),0) AS games_lost
-       FROM matches WHERE user_id = $1
+       FROM matches WHERE user_id = $1 AND verification_status IN ('auto', 'verified')
       GROUP BY surface
       ORDER BY surface`,
     [userId],
@@ -81,13 +83,15 @@ export async function getProfileAnalytics(userId: string): Promise<ProfileAnalyt
         COALESCE(SUM(ms.break_points_won),0)   AS bp_w,
         COALESCE(SUM(ms.break_points_total),0) AS bp_t
        FROM match_stats ms JOIN matches m ON m.id = ms.match_id
-      WHERE m.user_id = $1`,
+      WHERE m.user_id = $1 AND m.verification_status IN ('auto', 'verified')`,
     [userId],
   );
   const n = (k: string): number => Number(s?.[k] ?? 0);
 
   const recentRows = await query<{ result: 'win' | 'loss' }>(
-    'SELECT result FROM matches WHERE user_id = $1 ORDER BY played_at DESC LIMIT 10',
+    `SELECT result FROM matches
+      WHERE user_id = $1 AND verification_status IN ('auto', 'verified')
+      ORDER BY played_at DESC LIMIT 10`,
     [userId],
   );
 
@@ -191,7 +195,9 @@ export async function getHeadToHead(userId: string): Promise<HeadToHead[]> {
             COUNT(*) FILTER (WHERE result='loss') AS losses
        FROM matches m
        LEFT JOIN users o ON o.id = m.opponent_id
-      WHERE m.user_id = $1 AND (m.opponent_id IS NOT NULL OR m.opponent_name IS NOT NULL)
+      WHERE m.user_id = $1
+        AND m.verification_status IN ('auto', 'verified')
+        AND (m.opponent_id IS NOT NULL OR m.opponent_name IS NOT NULL)
       GROUP BY opponent_id, COALESCE(o.display_name, m.opponent_name, 'Unknown')
       ORDER BY matches DESC`,
     [userId],

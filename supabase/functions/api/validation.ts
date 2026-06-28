@@ -110,6 +110,9 @@ export const createScheduledMatchSchema = z
         message: 'scheduled_at is too far in the future',
       }),
     note: z.string().trim().max(280).optional(),
+    // A challenge is just a scheduled match with combative framing (changes the
+    // notification + card label); only meaningful when challenging a Vollo player.
+    is_challenge: z.boolean().optional(),
   })
   .refine((b) => b.opponent_id || b.opponent_name, {
     message: 'Provide an opponent (a Vollo player or a name)',
@@ -122,6 +125,11 @@ export const createScheduledMatchSchema = z
 
 export const updateScheduledMatchSchema = z.object({
   action: z.enum(['accept', 'decline', 'cancel']),
+});
+
+// The tagged opponent confirms (it counts) or rejects (it never counts) a match.
+export const verifyMatchSchema = z.object({
+  action: z.enum(['confirm', 'reject']),
 });
 
 export const createCourtSchema = z.object({

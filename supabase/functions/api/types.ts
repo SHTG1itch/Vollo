@@ -5,6 +5,13 @@ export type Surface = 'hard' | 'clay' | 'grass' | 'indoor';
 export type MatchResult = 'win' | 'loss';
 export type DominantHand = 'right' | 'left';
 
+/**
+ * Match verification lifecycle. A match against a registered Vollo player starts
+ * 'pending' and only counts (ELO/streak/domination) once the opponent confirms.
+ * Matches with no registered opponent are 'auto'.
+ */
+export type VerificationStatus = 'auto' | 'pending' | 'verified' | 'rejected';
+
 export type NotificationType =
   | 'kudos'
   | 'comment'
@@ -15,6 +22,11 @@ export type NotificationType =
   | 'court_taken'
   | 'court_dethroned'
   | 'match_tagged'
+  | 'match_verify_request'
+  | 'match_verified'
+  | 'match_rejected'
+  | 'turf_war'
+  | 'challenge'
   | 'match_scheduled'
   | 'schedule_accepted'
   | 'schedule_declined'
@@ -112,6 +124,9 @@ export interface Match {
   duration_minutes: number | null;
   notes: string | null;
   is_tiebreak: boolean;
+  /** Whether this match counts yet (see VerificationStatus). */
+  verification_status: VerificationStatus;
+  verified_at: string | null;
   played_at: string;
   created_at: string;
 }
@@ -225,6 +240,8 @@ export interface ScheduledMatchCard {
   scheduled_at: string;
   note: string | null;
   status: ScheduleStatus;
+  /** True when this was framed as a competitive challenge rather than a plain plan. */
+  is_challenge: boolean;
   match_id: string | null;
   /** Score of the linked, played match (logger's games first) — shown to both. */
   result_score: ScoreArray | null;

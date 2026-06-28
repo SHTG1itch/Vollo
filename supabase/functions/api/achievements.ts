@@ -56,7 +56,7 @@ async function snapshot(userId: string): Promise<AchievementSnapshot> {
         COUNT(*) FILTER (WHERE surface='indoor' AND result='win')  AS indoor_wins,
         MAX(rpe_index)                                             AS max_rpe,
         bool_or(result='win' AND (score_array->0->>1)::int > (score_array->0->>0)::int) AS has_comeback
-       FROM matches WHERE user_id = $1`,
+       FROM matches WHERE user_id = $1 AND verification_status IN ('auto', 'verified')`,
     [userId],
   );
   const streak = await queryOne<{ current_streak_weeks: number }>(

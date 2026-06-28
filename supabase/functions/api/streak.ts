@@ -79,7 +79,9 @@ export async function recomputeUserStreak(
   nowMs = Date.now(),
 ): Promise<StreakComputation> {
   const { rows } = await db.query<{ played_at: string }>(
-    'SELECT played_at FROM matches WHERE user_id = $1',
+    // Only matches that actually count toward the player's record drive the
+    // streak — a pending (unverified) or rejected match must not.
+    "SELECT played_at FROM matches WHERE user_id = $1 AND verification_status IN ('auto', 'verified')",
     [userId],
   );
   const playedAtMs = rows.map((r) => new Date(r.played_at).getTime());

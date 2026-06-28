@@ -12,7 +12,7 @@ import { Hono, type Context, type MiddlewareHandler } from 'hono';
 import { cors } from 'hono/cors';
 import { ZodError } from 'zod';
 
-import { query, queryOne, withTransaction, getSecret } from './db.ts';
+import { query, queryOne, withTransaction, getSecret, type Queryable } from './db.ts';
 import { adminClient, authClient } from './supabaseAdmin.ts';
 import { ApiError } from './errors.ts';
 import { mapCourt, mapMatchCard, mapPublicUser, mapScheduledMatch, mapUser, toIso } from './mappers.ts';
@@ -21,6 +21,7 @@ import {
   createCourtSchema, createMatchSchema, createScheduledMatchSchema, discoverQuerySchema, feedQuerySchema,
   geocodeQuerySchema, loginSchema, notificationIdsSchema, pushTokenSchema,
   reverseGeocodeQuerySchema, updateProfileSchema, updateScheduledMatchSchema, userSearchQuerySchema,
+  verifyMatchSchema,
 } from './validation.ts';
 import type { CreateMatchInput } from './validation.ts';
 import { analyzeScore, matchScore } from './scoring.ts';
@@ -33,7 +34,7 @@ import { geocode, reverseGeocode } from './geocoding.ts';
 import { fetchOverpassSectors, type OverpassSector } from './overpass.ts';
 import { getProfileAnalytics, getHeadToHead } from './analytics.ts';
 import { runStreakSweep, runTerritorySweep, runCourtNameSweep } from './sweeps.ts';
-import type { AuthClaims, LeaderboardEntry, MatchCard, MatchStats } from './types.ts';
+import type { AuthClaims, LeaderboardEntry, MatchCard, MatchResult, MatchStats, Surface } from './types.ts';
 
 type Env = { Variables: { user?: AuthClaims } };
 
@@ -205,6 +206,41 @@ async function resolveUserId(username: string): Promise<string> {
   return row.id;
 }
 
+/**
+ * Apply a (now-counting) match's effects to the logger: recompute their streak,
+ * compute the court MatchScore with the current streak modifier, apply the Elo
+ * delta, and persist all three back onto the match row. Used both for matches
+ * that count immediately ('auto') and when an opponent verifies a pending one.
+ * Must run inside the match's transaction so the streak query sees its status.
+ */
+async function applyMatchEffects(
+  client: Queryable,
+  args: {
+    matchId: string;
+    userId: string;
+    opponentId: string | null;
+    surface: Surface;
+    result: MatchResult;
+    gamesWon: number;
+    gamesLost: number;
+  },
+): Promise<void> {
+  const streak = await recomputeUserStreak(args.userId, client);
+  const score = matchScore(args.gamesWon, args.gamesLost, streak.streakModifier);
+  const { userDelta } = await applyMatchToRatings(client, {
+    userId: args.userId,
+    opponentId: args.opponentId,
+    surface: args.surface,
+    result: args.result,
+    gamesWon: args.gamesWon,
+    gamesLost: args.gamesLost,
+  });
+  await client.query(
+    'UPDATE matches SET streak_modifier = $1, match_score = $2, user_rating_delta = $3 WHERE id = $4',
+    [streak.streakModifier, score, userDelta, args.matchId],
+  );
+}
+
 // ════════════════════════════════════════════════════════════════════════
 // App
 // ════════════════════════════════════════════════════════════════════════
@@ -374,15 +410,23 @@ app.post('/api/matches', requireAuth, async (c) => {
 
   const playedAt = body.played_at ?? new Date().toISOString();
   const isTiebreak = analysis.isTiebreak;
-  const previousControllerId = body.court_id ? await getCourtController(body.court_id) : null;
+  // A match against a registered Vollo player must be confirmed by that opponent
+  // before it counts (ELO/streak/domination). Until then it's 'pending' and
+  // contributes nothing. Matches with no registered opponent count immediately.
+  const needsVerification = !!body.opponent_id;
+  const verificationStatus = needsVerification ? 'pending' : 'auto';
+  // Only meaningful when the match counts now — a pending match doesn't change
+  // any court's controller, so there's no pre-state to capture.
+  const previousControllerId =
+    !needsVerification && body.court_id ? await getCourtController(body.court_id) : null;
 
   const matchId = await withTransaction(async (client) => {
     const inserted = await client.query<{ id: string }>(
       `INSERT INTO matches
          (user_id, opponent_id, opponent_name, court_id, surface, score_array, result,
           sets_won, sets_lost, games_won, games_lost, match_score, streak_modifier,
-          rpe_index, duration_minutes, notes, is_tiebreak, played_at)
-       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,0,1,$12,$13,$14,$15,$16)
+          rpe_index, duration_minutes, notes, is_tiebreak, played_at, verification_status)
+       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,0,1,$12,$13,$14,$15,$16,$17)
        RETURNING id`,
       [
         userId,
@@ -403,6 +447,7 @@ app.post('/api/matches', requireAuth, async (c) => {
         body.notes ?? null,
         isTiebreak,
         playedAt,
+        verificationStatus,
       ],
     );
     const id = inserted.rows[0]!.id;
@@ -416,49 +461,49 @@ app.post('/api/matches', requireAuth, async (c) => {
       );
     }
 
-    const streak = await recomputeUserStreak(userId, client);
-    const score = matchScore(analysis.gamesWon, analysis.gamesLost, streak.streakModifier);
-
-    const { userDelta } = await applyMatchToRatings(client, {
-      userId,
-      opponentId: body.opponent_id ?? null,
-      surface: body.surface,
-      result: analysis.result,
-      gamesWon: analysis.gamesWon,
-      gamesLost: analysis.gamesLost,
-    });
-
-    await client.query(
-      'UPDATE matches SET streak_modifier = $1, match_score = $2, user_rating_delta = $3 WHERE id = $4',
-      [streak.streakModifier, score, userDelta, id],
-    );
+    // Pending matches apply no effects yet — they kick in when the opponent
+    // verifies. Auto matches (no registered opponent) count immediately.
+    if (!needsVerification) {
+      await applyMatchEffects(client, {
+        matchId: id,
+        userId,
+        opponentId: null,
+        surface: body.surface,
+        result: analysis.result,
+        gamesWon: analysis.gamesWon,
+        gamesLost: analysis.gamesLost,
+      });
+    }
     return id;
   });
 
   // Post-commit side effects must NOT fail the request (the match is durably
   // committed; a retry would double-log). Each is isolated; the 6-hourly sweep
-  // backstops territory.
-  if (body.court_id) {
+  // backstops territory. A pending match skips all of these until verified.
+  if (!needsVerification) {
+    if (body.court_id) {
+      try {
+        await recomputeAfterMatch({ courtId: body.court_id, loggerUserId: userId, previousControllerId });
+      } catch (err) {
+        console.error('[matches] territory recompute failed', err instanceof Error ? err.message : err);
+      }
+    }
     try {
-      await recomputeAfterMatch({ courtId: body.court_id, loggerUserId: userId, previousControllerId });
+      await evaluateAchievements(userId);
     } catch (err) {
-      console.error('[matches] territory recompute failed', err instanceof Error ? err.message : err);
+      console.error('[matches] achievement evaluation failed', err instanceof Error ? err.message : err);
     }
   }
-  try {
-    await evaluateAchievements(userId);
-  } catch (err) {
-    console.error('[matches] achievement evaluation failed', err instanceof Error ? err.message : err);
-  }
 
-  if (body.opponent_id && body.opponent_id !== userId) {
+  if (needsVerification && body.opponent_id !== userId) {
+    // Ask the tagged opponent to confirm the result before it counts — push on,
+    // because the logger's ELO/territory hinges on this response.
     await notify({
-      userId: body.opponent_id,
-      type: 'match_tagged',
-      title: '🎾 You were in a match',
-      body: `${c.get('user')!.username} logged a match against you.`,
+      userId: body.opponent_id!,
+      type: 'match_verify_request',
+      title: '🎾 Verify this match',
+      body: `@${c.get('user')!.username} logged a match against you. Confirm it to make it count.`,
       data: { matchId },
-      push: false,
     }).catch(() => {});
   }
 
@@ -482,6 +527,96 @@ app.post('/api/matches', requireAuth, async (c) => {
   return c.json({ match: card }, 201);
 });
 
+// Matches awaiting MY confirmation (I'm the tagged opponent). Static path is
+// declared before /matches/:id so "pending" isn't swallowed as an :id.
+app.get('/api/matches/pending', requireAuth, async (c) => {
+  const userId = uid(c);
+  const rows = await query<Record<string, unknown>>(
+    `SELECT mf.* FROM match_feed mf
+      WHERE mf.opponent_id = $1 AND mf.verification_status = 'pending'
+      ORDER BY mf.created_at DESC LIMIT 50`,
+    [userId],
+  );
+  return c.json({ matches: rows.map(mapMatchCard) });
+});
+
+// The tagged opponent confirms (it counts) or rejects (it never counts) a match.
+app.post('/api/matches/:id/verify', requireAuth, async (c) => {
+  const userId = uid(c);
+  const id = c.req.param('id');
+  const { action } = verifyMatchSchema.parse(await jsonBody(c));
+
+  const match = await queryOne<{
+    user_id: string;
+    opponent_id: string | null;
+    court_id: string | null;
+    surface: Surface;
+    result: MatchResult;
+    games_won: number;
+    games_lost: number;
+    verification_status: string;
+  }>(
+    `SELECT user_id, opponent_id, court_id, surface, result, games_won, games_lost, verification_status
+       FROM matches WHERE id = $1`,
+    [id],
+  );
+  if (!match) throw ApiError.notFound('Match not found');
+  if (match.opponent_id !== userId) throw ApiError.forbidden('Only the tagged opponent can verify this match');
+  if (match.verification_status !== 'pending') throw ApiError.badRequest('This match has already been resolved');
+
+  const verifier = c.get('user')!.username;
+
+  if (action === 'reject') {
+    await query("UPDATE matches SET verification_status = 'rejected', verified_at = now() WHERE id = $1", [id]);
+    await notify({
+      userId: match.user_id,
+      type: 'match_rejected',
+      title: '🚫 Match disputed',
+      body: `@${verifier} disputed your logged match, so it won't count.`,
+      data: { matchId: id },
+    }).catch(() => {});
+    return c.json({ match: await fetchMatchCard(id, userId) });
+  }
+
+  // confirm → the match now counts: apply its effects to the logger.
+  const previousControllerId = match.court_id ? await getCourtController(match.court_id) : null;
+  await withTransaction(async (client) => {
+    await client.query("UPDATE matches SET verification_status = 'verified', verified_at = now() WHERE id = $1", [id]);
+    await applyMatchEffects(client, {
+      matchId: id,
+      userId: match.user_id,
+      opponentId: match.opponent_id,
+      surface: match.surface,
+      result: match.result,
+      gamesWon: Number(match.games_won),
+      gamesLost: Number(match.games_lost),
+    });
+  });
+
+  if (match.court_id) {
+    try {
+      await recomputeAfterMatch({ courtId: match.court_id, loggerUserId: match.user_id, previousControllerId });
+    } catch (err) {
+      console.error('[verify] territory recompute failed', err instanceof Error ? err.message : err);
+    }
+  }
+  try {
+    await evaluateAchievements(match.user_id);
+  } catch (err) {
+    console.error('[verify] achievement evaluation failed', err instanceof Error ? err.message : err);
+  }
+
+  await notify({
+    userId: match.user_id,
+    type: 'match_verified',
+    title: '✅ Match verified',
+    body: `@${verifier} confirmed your match — it now counts.`,
+    data: { matchId: id },
+  }).catch(() => {});
+
+  return c.json({ match: await fetchMatchCard(id, userId) });
+});
+
 app.get('/api/matches/:id', optionalAuth, async (c) => {
   const card = await fetchMatchCard(c.req.param('id'), c.get('user')?.sub ?? null);
   if (!card) throw ApiError.notFound('Match not found');
@@ -495,35 +630,43 @@ app.delete('/api/matches/:id', requireAuth, async (c) => {
     user_id: string;
     court_id: string | null;
     opponent_id: string | null;
-    surface: import('./types.ts').Surface;
-    result: import('./types.ts').MatchResult;
+    surface: Surface;
+    result: MatchResult;
     games_won: number;
     games_lost: number;
     user_rating_delta: number | null;
+    verification_status: string;
   }>(
-    `SELECT user_id, court_id, opponent_id, surface, result, games_won, games_lost, user_rating_delta
+    `SELECT user_id, court_id, opponent_id, surface, result, games_won, games_lost,
+            user_rating_delta, verification_status
        FROM matches WHERE id = $1`,
     [id],
   );
   if (!match) throw ApiError.notFound('Match not found');
   if (match.user_id !== userId) throw ApiError.forbidden('You can only delete your own matches');
 
-  const previousControllerId = match.court_id ? await getCourtController(match.court_id) : null;
+  // A pending/rejected match never applied ELO or touched a leaderboard, so its
+  // deletion must NOT reverse ratings or recompute territory (that would corrupt
+  // the rating). Streak is always recomputed (cheap; it excludes the row anyway).
+  const counted = match.verification_status === 'auto' || match.verification_status === 'verified';
+  const previousControllerId = counted && match.court_id ? await getCourtController(match.court_id) : null;
 
   await withTransaction(async (client) => {
     await client.query('DELETE FROM matches WHERE id = $1', [id]);
-    await reverseMatchFromRatings(client, {
-      userId,
-      surface: match.surface,
-      result: match.result,
-      gamesWon: Number(match.games_won),
-      gamesLost: Number(match.games_lost),
-      appliedDelta: match.user_rating_delta == null ? null : Number(match.user_rating_delta),
-    });
+    if (counted) {
+      await reverseMatchFromRatings(client, {
+        userId,
+        surface: match.surface,
+        result: match.result,
+        gamesWon: Number(match.games_won),
+        gamesLost: Number(match.games_lost),
+        appliedDelta: match.user_rating_delta == null ? null : Number(match.user_rating_delta),
+      });
+    }
     await recomputeUserStreak(userId, client);
   });
 
-  if (match.court_id) {
+  if (counted && match.court_id) {
     await recomputeAfterMatch({ courtId: match.court_id, loggerUserId: userId, previousControllerId });
   }
   return c.body(null, 204);

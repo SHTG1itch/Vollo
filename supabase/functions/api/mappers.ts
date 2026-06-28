@@ -97,6 +97,8 @@ function mapMatchBase(r: Record<string, unknown>): Match {
     duration_minutes: r.duration_minutes != null ? Number(r.duration_minutes) : null,
     notes: (r.notes as string | null) ?? null,
     is_tiebreak: Boolean(r.is_tiebreak),
+    verification_status: (r.verification_status as Match['verification_status']) ?? 'auto',
+    verified_at: r.verified_at != null ? toIso(r.verified_at) : null,
     played_at: toIso(r.played_at),
     created_at: toIso(r.created_at),
   };
@@ -124,6 +126,7 @@ export function mapScheduledMatch(r: Record<string, unknown>, viewerId: string):
     scheduled_at: toIso(r.scheduled_at),
     note: (r.note as string | null) ?? null,
     status: r.status as ScheduledMatchCard['status'],
+    is_challenge: Boolean(r.is_challenge),
     match_id: (r.match_id as string | null) ?? null,
     result_score: (r.result_score as ScoreArray | null) ?? null,
     result_logged_by: (r.result_logged_by as string | null) ?? null,
