@@ -34,6 +34,15 @@ export function MatchDetailScreen({ route, navigation }: Props) {
   const [celebrate, setCelebrate] = useState(false);
   const celebratedRef = useRef(false);
 
+  // Reset the one-shot gate when the screen is reused for a DIFFERENT match
+  // (new route params on the same component instance — e.g. a deep link or
+  // navigating between matches without unmounting). Keyed on matchId only, so a
+  // pull-to-refresh of the SAME match still won't re-fire the confetti.
+  useEffect(() => {
+    celebratedRef.current = false;
+    setCelebrate(false);
+  }, [matchId]);
+
   useEffect(() => {
     if (!celebratedRef.current && match && match.result === 'win' && match.user_id === user?.id) {
       celebratedRef.current = true;
