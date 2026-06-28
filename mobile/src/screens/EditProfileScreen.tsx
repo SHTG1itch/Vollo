@@ -10,6 +10,36 @@ import type { GeocodeResult } from '../types';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'EditProfile'>;
 
+// Curated quick-picks so players can tap their gear instead of typing it. Free
+// text is still allowed for anything not listed.
+const RACQUET_OPTIONS = [
+  'Babolat Pure Aero', 'Babolat Pure Drive', 'Wilson Pro Staff 97', 'Wilson Blade 98',
+  'Head Speed Pro', 'Head Radical', 'Yonex EZONE 98', 'Yonex VCORE 100', 'Tecnifibre TF40',
+];
+const STRING_OPTIONS = [
+  'Luxilon ALU Power', 'Babolat RPM Blast', 'Solinco Hyperion', 'Wilson NXT',
+  'Head Lynx', 'Tecnifibre X-One Biphase', 'Natural Gut',
+];
+const SHOE_OPTIONS = [
+  'Nike Vapor Pro', 'Nike GP Challenge', 'Adidas Barricade', 'Asics Gel-Resolution',
+  'Asics Court FF', 'New Balance Coco CG',
+];
+
+function GearPicks({ options, value, onPick }: { options: string[]; value: string; onPick: (v: string) => void }) {
+  return (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pickRow}>
+      {options.map((o) => {
+        const active = value.trim().toLowerCase() === o.toLowerCase();
+        return (
+          <Pressable key={o} onPress={() => onPick(active ? '' : o)} style={[styles.pick, active && styles.pickActive]}>
+            <Text style={[styles.pickText, active && styles.pickTextActive]}>{o}</Text>
+          </Pressable>
+        );
+      })}
+    </ScrollView>
+  );
+}
+
 export function EditProfileScreen({ navigation }: Props) {
   const user = useAuth((s) => s.user);
   const setUser = useAuth((s) => s.setUser);
@@ -22,6 +52,12 @@ export function EditProfileScreen({ navigation }: Props) {
   const [home, setHome] = useState<GeocodeResult | null>(null);
   const [results, setResults] = useState<GeocodeResult[]>([]);
   const [saving, setSaving] = useState(false);
+
+  const eq = user?.equipment ?? {};
+  const [racquet, setRacquet] = useState(eq.racquet ?? '');
+  const [strings, setStrings] = useState(eq.strings ?? '');
+  const [tension, setTension] = useState(eq.string_tension ?? '');
+  const [shoes, setShoes] = useState(eq.shoes ?? '');
 
   const findHome = async () => {
     if (!homeQuery.trim()) return;
@@ -40,6 +76,13 @@ export function EditProfileScreen({ navigation }: Props) {
       const trimmedAvatar = avatarUrl.trim();
       if (trimmedAvatar) body.avatar_url = trimmedAvatar;
       if (home) body.home = { lat: home.lat, lng: home.lng, label: home.label };
+      // Public gear loadout — send the full object so clearing a field persists.
+      body.equipment = {
+        ...(racquet.trim() ? { racquet: racquet.trim() } : {}),
+        ...(strings.trim() ? { strings: strings.trim() } : {}),
+        ...(tension.trim() ? { string_tension: tension.trim() } : {}),
+        ...(shoes.trim() ? { shoes: shoes.trim() } : {}),
+      };
       const { user: updated } = await api.updateProfile(body);
       setUser(updated);
       navigation.goBack();
@@ -93,6 +136,31 @@ export function EditProfileScreen({ navigation }: Props) {
           {home ? <Muted>Home set to {home.city ?? home.label}</Muted> : null}
         </View>
       </Card>
+
+      <Card style={{ gap: spacing.md }}>
+        <View>
+          <Text style={styles.cardTitle}>Equipment</Text>
+          <Muted>Public — other players can see what you play with.</Muted>
+        </View>
+
+        <View style={{ gap: spacing.xs }}>
+          <Field label="Racquet" value={racquet} onChangeText={setRacquet} placeholder="e.g. Babolat Pure Aero" />
+          <GearPicks options={RACQUET_OPTIONS} value={racquet} onPick={setRacquet} />
+        </View>
+
+        <View style={{ gap: spacing.xs }}>
+          <Field label="Strings" value={strings} onChangeText={setStrings} placeholder="e.g. Luxilon ALU Power" />
+          <GearPicks options={STRING_OPTIONS} value={strings} onPick={setStrings} />
+        </View>
+
+        <Field label="String tension" value={tension} onChangeText={setTension} placeholder="e.g. 52 lbs" />
+
+        <View style={{ gap: spacing.xs }}>
+          <Field label="Shoes" value={shoes} onChangeText={setShoes} placeholder="e.g. Nike Vapor Pro" />
+          <GearPicks options={SHOE_OPTIONS} value={shoes} onPick={setShoes} />
+        </View>
+      </Card>
+
       <Button label="Save" onPress={save} loading={saving} disabled={!displayName.trim()} />
     </ScrollView>
   );
@@ -108,4 +176,10 @@ const styles = StyleSheet.create({
   handTextActive: { color: colors.onPrimary, fontWeight: '800' },
   result: { backgroundColor: colors.surfaceAlt, borderRadius: radius.sm, padding: spacing.md, borderWidth: 1, borderColor: colors.border },
   resultText: { color: colors.textDim, fontSize: font.small },
+  cardTitle: { color: colors.text, fontWeight: '800', fontSize: font.h3 },
+  pickRow: { gap: spacing.sm, paddingVertical: 2 },
+  pick: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.pill, backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border },
+  pickActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  pickText: { color: colors.textDim, fontSize: font.small, fontWeight: '600' },
+  pickTextActive: { color: colors.onPrimary, fontWeight: '800' },
 });

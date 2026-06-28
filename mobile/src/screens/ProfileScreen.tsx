@@ -124,6 +124,16 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
   const avgRating =
     ratings.length > 0 ? Math.round(ratings.reduce((s, r) => s + r.rating, 0) / ratings.length) : null;
 
+  // Public gear loadout (what this player uses).
+  const eq = profile.user.equipment ?? {};
+  const gear = [
+    eq.racquet ? { icon: '🎾', label: 'Racquet', value: eq.racquet } : null,
+    eq.strings || eq.string_tension
+      ? { icon: '🧵', label: 'Strings', value: [eq.strings, eq.string_tension].filter(Boolean).join(' · ') }
+      : null,
+    eq.shoes ? { icon: '👟', label: 'Shoes', value: eq.shoes } : null,
+  ].filter(Boolean) as { icon: string; label: string; value: string }[];
+
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.bg }}
@@ -181,6 +191,20 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
           <Text style={styles.miniSub}>×{(streak?.streak_modifier ?? 1).toFixed(1)} court boost</Text>
         </Card>
       </View>
+
+      {/* Gear (public equipment) */}
+      {gear.length > 0 ? (
+        <Card style={{ gap: spacing.sm }}>
+          <SectionTitle>Gear</SectionTitle>
+          {gear.map((g) => (
+            <View key={g.label} style={styles.gearRow}>
+              <Text style={styles.gearIcon}>{g.icon}</Text>
+              <Text style={styles.gearLabel}>{g.label}</Text>
+              <Text style={styles.gearValue} numberOfLines={1}>{g.value}</Text>
+            </View>
+          ))}
+        </Card>
+      ) : null}
 
       {/* Recent form */}
       {analytics && analytics.recent_form.length > 0 ? (
@@ -349,6 +373,10 @@ const styles = StyleSheet.create({
   ratingRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   ratingValue: { color: colors.text, fontWeight: '800', fontSize: font.body, width: 50 },
   ratingSub: { color: colors.textFaint, fontSize: font.tiny, flex: 1 },
+  gearRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  gearIcon: { fontSize: 16, width: 22 },
+  gearLabel: { color: colors.textDim, fontSize: font.small, fontWeight: '700', width: 72 },
+  gearValue: { color: colors.text, fontSize: font.small, fontWeight: '600', flex: 1 },
   territoryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   territoryName: { color: colors.text, fontWeight: '700' },
   territorySub: { color: colors.textDim, fontSize: font.small },
