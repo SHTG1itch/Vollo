@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import MapView, { Marker, Polygon, UrlTile, type Region } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { api } from '../api/client';
@@ -46,8 +46,12 @@ export function MapScreen() {
   const [selected, setSelected] = useState<Territory | null>(null);
   const [locationOff, setLocationOff] = useState(false);
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Remember the last viewport so we can refresh courts when the screen regains
+  // focus (e.g. returning after adding a court) and pass a centre to Add Court.
+  const lastRegion = useRef<Region>(DEFAULT_REGION);
 
   const load = useCallback(async (r: Region) => {
+    lastRegion.current = r;
     const bbox = {
       min_lng: r.longitude - r.longitudeDelta,
       min_lat: r.latitude - r.latitudeDelta,
@@ -55,12 +59,16 @@ export function MapScreen() {
       max_lat: r.latitude + r.latitudeDelta,
     };
     try {
-      const [{ territories: t }, { courts: c }] = await Promise.all([
+      const [{ territories: t }, courtRes] = await Promise.all([
         api.getTerritories(bbox),
-        api.getCourts({ lat: r.latitude, lng: r.longitude, radius_km: 60, limit: 100 }),
+        // Discover real-world OSM courts in view; fall back to the plain nearby
+        // list if discovery is unavailable.
+        api
+          .discoverCourts(bbox)
+          .catch(() => api.getCourts({ lat: r.latitude, lng: r.longitude, radius_km: 60, limit: 100 })),
       ]);
       setTerritories(t);
-      setCourts(c);
+      setCourts(courtRes.courts);
     } catch {
       /* keep current overlays */
     }
@@ -108,6 +116,19 @@ export function MapScreen() {
   useEffect(() => () => {
     if (debounce.current) clearTimeout(debounce.current);
   }, []);
+
+  // Refresh courts/territories when the screen regains focus (e.g. after adding
+  // a court). Skip the very first focus — the mount effect already loaded.
+  const didFocus = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (!didFocus.current) {
+        didFocus.current = true;
+        return;
+      }
+      void load(lastRegion.current);
+    }, [load]),
+  );
 
   const onRegionChange = (r: Region) => {
     if (debounce.current) clearTimeout(debounce.current);
@@ -176,6 +197,23 @@ export function MapScreen() {
           <Text style={styles.bannerText}>📍 Location is off — showing a default area.</Text>
         </View>
       ) : null}
+
+      {/* Add a court at the current map area */}
+      <Pressable
+        style={styles.addCourt}
+        onPress={() =>
+          navigation.navigate('AddCourt', {
+            origin: 'map',
+            lat: lastRegion.current.latitude,
+            lng: lastRegion.current.longitude,
+          })
+        }
+        accessibilityRole="button"
+        accessibilityLabel="Add a court"
+      >
+        <Text style={styles.addCourtIcon}>＋</Text>
+        <Text style={styles.addCourtText}>Court</Text>
+      </Pressable>
 
       {/* Recenter on me */}
       <Pressable
@@ -324,4 +362,19 @@ const styles = StyleSheet.create({
     ...shadow.card,
   },
   recenterIcon: { color: colors.primary, fontSize: 22, fontWeight: '800' },
+  addCourt: {
+    position: 'absolute',
+    right: spacing.lg,
+    bottom: 150,
+    paddingHorizontal: spacing.md,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.primary,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    ...shadow.card,
+  },
+  addCourtIcon: { color: colors.onPrimary, fontSize: 20, fontWeight: '900' },
+  addCourtText: { color: colors.onPrimary, fontSize: font.small, fontWeight: '800' },
 });
