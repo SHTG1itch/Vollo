@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import MapView, { Marker, Polygon, UrlTile, type Region } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -23,6 +23,42 @@ const DEFAULT_REGION: Region = {
   longitudeDelta: 0.15,
 };
 
+// Past this zoom-out the map would have to draw hundreds of pins (every pin is a
+// native view) — slow and a known crash vector. Above it we hide court pins and
+// show a "zoom in" hint; territories still render.
+const MAX_COURT_DELTA = 0.4;
+// Hard cap on simultaneously-rendered pins. Courts arrive ordered by court_count
+// (biggest facilities first) so the cap keeps the most significant ones.
+const MAX_MARKERS = 150;
+
+/**
+ * A single court pin. Memoised + tracksViewChanges={false} so react-native-maps
+ * stops continuously re-rendering every marker's native view — the single most
+ * important fix for map jank/crashes with many markers.
+ */
+const CourtMarker = React.memo(function CourtMarker({
+  court,
+  onPress,
+}: {
+  court: Court;
+  onPress: (id: string) => void;
+}) {
+  const desc =
+    court.court_count > 1
+      ? `${court.court_count} courts${court.city ? ` · ${court.city}` : ''}`
+      : court.city ?? undefined;
+  return (
+    <Marker
+      coordinate={{ latitude: court.lat, longitude: court.lng }}
+      title={court.name}
+      description={desc}
+      pinColor={surfaceColors[court.surface]}
+      tracksViewChanges={false}
+      onCalloutPress={() => onPress(court.id)}
+    />
+  );
+});
+
 /** Deterministic colour per owner so rival territories are distinguishable. */
 function ownerColor(userId: string, self: boolean): { fill: string; stroke: string } {
   if (self) return { fill: TERRITORY_FILL, stroke: TERRITORY_STROKE };
@@ -45,6 +81,8 @@ export function MapScreen() {
   const [courts, setCourts] = useState<Court[]>([]);
   const [selected, setSelected] = useState<Territory | null>(null);
   const [locationOff, setLocationOff] = useState(false);
+  // Drives the zoom gate: true only when zoomed in enough to render court pins.
+  const [zoomedIn, setZoomedIn] = useState(true);
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Remember the last viewport so we can refresh courts when the screen regains
   // focus (e.g. returning after adding a court) and pass a centre to Add Court.
@@ -55,6 +93,7 @@ export function MapScreen() {
 
   const load = useCallback(async (r: Region) => {
     lastRegion.current = r;
+    setZoomedIn(r.latitudeDelta <= MAX_COURT_DELTA);
     const seq = ++loadSeq.current;
     const bbox = {
       min_lng: r.longitude - r.longitudeDelta,
@@ -62,14 +101,14 @@ export function MapScreen() {
       max_lng: r.longitude + r.longitudeDelta,
       max_lat: r.latitude + r.latitudeDelta,
     };
+    // 1) Instant paint: territories + courts straight from the DB (no Overpass),
+    //    so markers appear immediately and panning never waits on the network.
     try {
       const [{ territories: terr }, courtRes] = await Promise.all([
         api.getTerritories(bbox),
-        // Discover real-world OSM courts in view; fall back to the plain nearby
-        // list if discovery is unavailable.
         api
-          .discoverCourts(bbox)
-          .catch(() => api.getCourts({ lat: r.latitude, lng: r.longitude, radius_km: 60, limit: 100 })),
+          .discoverCourts(bbox, { discover: false })
+          .catch(() => api.getCourts({ lat: r.latitude, lng: r.longitude, radius_km: 60, limit: MAX_MARKERS })),
       ]);
       if (seq !== loadSeq.current) return; // a newer load already won
       setTerritories(terr);
@@ -77,6 +116,17 @@ export function MapScreen() {
     } catch {
       /* keep current overlays */
     }
+
+    // 2) Background: pull any new real-world courts from OpenStreetMap. This is
+    //    the slow call (Overpass), so it runs AFTER paint and only swaps markers
+    //    in if it actually found more — the visible map is never blocked by it.
+    void api
+      .discoverCourts(bbox, { discover: true })
+      .then((res) => {
+        if (seq !== loadSeq.current) return;
+        setCourts((prev) => (res.courts.length > prev.length ? res.courts : prev));
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -136,9 +186,20 @@ export function MapScreen() {
   );
 
   const onRegionChange = (r: Region) => {
+    // Toggle the zoom gate promptly (cheap) even before the debounced load runs.
+    setZoomedIn(r.latitudeDelta <= MAX_COURT_DELTA);
     if (debounce.current) clearTimeout(debounce.current);
     debounce.current = setTimeout(() => void load(r), 600);
   };
+
+  const openCourt = useCallback((id: string) => navigation.navigate('Court', { courtId: id }), [navigation]);
+
+  // Only render pins when zoomed in, capped so a dense metro can't flood the map
+  // with native views.
+  const visibleCourts = useMemo(
+    () => (zoomedIn ? courts.slice(0, MAX_MARKERS) : []),
+    [courts, zoomedIn],
+  );
 
   return (
     <View style={styles.container}>
@@ -169,17 +230,17 @@ export function MapScreen() {
           );
         })}
 
-        {courts.map((court) => (
-          <Marker
-            key={court.id}
-            coordinate={{ latitude: court.lat, longitude: court.lng }}
-            title={court.name}
-            description={court.city ?? undefined}
-            pinColor={surfaceColors[court.surface]}
-            onCalloutPress={() => navigation.navigate('Court', { courtId: court.id })}
-          />
+        {visibleCourts.map((court) => (
+          <CourtMarker key={court.id} court={court} onPress={openCourt} />
         ))}
       </MapView>
+
+      {/* Zoomed too far out to show pins without choking the map */}
+      {!zoomedIn && !locationOff ? (
+        <View style={[styles.banner, { top: insets.top + 52 }]} pointerEvents="none">
+          <Text style={styles.bannerText}>🔍 Zoom in to see courts</Text>
+        </View>
+      ) : null}
 
       {/* Title + add-court control */}
       <View style={[styles.topBar, { top: insets.top + spacing.sm }]} pointerEvents="box-none">

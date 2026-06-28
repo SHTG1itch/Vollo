@@ -36,14 +36,17 @@ export function CourtsScreen() {
         if (t === token.current) setCourts(c);
       } else if (coords.current) {
         const { lat, lng } = coords.current;
-        const d = 0.3; // ~33 km half-span around the user
-        // Import real-world OSM courts near the user (best-effort), then list the
-        // nearby set distance-sorted so the closest courts surface first.
-        await api
-          .discoverCourts({ min_lng: lng - d, min_lat: lat - d, max_lng: lng + d, max_lat: lat + d })
-          .catch(() => undefined);
+        // List straight from the DB (kept well-populated by the map) so the
+        // screen is instant; never block on Overpass.
         const { courts: c } = await api.getCourts({ lat, lng, radius_km: 50, limit: 50 });
         if (t === token.current) setCourts(c);
+        // Then pull any new real-world courts in the background and refresh once.
+        const d = 0.15; // ~16 km half-span keeps the import fast
+        void api
+          .discoverCourts({ min_lng: lng - d, min_lat: lat - d, max_lng: lng + d, max_lat: lat + d }, { discover: true })
+          .then(() => api.getCourts({ lat, lng, radius_km: 50, limit: 50 }))
+          .then(({ courts: c2 }) => { if (t === token.current) setCourts(c2); })
+          .catch(() => undefined);
       } else {
         const { courts: c } = await api.getCourts({ limit: 50 });
         if (t === token.current) setCourts(c);

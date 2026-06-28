@@ -164,10 +164,18 @@ export const api = {
   // ── Courts ──
   getCourts: (params: { lat?: number; lng?: number; radius_km?: number; q?: string; limit?: number }) =>
     request<{ courts: Court[] }>(`/courts${qs(params)}`),
-  // Imports real-world tennis courts from OpenStreetMap within the viewport and
-  // returns every court (imported + user-added) inside it.
-  discoverCourts: (bbox: { min_lng: number; min_lat: number; max_lng: number; max_lat: number }) =>
-    request<{ courts: Court[] }>(`/courts/discover${qs(bbox)}`),
+  // Returns every court (OSM-imported + user-added) inside the viewport.
+  // `discover: false` is the instant first paint — it skips the slow Overpass
+  // import and just reads the DB, so the map never blocks on the network. The
+  // caller then re-runs with discover: true in the background to pull in new
+  // real-world courts.
+  discoverCourts: (
+    bbox: { min_lng: number; min_lat: number; max_lng: number; max_lat: number },
+    opts: { discover?: boolean } = {},
+  ) =>
+    request<{ courts: Court[] }>(
+      `/courts/discover${qs({ ...bbox, import: opts.discover === false ? 0 : 1 })}`,
+    ),
   reverseGeocode: (lat: number, lng: number) =>
     request<{ result: ReverseGeocodeResult | null }>(`/courts/reverse-geocode${qs({ lat, lng })}`),
   getCourt: (id: string) =>
@@ -176,7 +184,7 @@ export const api = {
     ),
   getCourtLeaderboard: (id: string) =>
     request<{ leaderboard: LeaderboardEntry[] }>(`/courts/${id}/leaderboard`),
-  createCourt: (body: { name: string; surface: Surface; lat: number; lng: number; city?: string; address?: string; description?: string }) =>
+  createCourt: (body: { name: string; surface: Surface; lat: number; lng: number; city?: string; address?: string; description?: string; court_count?: number }) =>
     request<{ court: Court }>('/courts', { method: 'POST', body: JSON.stringify(body) }),
   geocode: (q: string, limit = 5) => request<{ results: GeocodeResult[] }>(`/courts/geocode${qs({ q, limit })}`),
 

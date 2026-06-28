@@ -86,12 +86,16 @@ export function LogMatchScreen() {
     const here = coords.current;
     try {
       if (here) {
-        const d = 0.3;
-        await api
-          .discoverCourts({ min_lng: here.lng - d, min_lat: here.lat - d, max_lng: here.lng + d, max_lat: here.lat + d })
-          .catch(() => undefined);
+        // Show the nearby DB courts immediately (no Overpass wait)…
         const { courts: nearby } = await api.getCourts({ lat: here.lat, lng: here.lng, radius_km: 50, limit: 30 });
         setCourts(nearby);
+        // …then pull any new real-world courts in the background and refresh.
+        const d = 0.15;
+        void api
+          .discoverCourts({ min_lng: here.lng - d, min_lat: here.lat - d, max_lng: here.lng + d, max_lat: here.lat + d }, { discover: true })
+          .then(() => api.getCourts({ lat: here.lat, lng: here.lng, radius_km: 50, limit: 30 }))
+          .then(({ courts }) => setCourts(courts))
+          .catch(() => undefined);
         return;
       }
     } catch {
