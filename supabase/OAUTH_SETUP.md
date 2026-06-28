@@ -22,6 +22,30 @@ enable the providers in Supabase, and paste the client ids back into the app.
 
 ---
 
+## Live status (Google: set up 2026-06-27)
+
+**Google sign-in is configured and published — only the Android client (SHA-1) is left.**
+
+| Done | Detail |
+| --- | --- |
+| Google Cloud project | **Vollo** (`stable-course-500806-f0`), owner `you@example.com` |
+| OAuth consent screen | App "Vollo", External, **published to Production** (basic scopes → no verification needed) |
+| Web OAuth client | **Vollo Web** — `958415288431-fol1pk22asmc748feuvbo1gkntcegis2.apps.googleusercontent.com`; redirect URI = the Supabase callback |
+| Supabase Google provider | **Enabled** with the Web client id + secret |
+| App config | `expo.extra.googleWebClientId` set in `mobile/app.json` |
+
+**Remaining for Android sign-in to actually work:** create an **Android** OAuth
+client in the Vollo project (package `app.vollo.mobile` + your build's **SHA-1**)
+— see §2d. Without it, `GoogleSignin.signIn()` returns `DEVELOPER_ERROR` on
+Android. The SHA-1 comes from your EAS build keystore (`eas credentials`).
+
+**Apple sign-in is intentionally not set up** — Sign In with Apple requires the
+Apple Developer Program ($99/yr), which conflicts with the $0 constraint. The
+Apple button stays hidden automatically; revisit §3 only if you ever pay for that
+program.
+
+---
+
 ## 1. Supabase dashboard (both providers)
 
 Authentication → **Providers**. Leave **email confirmation ON** (Authentication →
@@ -33,6 +57,10 @@ You'll fill the Google and Apple panels with values produced in steps 2–3.
 ---
 
 ## 2. Google
+
+> **§2a–2c are already done** (see "Live status" above) — the Web client exists,
+> Supabase is configured, and `app.json` is set. The only outstanding piece is the
+> **Android** client in **§2d**. §2a–2c remain here for reference / disaster recovery.
 
 ### 2a. Google Cloud — OAuth consent screen + client ids
 In <https://console.cloud.google.com> → APIs & Services:
@@ -66,9 +94,35 @@ at build time instead of editing `app.json`.)
 
 The Google button appears as soon as `googleWebClientId` is non-empty.
 
+### 2d. Android OAuth client (the remaining step) — needs your SHA-1
+Android sign-in only works if the Vollo project has an **Android** OAuth client
+whose package + SHA-1 match the installed app. To get the SHA-1 from your EAS
+build keystore (free):
+
+```bash
+cd mobile
+npx eas-cli credentials        # Android → Keystore → shows SHA-1 / SHA1 Fingerprint
+# (or `eas build -p android --profile development` once, then re-run credentials)
+```
+
+Then in Google Cloud → **Vollo** project → **Clients → Create OAuth client**:
+- Application type: **Android**
+- Package name: `app.vollo.mobile`
+- SHA-1 certificate fingerprint: *(paste the value from above)*
+
+No app.json change is needed for Android — the runtime uses `googleWebClientId`
+as the token audience; the Android client just has to exist so Google trusts the
+calling app. (If you build multiple variants — dev/preview/production — add each
+variant's SHA-1, since they can use different keystores.)
+
 ---
 
-## 3. Apple (iOS)
+## 3. Apple (iOS) — deferred (not free)
+
+> Skipped under the $0 constraint: Sign In with Apple requires the **Apple
+> Developer Program ($99/yr)**. The Apple button stays hidden until both a native
+> iOS build and the steps below exist. Do this only if you later pay for that
+> program.
 
 Requires a paid **Apple Developer** account. For **native iOS** the minimum is:
 
