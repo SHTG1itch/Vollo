@@ -53,6 +53,11 @@ export const createMatchSchema = z
     scheduled_match_id: z.string().uuid().optional(),
     surface: surfaceSchema,
     score_array: scoreArraySchema,
+    // Optional short headline for the match, shown on the feed card.
+    title: z.string().trim().max(80).optional(),
+    // A single proof-of-play photo (the scoreboard, the court). Public URL the
+    // client uploaded to Storage; the edge function only persists the string.
+    photo_url: z.string().trim().url().max(500).optional(),
     rpe_index: z.number().int().min(1).max(10).optional(),
     duration_minutes: z.number().int().min(1).max(600).optional(),
     notes: z.string().trim().max(500).optional(),
@@ -168,6 +173,7 @@ export const updateProfileSchema = z.object({
   display_name: z.string().trim().min(1).max(60).optional(),
   bio: z.string().trim().max(280).optional(),
   avatar_url: z.string().trim().url().max(500).optional(),
+  cover_url: z.string().trim().url().max(500).optional(),
   dominant_hand: z.enum(['right', 'left']).optional(),
   // Signature colour as #RRGGBB. Empty string clears it back to "unset" so the
   // client can reset to the default hashed hue.
