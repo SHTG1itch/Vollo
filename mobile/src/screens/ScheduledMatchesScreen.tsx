@@ -127,9 +127,10 @@ export function ScheduledMatchesScreen() {
             <View style={styles.row}>
               <Avatar name={other.name} uri={s.viewer_role === 'creator' ? s.opponent_avatar_url : s.creator_avatar_url} size={44} />
               <View style={{ flex: 1 }}>
-                <Text style={styles.name}>{other.name}</Text>
+                <Text style={styles.name}>{s.is_challenge ? '⚔️ ' : ''}{other.name}</Text>
                 <Text style={styles.when}>{formatSchedule(s.scheduled_at)}</Text>
                 <View style={styles.metaRow}>
+                  {s.is_challenge ? <Text style={styles.challengeTag}>CHALLENGE</Text> : null}
                   {s.surface ? <SurfaceBadge surface={s.surface} small /> : null}
                   {s.court_name ? <Text style={styles.court}>📍 {s.court_name}</Text> : null}
                 </View>
@@ -185,6 +186,7 @@ const styles = StyleSheet.create({
   when: { color: colors.primary, fontFamily: fonts.bold, fontSize: font.small, marginTop: 2 },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: 4 },
   court: { color: colors.textDim, fontSize: font.tiny },
+  challengeTag: { color: colors.loss, fontSize: font.tiny, fontFamily: fonts.bold, letterSpacing: 0.5 },
   statusPill: { borderWidth: 1, borderRadius: radius.pill, paddingHorizontal: spacing.sm, paddingVertical: 3 },
   statusText: { fontSize: font.tiny, fontFamily: fonts.bold },
   note: { color: colors.textDim, fontSize: font.small, fontStyle: 'italic' },

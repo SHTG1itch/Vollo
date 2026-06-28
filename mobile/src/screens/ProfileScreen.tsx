@@ -172,17 +172,32 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
           </View>
         ) : (
           <View style={{ gap: spacing.sm }}>
-            <Button
-              label={following ? 'Following' : 'Follow'}
-              variant={following ? 'secondary' : 'primary'}
-              onPress={toggleFollow}
-              loading={followLoading}
-              disabled={followLoading}
-              style={{ height: 42 }}
-            />
+            <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+              <Button
+                label={following ? 'Following' : 'Follow'}
+                variant={following ? 'secondary' : 'primary'}
+                onPress={toggleFollow}
+                loading={followLoading}
+                disabled={followLoading}
+                style={{ flex: 1, height: 42 }}
+              />
+              <Button
+                label="⚔️ Challenge"
+                variant="primary"
+                onPress={() =>
+                  navigation.navigate('ScheduleMatch', {
+                    opponentId: profile.user.id,
+                    opponentName: profile.user.display_name,
+                    opponentUsername: profile.user.username,
+                    challenge: true,
+                  })
+                }
+                style={{ flex: 1, height: 42 }}
+              />
+            </View>
             <Button
               label="📅 Schedule a match"
-              variant="secondary"
+              variant="ghost"
               onPress={() =>
                 navigation.navigate('ScheduleMatch', {
                   opponentId: profile.user.id,

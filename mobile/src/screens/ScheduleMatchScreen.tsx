@@ -40,6 +40,8 @@ export function ScheduleMatchScreen({ navigation, route }: Props) {
   const presetOpponentId = route.params?.opponentId;
   const presetOpponentName = route.params?.opponentName ?? '';
   const presetUsername = route.params?.opponentUsername;
+  // A challenge only makes sense against a registered Vollo player.
+  const isChallenge = !!route.params?.challenge && !!presetOpponentId;
 
   const [opponentName, setOpponentName] = useState(presetOpponentName);
   const [dayOffset, setDayOffset] = useState(0);
@@ -82,10 +84,15 @@ export function ScheduleMatchScreen({ navigation, route }: Props) {
         ...(surface ? { surface } : {}),
         scheduled_at: scheduledAt.toISOString(),
         ...(note.trim() ? { note: note.trim() } : {}),
+        ...(isChallenge ? { is_challenge: true } : {}),
       });
       Alert.alert(
-        'Match proposed',
-        presetOpponentId ? 'They’ll get a notification to accept or decline.' : 'Added to your scheduled matches.',
+        isChallenge ? 'Challenge sent ⚔️' : 'Match proposed',
+        isChallenge
+          ? 'They’ll get a notification to accept your challenge.'
+          : presetOpponentId
+            ? 'They’ll get a notification to accept or decline.'
+            : 'Added to your scheduled matches.',
         [{ text: 'OK', onPress: () => navigation.goBack() }],
       );
     } catch (e) {
@@ -101,7 +108,7 @@ export function ScheduleMatchScreen({ navigation, route }: Props) {
       contentContainerStyle={[styles.content, { paddingTop: insets.top + spacing.lg }]}
       keyboardShouldPersistTaps="handled"
     >
-      <Text style={styles.title}>Schedule a match</Text>
+      <Text style={styles.title}>{isChallenge ? `Challenge ${presetUsername ? `@${presetUsername}` : presetOpponentName}` : 'Schedule a match'}</Text>
 
       {/* Opponent */}
       <Card style={{ gap: spacing.sm }}>
@@ -176,7 +183,7 @@ export function ScheduleMatchScreen({ navigation, route }: Props) {
         <Field value={note} onChangeText={setNote} placeholder="e.g. Best of 3, bring new balls" multiline style={{ height: 70, paddingTop: spacing.sm }} />
       </Card>
 
-      <Button label={`Propose · ${dayLabel(dayOffset, base)} ${hourLabel(hour)}`} onPress={submit} loading={saving} disabled={!hasOpponent || inPast} />
+      <Button label={`${isChallenge ? '⚔️ Send challenge' : 'Propose'} · ${dayLabel(dayOffset, base)} ${hourLabel(hour)}`} onPress={submit} loading={saving} disabled={!hasOpponent || inPast} />
       <View style={{ height: spacing.xxl }} />
     </ScrollView>
   );

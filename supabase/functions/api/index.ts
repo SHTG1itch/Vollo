@@ -759,7 +759,7 @@ app.post('/api/matches/:id/comments', requireAuth, async (c) => {
 // ─── Scheduled matches ───────────────────────────────────────────────────
 const SCHEDULED_SELECT = `
   SELECT s.id, s.creator_id, s.opponent_id, s.opponent_name, s.court_id, s.surface,
-         s.scheduled_at, s.note, s.status, s.match_id, s.created_at,
+         s.scheduled_at, s.note, s.status, s.is_challenge, s.match_id, s.created_at,
          cu.username AS creator_username, cu.display_name AS creator_display_name, cu.avatar_url AS creator_avatar_url,
          ou.username AS opponent_username, ou.display_name AS opponent_display_name, ou.avatar_url AS opponent_avatar_url,
          c.name AS court_name,
@@ -790,23 +790,27 @@ app.post('/api/scheduled-matches', requireAuth, async (c) => {
   if (b.opponent_id === userId) throw ApiError.badRequest('You cannot schedule a match against yourself');
 
   // A proposal to a Vollo player needs their acceptance; an off-app opponent is
-  // just a personal plan, so it starts accepted.
+  // just a personal plan, so it starts accepted. A challenge only makes sense
+  // against a registered player.
   const status = b.opponent_id ? 'proposed' : 'accepted';
+  const isChallenge = !!b.is_challenge && !!b.opponent_id;
   const inserted = await queryOne<{ id: string }>(
-    `INSERT INTO scheduled_matches (creator_id, opponent_id, opponent_name, court_id, surface, scheduled_at, note, status)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-    [userId, b.opponent_id ?? null, b.opponent_id ? null : b.opponent_name ?? null, b.court_id ?? null, b.surface ?? null, b.scheduled_at, b.note ?? null, status],
+    `INSERT INTO scheduled_matches (creator_id, opponent_id, opponent_name, court_id, surface, scheduled_at, note, status, is_challenge)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+    [userId, b.opponent_id ?? null, b.opponent_id ? null : b.opponent_name ?? null, b.court_id ?? null, b.surface ?? null, b.scheduled_at, b.note ?? null, status, isChallenge],
   );
   const card = await fetchScheduledMatch(inserted!.id, userId);
 
   if (b.opponent_id) {
     await notify({
       userId: b.opponent_id,
-      type: 'match_scheduled',
-      title: '📅 Match proposed',
-      body: `${c.get('user')!.username} wants to play you. Tap to respond.`,
+      type: isChallenge ? 'challenge' : 'match_scheduled',
+      title: isChallenge ? '⚔️ You’ve been challenged' : '📅 Match proposed',
+      body: isChallenge
+        ? `${c.get('user')!.username} challenged you to a match. Accept to lock it in.`
+        : `${c.get('user')!.username} wants to play you. Tap to respond.`,
       data: { scheduledMatchId: inserted!.id },
-      push: false,
+      push: isChallenge,
     }).catch(() => {});
   }
   return c.json({ scheduled_match: card }, 201);

@@ -152,6 +152,8 @@ export interface CreateScheduledMatchPayload {
   surface?: Surface;
   scheduled_at: string;
   note?: string;
+  /** Frame the proposal as a competitive challenge (combative copy + push). */
+  is_challenge?: boolean;
 }
 
 export const api = {

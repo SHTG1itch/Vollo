@@ -234,6 +234,8 @@ export interface ScheduledMatchCard {
   scheduled_at: string;
   note: string | null;
   status: ScheduleStatus;
+  /** True when framed as a competitive challenge rather than a plain plan. */
+  is_challenge: boolean;
   match_id: string | null;
   /** Score of the linked, played match (logger's games first) — shown to both. */
   result_score: ScoreArray | null;
