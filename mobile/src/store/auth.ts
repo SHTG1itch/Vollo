@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { ApiError, api, setAuthToken, setUnauthorizedHandler } from '../api/client';
 import { supabase } from '../lib/supabase';
+import { getAppleCredential, getGoogleIdToken, OAuthCancelled } from '../lib/oauth';
 import { useFeed } from './feed';
 import { useNotifications } from './notifications';
 import type { User } from '../types';
@@ -12,6 +13,11 @@ interface AuthState {
   token: string | null;
   hydrated: boolean;
   login: (identifier: string, password: string) => Promise<void>;
+  /** Native Google / Apple sign-in. Both exchange a provider ID token for a
+   *  Supabase session, which flows back through onAuthStateChange like any other
+   *  login. A user-cancelled sheet resolves quietly (no error). */
+  signInWithGoogle: () => Promise<void>;
+  signInWithApple: () => Promise<void>;
   /** Resolves to `needsConfirmation: true` when sign-up created the account but
    *  email confirmation is required before a session exists. */
   register: (body: { username: string; email: string; password: string; display_name: string }) => Promise<{ needsConfirmation: boolean }>;
@@ -36,6 +42,50 @@ export const useAuth = create<AuthState>()((set, get) => ({
       refresh_token: session.refresh_token,
     });
     if (error) throw new Error(error.message);
+  },
+
+  // Native ID-token sign-in. signInWithIdToken establishes the session, then the
+  // onAuthStateChange bridge below installs the token and runs refreshMe — the
+  // same path password login takes, so nothing else changes.
+  signInWithGoogle: async () => {
+    let idToken: string;
+    try {
+      idToken = await getGoogleIdToken();
+    } catch (e) {
+      if (e instanceof OAuthCancelled) return; // user backed out — no-op
+      throw e;
+    }
+    const { error } = await supabase.auth.signInWithIdToken({ provider: 'google', token: idToken });
+    if (error) throw new Error(error.message);
+  },
+
+  signInWithApple: async () => {
+    let credential;
+    try {
+      credential = await getAppleCredential();
+    } catch (e) {
+      if (e instanceof OAuthCancelled) return; // user backed out — no-op
+      throw e;
+    }
+    const { error } = await supabase.auth.signInWithIdToken({ provider: 'apple', token: credential.identityToken });
+    if (error) throw new Error(error.message);
+
+    // Apple discloses the user's real name only on the very first authorization,
+    // and never inside the identity token — so if we got one, set it as the
+    // display name, but only while the freshly-provisioned profile still carries
+    // the auto-derived fallback (so we never clobber a name the user has edited).
+    if (credential.fullName) {
+      try {
+        await get().refreshMe();
+        const me = get().user;
+        if (me && (me.display_name === me.username || !me.display_name.trim())) {
+          const { user } = await api.updateProfile({ display_name: credential.fullName });
+          set({ user });
+        }
+      } catch {
+        /* best-effort — the user can always edit their name in-app */
+      }
+    }
   },
 
   register: async ({ username, email, password, display_name }) => {
