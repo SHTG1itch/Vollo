@@ -9,8 +9,14 @@
 --
 -- NOTE: this is a breaking change for any pre-existing accounts created under the
 -- old bcrypt scheme — they have no auth.users row, so they must re-register.
--- For username/password sign-up to log a user in immediately, the project's Auth
--- settings should have email confirmation disabled (or auto-confirm enabled).
+--
+-- Email confirmation: the profile is provisioned only once the auth user's email
+-- is confirmed (or auto-confirmed, when confirmations are disabled). With email
+-- confirmation ON — recommended, to keep bots out — sign-up creates the auth user
+-- but no session; the user clicks the emailed link, which confirms them and fires
+-- this trigger to create their profile. Username login is then proxied
+-- server-side (POST /api/auth/login) so the client never needs, and never sees,
+-- anyone's email.
 -- ════════════════════════════════════════════════════════════════════════
 
 -- Link each profile to its Supabase Auth identity. Nullable + UNIQUE: legacy
@@ -21,9 +27,10 @@ ALTER TABLE public.users
 -- Passwords are Supabase Auth's job now.
 ALTER TABLE public.users DROP COLUMN IF EXISTS password_hash;
 
--- Auto-provision a profile row for every new auth user from the metadata the
--- mobile client passes to supabase.auth.signUp (username, display_name). Runs as
--- SECURITY DEFINER so the auth schema's trigger can write into public.users.
+-- Provision a profile row from the metadata the mobile client passes to
+-- supabase.auth.signUp (username, display_name) — but only once the email is
+-- confirmed, so unconfirmed bot sign-ups never squat a username or create rows.
+-- Runs as SECURITY DEFINER so the auth-schema trigger can write into public.users.
 CREATE OR REPLACE FUNCTION public.handle_new_auth_user()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -37,6 +44,17 @@ DECLARE
   v_user_id  UUID;
   v_suffix   INT := 0;
 BEGIN
+  -- Hold off until the email is confirmed. NEW.email_confirmed_at is set when the
+  -- user clicks the confirmation link (an UPDATE), or is already set at INSERT time
+  -- when confirmations are disabled / the user is auto-confirmed.
+  IF NEW.email_confirmed_at IS NULL THEN
+    RETURN NEW;
+  END IF;
+  -- Idempotent: a later auth.users UPDATE must not create a second profile.
+  IF EXISTS (SELECT 1 FROM public.users WHERE auth_id = NEW.id) THEN
+    RETURN NEW;
+  END IF;
+
   v_username := NULLIF(trim(NEW.raw_user_meta_data ->> 'username'), '');
   v_display  := NULLIF(trim(NEW.raw_user_meta_data ->> 'display_name'), '');
   -- Fall back to a stable handle derived from the auth id so the NOT NULL
@@ -69,7 +87,10 @@ BEGIN
 END;
 $$;
 
+-- Fire on insert (covers the auto-confirm case) and when email_confirmed_at flips
+-- on confirmation. The function itself guards against running before confirmation
+-- or running twice.
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
-  AFTER INSERT ON auth.users
+  AFTER INSERT OR UPDATE OF email_confirmed_at ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_auth_user();

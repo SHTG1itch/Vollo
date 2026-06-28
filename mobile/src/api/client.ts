@@ -135,6 +135,16 @@ export interface CreateMatchPayload {
   stats?: Partial<MatchCard['stats']>;
 }
 
+/** Session returned by the server-side sign-in proxy; fed straight into
+ *  supabase.auth.setSession so the client owns the refreshable session. */
+export interface SessionTokens {
+  access_token: string;
+  refresh_token: string;
+  expires_at?: number;
+  expires_in?: number;
+  token_type?: string;
+}
+
 export interface CreateScheduledMatchPayload {
   opponent_id?: string;
   opponent_name?: string;
@@ -146,9 +156,17 @@ export interface CreateScheduledMatchPayload {
 
 export const api = {
   // ── Auth ──
-  // Registration/login happen client-side via Supabase Auth (see store/auth.ts).
-  // This only turns a typed username into the email Supabase Auth signs in with.
-  resolveEmail: (username: string) => request<{ email: string }>(`/auth/resolve-email${qs({ username })}`),
+  // Sign-up runs client-side via Supabase Auth (see store/auth.ts); sign-in is
+  // proxied server-side so a username resolves to a session without the email
+  // ever reaching the client. `checkUsername` powers the sign-up "handle taken"
+  // check and discloses no email.
+  login: (identifier: string, password: string) =>
+    request<{ session: SessionTokens }>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ identifier, password }),
+    }),
+  checkUsername: (username: string) =>
+    request<{ available: boolean }>(`/auth/username-available${qs({ username })}`),
   me: () => request<{ user: AuthResponse['user'] }>('/auth/me'),
 
   // ── Feed ──

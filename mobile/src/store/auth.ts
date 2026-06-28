@@ -12,7 +12,10 @@ interface AuthState {
   token: string | null;
   hydrated: boolean;
   login: (identifier: string, password: string) => Promise<void>;
-  register: (body: { username: string; email: string; password: string; display_name: string }) => Promise<void>;
+  /** Resolves to `needsConfirmation: true` when sign-up created the account but
+   *  email confirmation is required before a session exists. */
+  register: (body: { username: string; email: string; password: string; display_name: string }) => Promise<{ needsConfirmation: boolean }>;
+  resendConfirmation: (email: string) => Promise<void>;
   logout: () => Promise<void>;
   setUser: (user: User) => void;
   refreshMe: () => Promise<void>;
@@ -23,41 +26,46 @@ export const useAuth = create<AuthState>()((set, get) => ({
   token: null,
   hydrated: false,
 
-  // Supabase Auth signs in with an email, so resolve a typed username to its
-  // email first (an address is used as-is). The session token then flows back
-  // through onAuthStateChange.
+  // Sign-in is proxied server-side so a typed username never has to be turned
+  // into an email on the client. The proxy returns the session, which we install
+  // locally; the token then flows back through onAuthStateChange.
   login: async (identifier, password) => {
-    const id = identifier.trim();
-    const email = id.includes('@') ? id : (await api.resolveEmail(id)).email;
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { session } = await api.login(identifier.trim(), password);
+    const { error } = await supabase.auth.setSession({
+      access_token: session.access_token,
+      refresh_token: session.refresh_token,
+    });
     if (error) throw new Error(error.message);
   },
 
   register: async ({ username, email, password, display_name }) => {
-    // Catch a taken username up front: a collision would otherwise fail opaquely
-    // inside the profile-provisioning DB trigger. A 404 means it's free.
-    let taken = false;
+    // Catch a taken username up front: a collision would otherwise be silently
+    // suffixed by the profile-provisioning DB trigger (you'd get "srivats1").
     try {
-      await api.resolveEmail(username);
-      taken = true;
+      const { available } = await api.checkUsername(username);
+      if (!available) throw new Error('That username is already taken.');
     } catch (e) {
-      if (e instanceof ApiError && e.status !== 404) {
-        // Transient lookup failure — don't block; let sign-up surface any issue.
-      }
+      // A real "taken" verdict propagates; a transient lookup failure doesn't
+      // block sign-up (the trigger still dedupes as a backstop).
+      if (e instanceof Error && !(e instanceof ApiError)) throw e;
     }
-    if (taken) throw new Error('That username is already taken.');
 
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      // Read by the AFTER INSERT trigger to provision the public.users profile.
+      // Read by the profile-provisioning trigger once the email is confirmed.
       options: { data: { username, display_name } },
     });
     if (error) throw new Error(error.message);
-    if (!data.session) {
-      // Email confirmation is enabled on the project — no session yet.
-      throw new Error('Account created — check your email to confirm, then sign in.');
-    }
+    // With email confirmation on there's no session yet — the caller shows a
+    // "check your inbox" state. With it off, signUp returns a session and the
+    // onAuthStateChange bridge logs the user straight in.
+    return { needsConfirmation: !data.session };
+  },
+
+  resendConfirmation: async (email) => {
+    const { error } = await supabase.auth.resend({ type: 'signup', email: email.trim() });
+    if (error) throw new Error(error.message);
   },
 
   logout: async () => {

@@ -2,6 +2,15 @@ import { z } from 'zod';
 
 export const surfaceSchema = z.enum(['hard', 'clay', 'grass', 'indoor']);
 
+// Server-side sign-in proxy: the client posts a username (or email) + password and
+// we resolve the email internally, so the email never travels back to the client.
+// Kept lenient on the identifier (could be either) and matched to Supabase Auth's
+// 72-char password ceiling.
+export const loginSchema = z.object({
+  identifier: z.string().trim().min(1).max(255),
+  password: z.string().min(1).max(72),
+});
+
 const setSchema = z.tuple([z.number().int().min(0).max(99), z.number().int().min(0).max(99)]);
 export const scoreArraySchema = z.array(setSchema).min(1).max(5);
 

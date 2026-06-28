@@ -13,13 +13,13 @@ import { cors } from 'hono/cors';
 import { ZodError } from 'zod';
 
 import { query, queryOne, withTransaction, getSecret } from './db.ts';
-import { adminClient } from './supabaseAdmin.ts';
+import { adminClient, authClient } from './supabaseAdmin.ts';
 import { ApiError } from './errors.ts';
 import { mapCourt, mapMatchCard, mapPublicUser, mapScheduledMatch, mapUser, toIso } from './mappers.ts';
 import {
   bboxQuerySchema, commentSchema, commentsQuerySchema, courtsQuerySchema,
   createCourtSchema, createMatchSchema, createScheduledMatchSchema, discoverQuerySchema, feedQuerySchema,
-  geocodeQuerySchema, notificationIdsSchema, pushTokenSchema,
+  geocodeQuerySchema, loginSchema, notificationIdsSchema, pushTokenSchema,
   reverseGeocodeQuerySchema, updateProfileSchema, updateScheduledMatchSchema, userSearchQuerySchema,
 } from './validation.ts';
 import type { CreateMatchInput } from './validation.ts';
@@ -131,8 +131,10 @@ function makeLimiter(windowMs: number, max: number) {
     return b.count <= max;
   };
 }
-// Light limit on username→email resolution (an enumeration surface), keyed per IP.
-const resolveLimiter = makeLimiter(60_000, 30);
+// Username-availability checks are an enumeration surface, so keep them lightly
+// limited per IP. Sign-in is a credential-testing surface — limit it more tightly.
+const usernameLimiter = makeLimiter(60_000, 30);
+const loginLimiter = makeLimiter(60_000, 15);
 const geocodeLimiterFn = makeLimiter(60_000, 30);
 // Discovery fans out to the free Overpass API + writes courts, so it gets its
 // own limiter (in addition to requiring auth) to protect the shared egress IP
@@ -221,17 +223,64 @@ app.get('/api', (c) => c.json({ name: 'Vollo API', status: 'ok', runtime: 'supab
 app.get('/api/health', (c) => c.json({ status: 'ok' }));
 
 // ─── Auth ────────────────────────────────────────────────────────────────
-// Registration and login now happen client-side against Supabase Auth (the
-// mobile app calls supabase.auth.signUp / signInWithPassword directly). This
-// route only lets the client turn a typed username into the email Supabase Auth
-// needs to sign in. Rate-limited; returns 404 for unknown usernames.
-app.get('/api/auth/resolve-email', async (c) => {
-  if (!resolveLimiter(clientIp(c))) throw ApiError.tooManyRequests('Too many lookups, please try again shortly');
+// Sign-up happens client-side against Supabase Auth (the mobile app calls
+// supabase.auth.signUp directly — the user supplies their own email, so nothing
+// is disclosed). Sign-in is proxied here so a username can be turned into a
+// session without the client ever seeing anyone's email.
+
+// Username availability for the sign-up form. Reveals only whether a handle is
+// taken (unavoidable for "username already in use" UX) — never an email.
+app.get('/api/auth/username-available', async (c) => {
+  if (!usernameLimiter(clientIp(c))) throw ApiError.tooManyRequests('Too many lookups, please try again shortly');
   const username = (c.req.query('username') ?? '').trim();
   if (!username || username.length > 60) throw ApiError.badRequest('username is required');
-  const row = await queryOne<{ email: string }>('SELECT email FROM users WHERE username = $1', [username]);
-  if (!row) throw ApiError.notFound('No account with that username');
-  return c.json({ email: row.email });
+  const row = await queryOne<{ taken: boolean }>(
+    'SELECT EXISTS(SELECT 1 FROM users WHERE lower(username) = lower($1)) AS taken',
+    [username],
+  );
+  return c.json({ available: !row?.taken });
+});
+
+// Server-side sign-in proxy. The client sends a username (or email) + password;
+// we resolve the email internally and complete the password grant with the
+// anon-key client, returning the session tokens. The email is never sent back,
+// and "no such account" and "wrong password" fail identically so the endpoint
+// can't be used to enumerate accounts.
+app.post('/api/auth/login', async (c) => {
+  if (!loginLimiter(clientIp(c))) throw ApiError.tooManyRequests('Too many sign-in attempts, please try again shortly');
+  const { identifier, password } = loginSchema.parse(await jsonBody(c));
+
+  let email: string | null = identifier.includes('@') ? identifier : null;
+  if (!email) {
+    const row = await queryOne<{ email: string }>('SELECT email FROM users WHERE lower(username) = lower($1)', [identifier]);
+    email = row?.email ?? null;
+  }
+  const invalid = () => new ApiError(401, 'invalid_credentials', 'Invalid username or password');
+  if (!email) throw invalid();
+
+  const { data, error } = await authClient.auth.signInWithPassword({ email, password });
+  if (error) {
+    // Unconfirmed email is a distinct, actionable state — surface it so the app
+    // can tell the user to check their inbox. Everything else collapses to the
+    // generic invalid-credentials message.
+    const code = (error as { code?: string }).code;
+    if (code === 'email_not_confirmed') {
+      throw new ApiError(403, 'email_not_confirmed', 'Please confirm your email before signing in — check your inbox.');
+    }
+    throw invalid();
+  }
+  if (!data.session) throw invalid();
+
+  const s = data.session;
+  return c.json({
+    session: {
+      access_token: s.access_token,
+      refresh_token: s.refresh_token,
+      expires_at: s.expires_at,
+      expires_in: s.expires_in,
+      token_type: s.token_type,
+    },
+  });
 });
 
 app.get('/api/auth/me', requireAuth, async (c) => {

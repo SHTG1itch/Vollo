@@ -67,15 +67,24 @@ matching the routes. So the mobile base URL is
 
 ### Auth (Supabase Auth)
 
-Sign-up/sign-in happen client-side via the Supabase JS SDK; the function never
-sees a password. The only auth route it serves is
-`GET /api/auth/resolve-email?username=` (rate-limited), which lets the app turn a
-typed username into the email Supabase Auth signs in with. Migration `012` adds
-`users.auth_id`, drops `password_hash`, and installs an `AFTER INSERT ON
-auth.users` trigger that provisions the profile row from the sign-up metadata
-(`username`, `display_name`). **For sign-up to log a user in immediately, disable
-email confirmation in the project's Auth settings** (otherwise there's no session
-until the user confirms).
+Sign-up happens client-side via the Supabase JS SDK (the user supplies their own
+email); **sign-in is proxied server-side** so the client never needs — and never
+sees — anyone's email:
+
+- `POST /api/auth/login` — body `{ identifier, password }`. The function resolves
+  a username (or email) to its email internally, completes the password grant with
+  the anon-key client, and returns the session tokens; the client installs them
+  with `supabase.auth.setSession`. "No such account" and "wrong password" fail
+  identically (no enumeration); an unconfirmed email returns `403 email_not_confirmed`.
+- `GET /api/auth/username-available?username=` — sign-up "handle taken" check;
+  discloses only availability, never an email.
+
+Both are rate-limited per IP. Migration `012` adds `users.auth_id`, drops
+`password_hash`, and installs a trigger on `auth.users` that provisions the profile
+row from the sign-up metadata (`username`, `display_name`) **once the email is
+confirmed** — so unconfirmed bot sign-ups never create rows or squat usernames.
+**Keep email confirmation enabled** in the project's Auth settings (the default)
+to make that protection effective.
 
 ## Status: LIVE
 

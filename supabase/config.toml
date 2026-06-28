@@ -6,7 +6,7 @@ project_id = "pfophuqopwfupxjonsty"
 
 [functions.api]
 # The function validates Supabase Auth bearer tokens itself (adminClient.auth
-# .getUser) and serves several genuinely public routes (feed, resolve-email,
+# .getUser) and serves several genuinely public routes (feed, login proxy,
 # courts/territories reads), which would be 401'd by the platform gate before
 # reaching us — so the platform JWT gate stays disabled.
 verify_jwt = false
