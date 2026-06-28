@@ -20,7 +20,7 @@ stream). Each match feeds three systems:
 1. **A social feed** of "Match Cards" with optimistic tennis-ball **Kudos**, comments and follows.
 2. **Multi-dimensional analytics** — career stats partitioned by surface, a full stat
    matrix (serve %, winners/errors per stroke, rally-length distribution), per-surface
-   **Vollo Rating** (Elo), and a rolling **streak heat index**.
+   **Vollo Rating** (Bayesian/Glicko-style), and a rolling **streak heat index**.
 3. **The Geospatial Domination Engine** — win matches at courts to top their 30-day
    leaderboard; control ≥3 courts within 10 km and PostGIS draws a neon-green
    **concave-hull territory** whose vertices sit on the courts you actually hold.
@@ -163,6 +163,26 @@ On every counting match (and on a 6-hourly sweep) the engine, for each affected 
 A pure-TypeScript mirror of the geometry (haversine, clustering, monotone-chain hull,
 compass district naming) lives in `backend/src/utils/geo.ts` and is fully unit-tested.
 
+### Vollo Rating (Bayesian)
+Each `(player, surface)` skill is a Gaussian posterior `θ ~ N(μ, σ²)`, where μ is
+the rating and σ the **rating deviation** (model uncertainty). Every counting
+match is a Bayesian update layer — Glicko's closed form, where the posterior
+precision is the prior precision **plus** the match's information precision, and
+the posterior mean is the precision-weighted blend of prior and evidence:
+
+```
+1/σ'²  =  1/σ²  +  M · q² · g(σ_opp)² · E·(1−E)          (precision adds)
+μ'     =  μ  +  (1/σ'²) · q · g(σ_opp) · (S − E) · M     (mean update)
+```
+
+`M` is the game-margin multiplier (a blowout is stronger evidence), `S` the
+outcome and `E` the model's expected score. Uncertainty shrinks with evidence, so
+a provisional player's rating moves fast and a seasoned one barely budges. Ratings
+are a pure function of history, recomputed by replaying a player's counting
+matches from the prior (`recomputeUserRatings`), which makes deletion exact with
+no fragile delta-reversal. Only the logging player's posterior updates (the
+verified-match gate keeps that honest).
+
 ---
 
 ## Beyond the spec (added features)
@@ -188,16 +208,20 @@ compass district naming) lives in `backend/src/utils/geo.ts` and is fully unit-t
 - **Tap a zone to see who to beat** — the map's sector card shows the dominant
   player and how many wins they hold there, so you know the bar to claim it.
 - **Fast, crash-free map** — courts paint instantly from the DB while new ones
-  import from OSM in the background; overlays commit on the idle frame, reuse their
-  native views when unchanged, coalesce fast pans/zooms, and cap vertices/markers —
-  so rapid gestures no longer churn (and crash) the native map.
+  import from OSM in the background. All native overlays unmount while you pan/zoom
+  and remount only once the gesture settles (so there's zero native-view churn —
+  the dominant crash vector), overlays commit on the idle frame and reuse their
+  native views when unchanged, sub-threshold pans coalesce, zoom is bounded, and
+  vertices/markers are capped.
 - **Public equipment loadout** — racquet, strings, tension and shoes on every
   profile, so you can see what gear strong players use.
-- **Per-surface Vollo Rating** — Elo with a game-margin multiplier, applied only
-  once a match counts (verified/auto). Only the logging player's rating moves: a
-  unilateral log never mutates a tagged opponent's rating (that would let anyone
-  tank another player's record). The exact delta is stored per match so deleting a
-  match backs it out precisely.
+- **Per-surface Vollo Rating (Bayesian)** — a Gaussian skill posterior N(μ, σ)
+  per surface, updated Bayesianly (Glicko-style) per match: each result is an
+  update layer that adds precision (so a new player's rating moves fast and a
+  seasoned one barely budges), with the game margin weighting the evidence.
+  Applied only once a match counts (verified/auto). Only the logging player's
+  rating moves (no unilateral tanking); ratings are a pure replay of match
+  history, so deleting a match recomputes exactly.
 - **Achievements / badges** — Clay Grinder, Comeback King, Territory Lord, On Fire…
 - **Head-to-head rivalries**, **comments**, **follows**, and a following-only feed.
 - **Playstyle labeling** — "Clay Court Grinder" vs "Hard Court Specialist" from your
