@@ -129,10 +129,12 @@ export function LogMatchScreen() {
       try {
         const { court } = await api.getCourt(newId);
         setCourts((prev) => (prev.some((c) => c.id === court.id) ? prev : [court, ...prev]));
+        // Only select once the court is in the list, so the selection always has
+        // a visible chip (don't ship a court_id with nothing shown as picked).
+        setCourtId(newId);
       } catch {
-        /* ignore — selection still works if it loads via loadCourts */
+        /* couldn't load the new court — leave the selection unchanged */
       }
-      setCourtId(newId);
       // Clear the param so re-focusing the tab doesn't re-select it.
       (navigation.setParams as (p: { newCourtId?: string }) => void)({ newCourtId: undefined });
     })();

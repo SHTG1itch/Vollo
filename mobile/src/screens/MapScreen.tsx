@@ -49,9 +49,13 @@ export function MapScreen() {
   // Remember the last viewport so we can refresh courts when the screen regains
   // focus (e.g. returning after adding a court) and pass a centre to Add Court.
   const lastRegion = useRef<Region>(DEFAULT_REGION);
+  // Drop out-of-order responses: a slow earlier load must not overwrite a newer
+  // viewport's overlays (several callers can be in flight — pan, recenter, focus).
+  const loadSeq = useRef(0);
 
   const load = useCallback(async (r: Region) => {
     lastRegion.current = r;
+    const seq = ++loadSeq.current;
     const bbox = {
       min_lng: r.longitude - r.longitudeDelta,
       min_lat: r.latitude - r.latitudeDelta,
@@ -59,7 +63,7 @@ export function MapScreen() {
       max_lat: r.latitude + r.latitudeDelta,
     };
     try {
-      const [{ territories: t }, courtRes] = await Promise.all([
+      const [{ territories: terr }, courtRes] = await Promise.all([
         api.getTerritories(bbox),
         // Discover real-world OSM courts in view; fall back to the plain nearby
         // list if discovery is unavailable.
@@ -67,7 +71,8 @@ export function MapScreen() {
           .discoverCourts(bbox)
           .catch(() => api.getCourts({ lat: r.latitude, lng: r.longitude, radius_km: 60, limit: 100 })),
       ]);
-      setTerritories(t);
+      if (seq !== loadSeq.current) return; // a newer load already won
+      setTerritories(terr);
       setCourts(courtRes.courts);
     } catch {
       /* keep current overlays */

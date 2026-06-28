@@ -38,8 +38,19 @@ export function AddCourtScreen({ route, navigation }: Props) {
   const [name, setName] = useState('');
   const [surface, setSurface] = useState<Surface>('hard');
   const [addressQuery, setAddressQuery] = useState('');
-  const [busy, setBusy] = useState(false);
+  // Independent flags: the address "Find" and the "Add court" submit are separate
+  // async actions, so one finishing must not re-enable the other mid-flight.
+  const [searching, setSearching] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [locating, setLocating] = useState(false);
+
+  // Render the map at the seeded coordinate immediately (initialRegion is only
+  // honored on first mount), so the centre pin marks the right place even if the
+  // post-mount animateToRegion is dropped (a known Android no-op-on-mount).
+  const seeded = route.params?.lat != null && route.params?.lng != null;
+  const initialRegion: Region = seeded
+    ? { ...DEFAULT_REGION, latitude: route.params!.lat!, longitude: route.params!.lng! }
+    : DEFAULT_REGION;
 
   // Seed the pin: use a passed coordinate, else the user's GPS, else default.
   useEffect(() => {
@@ -86,8 +97,8 @@ export function AddCourtScreen({ route, navigation }: Props) {
   // Optional: jump the map to a typed address so you don't have to pan far.
   const findAddress = async () => {
     const q = addressQuery.trim();
-    if (!q) return;
-    setBusy(true);
+    if (!q || submitting) return;
+    setSearching(true);
     try {
       const { results } = await api.geocode(q, 1);
       const hit = results[0];
@@ -101,7 +112,7 @@ export function AddCourtScreen({ route, navigation }: Props) {
     } catch {
       Alert.alert('Search unavailable', 'Address search is busy — just pan the map to the court.');
     } finally {
-      setBusy(false);
+      setSearching(false);
     }
   };
 
@@ -111,11 +122,11 @@ export function AddCourtScreen({ route, navigation }: Props) {
 
   const submit = async () => {
     const trimmed = name.trim();
-    if (!trimmed) {
-      Alert.alert('Name the court', 'Give the court a name so other players can find it.');
+    if (!trimmed || submitting) {
+      if (!trimmed) Alert.alert('Name the court', 'Give the court a name so other players can find it.');
       return;
     }
-    setBusy(true);
+    setSubmitting(true);
     try {
       // Best-effort reverse geocode for a city/address label — never blocks the add.
       let city: string | undefined;
@@ -148,7 +159,7 @@ export function AddCourtScreen({ route, navigation }: Props) {
     } catch (e) {
       Alert.alert('Could not add court', e instanceof ApiError ? e.message : 'Try again');
     } finally {
-      setBusy(false);
+      setSubmitting(false);
     }
   };
 
@@ -158,7 +169,7 @@ export function AddCourtScreen({ route, navigation }: Props) {
         <MapView
           ref={mapRef}
           style={StyleSheet.absoluteFill}
-          initialRegion={DEFAULT_REGION}
+          initialRegion={initialRegion}
           onRegionChangeComplete={onRegionChangeComplete}
           mapType="none"
           showsUserLocation
@@ -212,10 +223,10 @@ export function AddCourtScreen({ route, navigation }: Props) {
               onSubmitEditing={findAddress}
               autoCapitalize="none"
             />
-            <Button label="Find" variant="secondary" onPress={findAddress} style={{ paddingHorizontal: spacing.lg }} />
+            <Button label="Find" variant="secondary" onPress={findAddress} loading={searching} disabled={submitting} style={{ paddingHorizontal: spacing.lg }} />
           </View>
 
-          <Button label="Add court here" onPress={submit} loading={busy} disabled={!name.trim()} />
+          <Button label="Add court here" onPress={submit} loading={submitting} disabled={!name.trim() || searching} />
         </Card>
       </KeyboardAvoidingView>
     </View>

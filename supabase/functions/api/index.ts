@@ -108,6 +108,10 @@ function makeLimiter(windowMs: number, max: number) {
 }
 const credentialLimiter = makeLimiter(15 * 60_000, 20);
 const geocodeLimiterFn = makeLimiter(60_000, 30);
+// Discovery fans out to the free Overpass API + writes courts, so it gets its
+// own limiter (in addition to requiring auth) to protect the shared egress IP
+// from getting Overpass-banned, which would break court discovery for everyone.
+const discoverLimiterFn = makeLimiter(60_000, 40);
 function clientIp(c: Context): string {
   return (c.req.header('x-forwarded-for')?.split(',')[0]?.trim()) || 'unknown';
 }
@@ -596,7 +600,8 @@ async function importOverpassCourts(b: { min_lng: number; min_lat: number; max_l
   return imported;
 }
 
-app.get('/api/courts/discover', async (c) => {
+app.get('/api/courts/discover', requireAuth, async (c) => {
+  if (!discoverLimiterFn(clientIp(c))) throw ApiError.tooManyRequests();
   const b = discoverQuerySchema.parse(c.req.query());
   if (b.min_lng >= b.max_lng || b.min_lat >= b.max_lat) throw ApiError.badRequest('min must be < max for both axes');
 
