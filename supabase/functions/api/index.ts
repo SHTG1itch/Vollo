@@ -26,14 +26,14 @@ import {
 import type { CreateMatchInput } from './validation.ts';
 import { analyzeScore, matchScore } from './scoring.ts';
 import { recomputeUserStreak, getStreakState } from './streak.ts';
-import { applyMatchToRatings, reverseMatchFromRatings, getRatings } from './rating.ts';
+import { recomputeUserRatings, getRatings } from './rating.ts';
 import { evaluateAchievements, getAchievements } from './achievements.ts';
 import { getCourtController, recomputeAfterMatch, getUserTerritories, listTerritories } from './territory.ts';
 import { notify } from './notifications.ts';
 import { geocode, reverseGeocode } from './geocoding.ts';
 import { fetchOverpassSectors, type OverpassSector } from './overpass.ts';
 import { getProfileAnalytics, getHeadToHead } from './analytics.ts';
-import { runStreakSweep, runTerritorySweep, runCourtNameSweep } from './sweeps.ts';
+import { runStreakSweep, runTerritorySweep, runCourtNameSweep, runRatingSweep } from './sweeps.ts';
 import type { AuthClaims, LeaderboardEntry, MatchCard, MatchResult, MatchStats, Surface } from './types.ts';
 
 type Env = { Variables: { user?: AuthClaims } };
@@ -208,37 +208,29 @@ async function resolveUserId(username: string): Promise<string> {
 
 /**
  * Apply a (now-counting) match's effects to the logger: recompute their streak,
- * compute the court MatchScore with the current streak modifier, apply the Elo
- * delta, and persist all three back onto the match row. Used both for matches
- * that count immediately ('auto') and when an opponent verifies a pending one.
- * Must run inside the match's transaction so the streak query sees its status.
+ * persist the court MatchScore with the current streak modifier, and recompute
+ * their Bayesian per-surface ratings from history. Used both for matches that
+ * count immediately ('auto') and when an opponent verifies a pending one. Must
+ * run inside the match's transaction so both recomputes see this match's status.
  */
 async function applyMatchEffects(
   client: Queryable,
   args: {
     matchId: string;
     userId: string;
-    opponentId: string | null;
-    surface: Surface;
-    result: MatchResult;
     gamesWon: number;
     gamesLost: number;
   },
 ): Promise<void> {
   const streak = await recomputeUserStreak(args.userId, client);
   const score = matchScore(args.gamesWon, args.gamesLost, streak.streakModifier);
-  const { userDelta } = await applyMatchToRatings(client, {
-    userId: args.userId,
-    opponentId: args.opponentId,
-    surface: args.surface,
-    result: args.result,
-    gamesWon: args.gamesWon,
-    gamesLost: args.gamesLost,
-  });
   await client.query(
-    'UPDATE matches SET streak_modifier = $1, match_score = $2, user_rating_delta = $3 WHERE id = $4',
-    [streak.streakModifier, score, userDelta, args.matchId],
+    'UPDATE matches SET streak_modifier = $1, match_score = $2 WHERE id = $3',
+    [streak.streakModifier, score, args.matchId],
   );
+  // Ratings are a pure function of history — recompute (replay) rather than
+  // applying a delta, so deletion stays exact and the Bayesian update is sound.
+  await recomputeUserRatings(client, args.userId);
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -467,9 +459,6 @@ app.post('/api/matches', requireAuth, async (c) => {
       await applyMatchEffects(client, {
         matchId: id,
         userId,
-        opponentId: null,
-        surface: body.surface,
-        result: analysis.result,
         gamesWon: analysis.gamesWon,
         gamesLost: analysis.gamesLost,
       });
@@ -598,9 +587,6 @@ app.post('/api/matches/:id/verify', requireAuth, async (c) => {
     await applyMatchEffects(client, {
       matchId: id,
       userId: match.user_id,
-      opponentId: match.opponent_id,
-      surface: match.surface,
-      result: match.result,
       gamesWon: Number(match.games_won),
       gamesLost: Number(match.games_lost),
     });
@@ -666,16 +652,8 @@ app.delete('/api/matches/:id', requireAuth, async (c) => {
 
   await withTransaction(async (client) => {
     await client.query('DELETE FROM matches WHERE id = $1', [id]);
-    if (counted) {
-      await reverseMatchFromRatings(client, {
-        userId,
-        surface: match.surface,
-        result: match.result,
-        gamesWon: Number(match.games_won),
-        gamesLost: Number(match.games_lost),
-        appliedDelta: match.user_rating_delta == null ? null : Number(match.user_rating_delta),
-      });
-    }
+    // Ratings are recomputed from the remaining history (exact), not delta-reversed.
+    if (counted) await recomputeUserRatings(client, userId);
     await recomputeUserStreak(userId, client);
   });
 
@@ -1360,8 +1338,9 @@ app.post('/api/internal/sweep', async (c) => {
   const type = (await jsonBody<{ type?: string }>(c)).type;
   if (type === 'streak') return c.json({ ok: true, recomputed: await runStreakSweep() });
   if (type === 'territory') return c.json({ ok: true, recomputed: await runTerritorySweep() });
+  if (type === 'ratings') return c.json({ ok: true, recomputed: await runRatingSweep() });
   if (type === 'court_names') return c.json({ ok: true, named: await runCourtNameSweep() });
-  throw ApiError.badRequest('type must be streak, territory or court_names');
+  throw ApiError.badRequest('type must be streak, territory, ratings or court_names');
 });
 
 // ─── Error handling ──────────────────────────────────────────────────────

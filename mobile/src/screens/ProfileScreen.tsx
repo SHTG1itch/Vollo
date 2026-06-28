@@ -262,8 +262,13 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
           {ratings.map((r) => (
             <View key={r.surface} style={styles.ratingRow}>
               <SurfaceBadge surface={r.surface as Surface} small />
-              <Text style={styles.ratingValue}>{r.rating}</Text>
-              <Text style={styles.ratingSub}>peak {r.peak_rating} · {r.wins}W {r.losses}L</Text>
+              <Text style={styles.ratingValue}>
+                {r.rating}
+                {r.rating_deviation != null ? <Text style={styles.ratingPm}> ±{r.rating_deviation}</Text> : null}
+              </Text>
+              <Text style={styles.ratingSub}>
+                peak {r.peak_rating} · {r.wins}W {r.losses}L{r.rating_deviation >= 150 ? ' · provisional' : ''}
+              </Text>
             </View>
           ))}
         </Card>
@@ -412,8 +417,9 @@ const styles = StyleSheet.create({
   subhead: { color: colors.textDim, fontWeight: '700', fontSize: font.small },
   winRate: { color: colors.onAccent, fontWeight: '800', fontSize: font.small, backgroundColor: colors.accent, paddingHorizontal: spacing.sm, paddingVertical: 2, borderRadius: radius.pill, overflow: 'hidden' },
   ratingRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  ratingValue: { color: colors.text, fontWeight: '800', fontSize: font.body, width: 50 },
-  ratingSub: { color: colors.textFaint, fontSize: font.tiny, flex: 1 },
+  ratingValue: { color: colors.text, fontWeight: '800', fontSize: font.body, minWidth: 50 },
+  ratingPm: { color: colors.textFaint, fontWeight: '600', fontSize: font.tiny },
+  ratingSub: { color: colors.textFaint, fontSize: font.tiny, flex: 1, textAlign: 'right' },
   gearRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   gearIcon: { fontSize: 16, width: 22 },
   gearLabel: { color: colors.textDim, fontSize: font.small, fontWeight: '700', width: 72 },

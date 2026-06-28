@@ -156,6 +156,8 @@ export interface LeaderboardEntry {
 export interface SurfaceRating {
   surface: Surface;
   rating: number;
+  /** Bayesian rating deviation (σ) — uncertainty. High = provisional/new. */
+  rating_deviation: number;
   matches_played: number;
   wins: number;
   losses: number;

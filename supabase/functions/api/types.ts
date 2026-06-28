@@ -199,6 +199,8 @@ export interface StreakState {
 export interface SurfaceRating {
   surface: Surface;
   rating: number;
+  /** Bayesian rating deviation (σ): the model's uncertainty. High = provisional. */
+  rating_deviation: number;
   matches_played: number;
   wins: number;
   losses: number;

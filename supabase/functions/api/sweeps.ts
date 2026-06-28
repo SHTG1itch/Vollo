@@ -1,6 +1,7 @@
 import { pool, query } from './db.ts';
 import { recomputeUserStreak } from './streak.ts';
 import { recomputeUserTerritories } from './territory.ts';
+import { recomputeUserRatings } from './rating.ts';
 import { evaluateAchievements } from './achievements.ts';
 import { reverseGeocode } from './geocoding.ts';
 
@@ -41,6 +42,27 @@ export async function runTerritorySweep(): Promise<number> {
     }
   }
   console.log(`[sweep] territory sweep recomputed ${ok}/${users.length} user(s)`);
+  return ok;
+}
+
+/**
+ * Bayesian rating recompute sweep. Replays every user's match history into their
+ * per-surface Gaussian rating posterior. Idempotent (ratings are a pure function
+ * of history), so it doubles as the one-time backfill that converts legacy Elo
+ * rows to the Bayesian model. Invoked on demand via the internal sweep route.
+ */
+export async function runRatingSweep(): Promise<number> {
+  const users = await query<{ id: string }>('SELECT id FROM users');
+  let ok = 0;
+  for (const u of users) {
+    try {
+      await recomputeUserRatings(pool, u.id);
+      ok++;
+    } catch (err) {
+      console.error(`[sweep] rating recompute failed for ${u.id}`, err instanceof Error ? err.message : err);
+    }
+  }
+  console.log(`[sweep] rating sweep recomputed ${ok}/${users.length} user(s)`);
   return ok;
 }
 
