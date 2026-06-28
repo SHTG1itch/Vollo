@@ -79,6 +79,34 @@ export const font = {
   tiny: 11,
 } as const;
 
+// ── Vollo's custom typeface ────────────────────────────────────────────────
+// Strava leans on a bold, slightly-condensed grotesque for its big numbers and
+// activity titles. Vollo's brand font is Barlow: a condensed cut (Barlow Semi
+// Condensed) for display/headings — the athletic, headline energy — over a
+// neutral Barlow body for long-form readability. The faces are bundled and
+// registered under Vollo-branded family names (see src/fonts.ts + App.tsx).
+//
+// Each weight is a separate face, so always pick the family for the weight you
+// want rather than pairing one family with fontWeight (RN can't swap faces by
+// weight for a custom family, and would otherwise synth a faux-bold).
+export const fonts = {
+  display: 'Vollo-Display', // Barlow Semi Condensed Bold — hero numbers, brand
+  heading: 'Vollo-Heading', // Barlow Semi Condensed SemiBold — section/card titles
+  body: 'Vollo-Body', // Barlow Regular — default body copy
+  medium: 'Vollo-BodyMedium', // Barlow Medium — emphasised body
+  bold: 'Vollo-BodyBold', // Barlow SemiBold — strong labels/buttons
+} as const;
+
+/** Ready-made text-style fragments so screens spread a family instead of
+ *  hand-typing fontFamily (and remembering to drop the now-redundant weight). */
+export const type = {
+  display: { fontFamily: fonts.display },
+  heading: { fontFamily: fonts.heading },
+  body: { fontFamily: fonts.body },
+  medium: { fontFamily: fonts.medium },
+  bold: { fontFamily: fonts.bold },
+} as const;
+
 // Soft elevation for white cards on the light feed — the subtle lift that gives
 // the Strava activity feed its depth without heavy borders.
 export const shadow = {
