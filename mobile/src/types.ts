@@ -5,6 +5,10 @@ export type MatchResult = 'win' | 'loss';
 export type SetScore = [number, number];
 export type ScoreArray = SetScore[];
 
+/** A match against a Vollo player starts 'pending' and only counts once the
+ *  opponent confirms it; matches with no Vollo opponent are 'auto'. */
+export type VerificationStatus = 'auto' | 'pending' | 'verified' | 'rejected';
+
 /** Public gear loadout shown on every profile. All fields optional. */
 export interface Equipment {
   racquet?: string;
@@ -90,6 +94,8 @@ export interface MatchCard {
   duration_minutes: number | null;
   notes: string | null;
   is_tiebreak: boolean;
+  verification_status: VerificationStatus;
+  verified_at: string | null;
   played_at: string;
   created_at: string;
   author_username: string;

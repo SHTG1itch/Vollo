@@ -182,6 +182,11 @@ export const api = {
     request<{ match: MatchCard }>('/matches', { method: 'POST', body: JSON.stringify(body) }),
   getMatch: (id: string) => request<{ match: MatchCard }>(`/matches/${id}`),
   deleteMatch: (id: string) => request<void>(`/matches/${id}`, { method: 'DELETE' }),
+  // Matches awaiting my confirmation (I'm the tagged opponent).
+  getPendingMatches: () => request<{ matches: MatchCard[] }>('/matches/pending'),
+  // The tagged opponent confirms (it counts) or rejects (it never counts).
+  verifyMatch: (id: string, action: 'confirm' | 'reject') =>
+    request<{ match: MatchCard }>(`/matches/${id}/verify`, { method: 'POST', body: JSON.stringify({ action }) }),
   addKudos: (id: string) =>
     request<{ kudos_count: number; viewer_has_kudos: boolean }>(`/matches/${id}/kudos`, { method: 'POST' }),
   removeKudos: (id: string) =>

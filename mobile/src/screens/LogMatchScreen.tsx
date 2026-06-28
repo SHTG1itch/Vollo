@@ -381,6 +381,9 @@ export function LogMatchScreen() {
             ))}
           </>
         )}
+        {opponentId ? (
+          <Muted>⏳ {opponentName || 'They'}’ll need to verify this match before it counts toward your rating & territory.</Muted>
+        ) : null}
       </Section>
 
       {/* When */}

@@ -47,6 +47,8 @@ export function MatchCard({
         </View>
         <Text style={styles.score}>{formatScoreLine(match.score_array)}</Text>
         {match.is_tiebreak ? <Text style={styles.tb}>TB</Text> : null}
+        {match.verification_status === 'pending' ? <Text style={styles.pending}>⏳ PENDING</Text> : null}
+        {match.verification_status === 'rejected' ? <Text style={styles.disputed}>🚫 DISPUTED</Text> : null}
       </View>
 
       <Text style={styles.vs}>
@@ -100,6 +102,8 @@ const styles = StyleSheet.create({
   resultText: { fontWeight: '800', fontSize: font.tiny, letterSpacing: 1 },
   score: { color: colors.text, fontSize: font.h3, fontWeight: '800', letterSpacing: 1 },
   tb: { color: colors.warning, fontSize: font.tiny, fontWeight: '800' },
+  pending: { color: colors.warning, fontSize: font.tiny, fontWeight: '800', letterSpacing: 0.5 },
+  disputed: { color: colors.loss, fontSize: font.tiny, fontWeight: '800', letterSpacing: 0.5 },
   vs: { color: colors.textDim, fontSize: font.small },
   vsName: { color: colors.text, fontWeight: '600' },
   metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, marginTop: 2 },
