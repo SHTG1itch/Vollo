@@ -5,6 +5,7 @@ import type { RootStackParamList } from '../navigation/types';
 import { useAuth } from '../store/auth';
 import { Button, Field, H1, Muted, Screen } from '../components/ui';
 import { SocialAuth } from '../components/SocialAuth';
+import { VolloWordmark } from '../components/VolloLogo';
 import { colors, font, radius, shadow, spacing } from '../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Register'>;
@@ -88,7 +89,10 @@ export function RegisterScreen({ navigation }: Props) {
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
           <View style={styles.header}>
-            <H1>Join Vollo</H1>
+            <View style={styles.brandRow}>
+              <H1>Join</H1>
+              <VolloWordmark size={32} />
+            </View>
             <Muted>Your tennis story starts here.</Muted>
           </View>
 
@@ -129,6 +133,7 @@ const styles = StyleSheet.create({
   logo: { fontSize: 56, textAlign: 'center' },
   note: { color: colors.text, fontSize: font.small, textAlign: 'center' },
   header: { alignItems: 'center', gap: spacing.xs },
+  brandRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   form: {
     gap: spacing.md,
     backgroundColor: colors.surface,
