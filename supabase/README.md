@@ -85,7 +85,11 @@ Both are rate-limited per IP. Migration `012` adds `users.auth_id`, drops
 row from the sign-up metadata (`username`, `display_name`) **once the email is
 confirmed** — so unconfirmed bot sign-ups never create rows or squat usernames.
 **Keep email confirmation enabled** in the project's Auth settings (the default)
-to make that protection effective.
+to make that protection effective. Because Vollo has no website, the **Site URL is
+the app deep link `vollo://`** (Authentication → URL Configuration, mirrored in
+`config.toml` `[auth]`) so the confirmation/recovery links open the app instead of
+dead-ending on `http://localhost:3000`. The token is verified server-side before
+that redirect, so confirmation succeeds even if the deep link doesn't resolve.
 
 **Google / Apple sign-in** (native ID-token flow) is wired through the same
 machinery: the app calls `supabase.auth.signInWithIdToken`, the resulting session

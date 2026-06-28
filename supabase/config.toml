@@ -11,6 +11,16 @@ project_id = "pfophuqopwfupxjonsty"
 # reaching us — so the platform JWT gate stays disabled.
 verify_jwt = false
 
+# ── Email confirmation deep link (mobile) ────────────────────────────────────
+# Vollo has no website, so email-confirmation / password-recovery links must open
+# the app via its deep-link scheme instead of a web page. Set live in the
+# dashboard (Authentication → URL Configuration); mirrored here as config-as-code.
+# Without this the link falls back to the default http://localhost:3000 and dead-
+# ends on a phone (the email is still confirmed server-side before that redirect).
+[auth]
+site_url = "vollo://"
+additional_redirect_urls = ["vollo://**"]
+
 # ── Social sign-in (Google / Apple) ──────────────────────────────────────────
 # The mobile app uses the NATIVE id-token flow (supabase.auth.signInWithIdToken),
 # so the provider must trust the platform OAuth client ids whose tokens the app
