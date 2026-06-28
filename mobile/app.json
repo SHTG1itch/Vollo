@@ -27,7 +27,9 @@
       "package": "app.vollo.mobile",
       "permissions": [
         "ACCESS_FINE_LOCATION",
-        "ACCESS_COARSE_LOCATION"
+        "ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
       ]
     },
     "web": {
@@ -50,7 +52,10 @@
       "supabaseUrl": "https://pfophuqopwfupxjonsty.supabase.co",
       "supabaseAnonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBmb3BodXFvcHdmdXB4am9uc3R5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI1MTE1NTksImV4cCI6MjA5ODA4NzU1OX0.xl6PXZC1iUasQZ5RsTgnIuQmoN2RzzsmWdDGtHssnP4",
       "googleWebClientId": "958415288431-fol1pk22asmc748feuvbo1gkntcegis2.apps.googleusercontent.com",
-      "googleIosClientId": ""
+      "googleIosClientId": "",
+      "eas": {
+        "projectId": "0be07316-2872-4688-afad-404a26ef890d"
+      }
     }
   }
 }
