@@ -7,19 +7,30 @@
 // does for password sign-in — no new session plumbing, and the server-side login
 // proxy, token validation and email/password flows are all untouched.
 //
-// Everything here is capability-gated: Google is inert until a webClientId is
-// configured (extra.googleWebClientId), and Apple is gated on the native
-// availability check (iOS 13+). When a provider isn't set up, its button never
-// renders, so this is additive and can't break the existing auth screens.
+// IMPORTANT — the native SDKs are loaded LAZILY (require() inside the functions),
+// never imported at the top of this module. A static `import` runs the package's
+// native bootstrap the instant this file is evaluated, which throws
+// "RNGoogleSignin could not be found" and crashes the whole app on any binary
+// that doesn't bundle these native modules (Expo Go, or a dev client built before
+// they were added). Lazy loading means nothing native is touched unless the user
+// actually invokes a provider — so the app boots and email/username login works
+// regardless of the running binary.
+//
+// Everything is also capability-gated: Google is inert unless enabled + a
+// webClientId is configured, and Apple is gated on the iOS availability check.
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
-import {
-  GoogleSignin,
-  isErrorWithCode,
-  isSuccessResponse,
-  statusCodes,
-} from '@react-native-google-signin/google-signin';
-import * as AppleAuthentication from 'expo-apple-authentication';
+
+type GoogleModule = typeof import('@react-native-google-signin/google-signin');
+type AppleModule = typeof import('expo-apple-authentication');
+
+// Deferred loads — only run the native bootstrap when a provider is actually used.
+function loadGoogle(): GoogleModule {
+  return require('@react-native-google-signin/google-signin') as GoogleModule;
+}
+function loadApple(): AppleModule {
+  return require('expo-apple-authentication') as AppleModule;
+}
 
 const extra = Constants.expoConfig?.extra as
   | { googleWebClientId?: string; googleIosClientId?: string; googleAuthEnabled?: boolean }
@@ -50,13 +61,14 @@ export class OAuthCancelled extends Error {
 // ─── Google ────────────────────────────────────────────────────────────────
 
 /** True only when Google auth is enabled AND a real web client id is configured —
- *  drives whether the "Continue with Google" button is shown at all. */
+ *  drives whether the "Continue with Google" button is shown at all. Touches no
+ *  native module, so it's safe to call at render time on any binary. */
 export function isGoogleConfigured(): boolean {
   return GOOGLE_AUTH_ENABLED && GOOGLE_WEB_CLIENT_ID.length > 0;
 }
 
 let googleConfigured = false;
-function ensureGoogleConfigured(): void {
+function ensureGoogleConfigured(GoogleSignin: GoogleModule['GoogleSignin']): void {
   if (googleConfigured) return;
   // webClientId is what makes Google mint an ID token whose audience Supabase
   // accepts; iosClientId is only needed for the native iOS sheet.
@@ -69,9 +81,10 @@ function ensureGoogleConfigured(): void {
 }
 
 /** Run the native Google sign-in sheet and return its ID token. Throws
- *  OAuthCancelled if the user backs out. */
+ *  OAuthCancelled if the user backs out. Loads the native SDK on first call. */
 export async function getGoogleIdToken(): Promise<string> {
-  ensureGoogleConfigured();
+  const { GoogleSignin, isSuccessResponse, isErrorWithCode, statusCodes } = loadGoogle();
+  ensureGoogleConfigured(GoogleSignin);
   try {
     await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
     const response = await GoogleSignin.signIn();
@@ -92,11 +105,12 @@ export async function getGoogleIdToken(): Promise<string> {
 
 // ─── Apple ─────────────────────────────────────────────────────────────────
 
-/** Apple sign-in is iOS-only and needs the device capability (iOS 13+). */
+/** Apple sign-in is iOS-only and needs the device capability (iOS 13+). Returns
+ *  false (without loading the native module) on any non-iOS platform. */
 export async function isAppleAvailable(): Promise<boolean> {
   if (Platform.OS !== 'ios') return false;
   try {
-    return await AppleAuthentication.isAvailableAsync();
+    return await loadApple().isAvailableAsync();
   } catch {
     return false;
   }
@@ -111,10 +125,11 @@ export interface AppleCredential {
 
 export async function getAppleCredential(): Promise<AppleCredential> {
   try {
-    const credential = await AppleAuthentication.signInAsync({
+    const Apple = loadApple();
+    const credential = await Apple.signInAsync({
       requestedScopes: [
-        AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
-        AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        Apple.AppleAuthenticationScope.FULL_NAME,
+        Apple.AppleAuthenticationScope.EMAIL,
       ],
     });
     if (!credential.identityToken) throw new Error('Apple did not return an identity token.');
@@ -132,7 +147,22 @@ export async function getAppleCredential(): Promise<AppleCredential> {
   }
 }
 
-// The official Apple button + its enums, re-exported so the UI stays HIG-compliant.
-export const AppleButton = AppleAuthentication.AppleAuthenticationButton;
-export const AppleButtonType = AppleAuthentication.AppleAuthenticationButtonType;
-export const AppleButtonStyle = AppleAuthentication.AppleAuthenticationButtonStyle;
+/** Lazily resolve the official Apple button component + its enums (HIG-compliant),
+ *  or null if the native module isn't available. Call ONLY after isAppleAvailable()
+ *  has resolved true, so the native module is never required on unsupported binaries. */
+export function getAppleButton(): {
+  Button: AppleModule['AppleAuthenticationButton'];
+  Type: AppleModule['AppleAuthenticationButtonType'];
+  Style: AppleModule['AppleAuthenticationButtonStyle'];
+} | null {
+  try {
+    const Apple = loadApple();
+    return {
+      Button: Apple.AppleAuthenticationButton,
+      Type: Apple.AppleAuthenticationButtonType,
+      Style: Apple.AppleAuthenticationButtonStyle,
+    };
+  } catch {
+    return null;
+  }
+}

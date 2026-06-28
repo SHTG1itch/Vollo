@@ -9,13 +9,7 @@ import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { useAuth } from '../store/auth';
-import {
-  AppleButton,
-  AppleButtonStyle,
-  AppleButtonType,
-  isAppleAvailable,
-  isGoogleConfigured,
-} from '../lib/oauth';
+import { getAppleButton, isAppleAvailable, isGoogleConfigured } from '../lib/oauth';
 import { colors, font, fonts, radius, spacing } from '../theme';
 
 /** The official four-colour Google "G", drawn with react-native-svg. */
@@ -47,8 +41,12 @@ export function SocialAuth({ onError }: { onError?: (msg: string) => void }) {
     };
   }, []);
 
+  // Resolve the native Apple button only once availability has confirmed (iOS) —
+  // getAppleButton() lazy-loads the native module, so it's never touched otherwise.
+  const apple = appleReady ? getAppleButton() : null;
+
   // Nothing configured/available → render nothing, leaving the form untouched.
-  if (!googleReady && !appleReady) return null;
+  if (!googleReady && !apple) return null;
 
   const run = async (provider: 'google' | 'apple', fn: () => Promise<void>) => {
     if (busy) return; // guard against double-taps while a sheet is open
@@ -71,10 +69,10 @@ export function SocialAuth({ onError }: { onError?: (msg: string) => void }) {
         <View style={styles.line} />
       </View>
 
-      {appleReady ? (
-        <AppleButton
-          buttonType={AppleButtonType.SIGN_IN}
-          buttonStyle={AppleButtonStyle.BLACK}
+      {apple ? (
+        <apple.Button
+          buttonType={apple.Type.SIGN_IN}
+          buttonStyle={apple.Style.BLACK}
           cornerRadius={radius.md}
           style={styles.apple}
           onPress={() => run('apple', signInWithApple)}
