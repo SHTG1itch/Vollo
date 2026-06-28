@@ -126,6 +126,8 @@ export interface CreateMatchPayload {
   court_id?: string;
   scheduled_match_id?: string;
   surface: Surface;
+  title?: string;
+  photo_url?: string;
   score_array: ScoreArray;
   is_tiebreak?: boolean;
   rpe_index?: number;

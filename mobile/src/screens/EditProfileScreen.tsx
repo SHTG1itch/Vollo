@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { api, ApiError } from '../api/client';
@@ -58,6 +58,8 @@ export function EditProfileScreen({ navigation }: Props) {
   const [bio, setBio] = useState(user?.bio ?? '');
   const [avatarUrl, setAvatarUrl] = useState(user?.avatar_url ?? '');
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [coverUrl, setCoverUrl] = useState(user?.cover_url ?? '');
+  const [uploadingCover, setUploadingCover] = useState(false);
   const [hand, setHand] = useState<'right' | 'left'>(user?.dominant_hand ?? 'right');
   const [color, setColor] = useState<string | null>(user?.color ?? null);
   const [homeQuery, setHomeQuery] = useState(user?.home_label ?? '');
@@ -84,6 +86,19 @@ export function EditProfileScreen({ navigation }: Props) {
     }
   };
 
+  const onPickCover = async () => {
+    if (uploadingCover) return;
+    setUploadingCover(true);
+    try {
+      const url = await pickAndUploadProfileImage('cover');
+      if (url) setCoverUrl(url);
+    } catch (e) {
+      Alert.alert('Upload failed', e instanceof Error ? e.message : 'Please try again.');
+    } finally {
+      setUploadingCover(false);
+    }
+  };
+
   const findHome = async () => {
     if (!homeQuery.trim()) return;
     try {
@@ -102,6 +117,8 @@ export function EditProfileScreen({ navigation }: Props) {
       body.color = color ?? '';
       const trimmedAvatar = avatarUrl.trim();
       if (trimmedAvatar) body.avatar_url = trimmedAvatar;
+      const trimmedCover = coverUrl.trim();
+      if (trimmedCover) body.cover_url = trimmedCover;
       if (home) body.home = { lat: home.lat, lng: home.lng, label: home.label };
       // Public gear loadout — send the full object so clearing a field persists.
       body.equipment = {
@@ -123,6 +140,25 @@ export function EditProfileScreen({ navigation }: Props) {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: colors.bg }} contentContainerStyle={styles.content}>
       <Card style={{ gap: spacing.md }}>
+        <Pressable
+          onPress={onPickCover}
+          disabled={uploadingCover}
+          style={[styles.cover, { backgroundColor: color ?? colors.primarySoft }]}
+          accessibilityRole="button"
+          accessibilityLabel="Change cover photo"
+        >
+          {coverUrl.trim() ? (
+            <Image source={{ uri: coverUrl.trim() }} style={styles.coverImg} resizeMode="cover" />
+          ) : null}
+          <View style={styles.coverPill}>
+            {uploadingCover ? (
+              <ActivityIndicator size="small" color={colors.white} />
+            ) : (
+              <Text style={styles.coverPillText}>{coverUrl.trim() ? '📷 Change cover' : '📷 Add cover photo'}</Text>
+            )}
+          </View>
+        </Pressable>
+
         <View style={styles.avatarRow}>
           <Pressable
             onPress={onPickAvatar}
@@ -244,6 +280,21 @@ export function EditProfileScreen({ navigation }: Props) {
 
 const styles = StyleSheet.create({
   content: { padding: spacing.lg, gap: spacing.lg },
+  cover: {
+    height: 120,
+    borderRadius: radius.md,
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  coverImg: { ...StyleSheet.absoluteFillObject, width: '100%', height: '100%' },
+  coverPill: {
+    backgroundColor: 'rgba(11,19,13,0.55)',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.pill,
+  },
+  coverPillText: { color: colors.white, fontFamily: fonts.bold, fontSize: font.small },
   avatarRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   avatarPick: { position: 'relative' },
   avatarBadge: {
