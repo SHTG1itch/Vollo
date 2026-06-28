@@ -4,6 +4,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { useAuth } from '../store/auth';
 import { Button, Field, H1, Muted, Screen } from '../components/ui';
+import { SocialAuth } from '../components/SocialAuth';
 import { colors, font, radius, shadow, spacing } from '../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Login'>;
@@ -55,6 +56,7 @@ export function LoginScreen({ navigation }: Props) {
             />
             {error ? <Text style={styles.error}>{error}</Text> : null}
             <Button label="Sign in" onPress={submit} loading={loading} disabled={!identifier || !password} />
+            <SocialAuth onError={setError} />
             <Button label="Create an account" variant="ghost" onPress={() => navigation.navigate('Register')} />
           </View>
 

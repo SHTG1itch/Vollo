@@ -4,6 +4,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { useAuth } from '../store/auth';
 import { Button, Field, H1, Muted, Screen } from '../components/ui';
+import { SocialAuth } from '../components/SocialAuth';
 import { colors, font, radius, shadow, spacing } from '../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Register'>;
@@ -113,6 +114,7 @@ export function RegisterScreen({ navigation }: Props) {
             <Field label="Password" secureTextEntry value={password} onChangeText={setPassword} placeholder="min 8 chars" />
             {error ? <Text style={styles.error}>{error}</Text> : null}
             <Button label="Create account" onPress={submit} loading={loading} disabled={!valid} />
+            <SocialAuth onError={setError} />
             <Button label="I already have an account" variant="ghost" onPress={() => navigation.goBack()} />
           </View>
         </ScrollView>
