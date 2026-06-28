@@ -8,7 +8,7 @@ no paid resources:
 | Data | Postgres + PostGIS | **Supabase Postgres + PostGIS** |
 | API | Express (Node) web service | **Edge Function `api`** (Deno + Hono) |
 | Background jobs | `node-cron` in the web process | **pg_cron + pg_net** sweeps |
-| Auth | Custom HS256 JWT (bcrypt) | **Same custom JWT** (jose + bcryptjs) |
+| Auth | Custom HS256 JWT (bcrypt) | **Supabase Auth** (token validated in-function) |
 | Secrets | env vars | private `app_secrets` table (RLS-sealed) |
 
 Project ref: `pfophuqopwfupxjonsty` · region `us-east-1`.
@@ -19,10 +19,14 @@ Project ref: `pfophuqopwfupxjonsty` · region `us-east-1`.
   free tier.
 - The Edge Function connects to Postgres over the **direct connection**
   (`SUPABASE_DB_URL`, auto-injected), which bypasses RLS — so all access is
-  funnelled through the function's own JWT auth and the public PostgREST/anon
+  funnelled through the function's own authorization and the public PostgREST/anon
   API stays sealed (every app table has RLS enabled with no policies).
-- The function is deployed with `verify_jwt = false` because it implements its
-  own bearer-token auth and serves public routes (login/register/feed).
+- Auth is **Supabase Auth**: the client signs in with the JS SDK and sends the
+  resulting access token as the bearer; the function validates it with the
+  service-role client (`adminClient.auth.getUser`) and resolves it to the app
+  profile via `users.auth_id`.
+- The function is deployed with `verify_jwt = false` because it validates tokens
+  itself and serves genuinely public routes (feed, resolve-email, courts reads).
 
 ## Layout
 
@@ -33,15 +37,17 @@ supabase/
                            # + 008/009 (RLS seal + security-invoker views)
                            # + 010 (court source/osm dedup + user equipment)
                            # + 011 (court sectors: one facility = one court)
+                           # + 012 (Supabase Auth: auth_id + signup trigger)
+                           # + 013 (player colour) + 014 (scheduled matches)
   functions/api/           # the entire API, ported to Deno + Hono
     index.ts               # Hono app: every /api/* route, auth, error handling, sweep endpoint
     db.ts                  # postgres.js adapter (query/queryOne/withTransaction/pool)
-    auth.ts                # HS256 sign/verify (jose) + bcrypt
+    supabaseAdmin.ts       # service-role client: validate bearer tokens, delete auth users
     config.ts types.ts validation.ts errors.ts mappers.ts geo.ts
     overpass.ts            # OpenStreetMap discovery: names + groups pitches into sectors
     scoring.ts rating.ts streak.ts territory.ts analytics.ts
     achievements.ts notifications.ts geocoding.ts sweeps.ts
-    deno.json              # import map (hono, postgres, jose, bcryptjs, zod)
+    deno.json              # import map (hono, postgres, zod, @supabase/supabase-js)
 ```
 
 The HTTP contract is identical to the old Express API (same `/api/*` paths, JSON
@@ -54,10 +60,22 @@ The Edge Function is reached at:
 https://pfophuqopwfupxjonsty.supabase.co/functions/v1/api/<path>
 ```
 
-A call to `…/functions/v1/api/auth/login` arrives inside the function as
-`/api/auth/login`, matching the original routes. So the mobile base URL is
+A call to `…/functions/v1/api/feed` arrives inside the function as `/api/feed`,
+matching the routes. So the mobile base URL is
 `https://pfophuqopwfupxjonsty.supabase.co/functions/v1` and the client's existing
 `/api` prefix completes the path.
+
+### Auth (Supabase Auth)
+
+Sign-up/sign-in happen client-side via the Supabase JS SDK; the function never
+sees a password. The only auth route it serves is
+`GET /api/auth/resolve-email?username=` (rate-limited), which lets the app turn a
+typed username into the email Supabase Auth signs in with. Migration `012` adds
+`users.auth_id`, drops `password_hash`, and installs an `AFTER INSERT ON
+auth.users` trigger that provisions the profile row from the sign-up metadata
+(`username`, `display_name`). **For sign-up to log a user in immediately, disable
+email confirmation in the project's Auth settings** (otherwise there's no session
+until the user confirms).
 
 ## Status: LIVE
 
@@ -121,12 +139,14 @@ deployed function is fully self-contained (it does NOT fetch the gist at runtime
 and the build sandbox only allows fetches from allowlisted hosts like
 `gist.githubusercontent.com`, not arbitrary file hosts). The bundle contains no
 secrets (the DB URL and JWT/sweep secrets load from env / the `app_secrets` table
-at runtime), so the gist is safe to be public.
+at runtime, and the service-role key / DB URL are auto-injected env), so the gist
+is safe to be public.
 
 To reproduce the bundle: esbuild `index.ts` with `bundle:true, format:'esm'`,
 mapping the six bare deps to their `npm:` specifiers as `external`. Running the
 canonical CLI deploy above instead builds direct-from-source and makes the gist
-irrelevant.
+irrelevant. (The import map now bundles `@supabase/supabase-js` for token
+validation; `jose`/`bcryptjs` are gone with the old custom-JWT auth.)
 
 ## Migrations
 

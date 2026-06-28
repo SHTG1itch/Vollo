@@ -184,7 +184,8 @@ compass district naming) lives in `backend/src/utils/geo.ts` and is fully unit-t
 
 | Method & path | Purpose |
 |---|---|
-| `POST /api/auth/register` · `POST /api/auth/login` · `GET /api/auth/me` | Auth (JWT) |
+| `GET /api/auth/resolve-email?username=` · `GET /api/auth/me` | Auth — sign-up/in happen client-side via **Supabase Auth**; the function validates the token and resolves the profile (the legacy Express backend in `backend/` still uses custom JWT) |
+| `GET /api/scheduled-matches` · `POST …` · `PATCH /:id` | Propose/accept/decline/cancel matches; a logged match links its result back |
 | `GET /api/feed?scope=global\|following&before=` | Paginated match cards |
 | `POST /api/matches` | Log a match (+ optional stat matrix) |
 | `POST /api/matches/:id/kudos` · `DELETE …` | Kudos (idempotent) |
