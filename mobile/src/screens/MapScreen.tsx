@@ -118,13 +118,15 @@ export function MapScreen() {
     }
 
     // 2) Background: pull any new real-world courts from OpenStreetMap. This is
-    //    the slow call (Overpass), so it runs AFTER paint and only swaps markers
-    //    in if it actually found more — the visible map is never blocked by it.
+    //    the slow call (Overpass), so it runs AFTER paint — the visible map is
+    //    never blocked by it. The seq guard makes this the authoritative set for
+    //    the current viewport, so replace unconditionally (don't compare counts:
+    //    panning to a sparser area legitimately returns fewer courts).
     void api
       .discoverCourts(bbox, { discover: true })
       .then((res) => {
         if (seq !== loadSeq.current) return;
-        setCourts((prev) => (res.courts.length > prev.length ? res.courts : prev));
+        setCourts(res.courts);
       })
       .catch(() => {});
   }, []);

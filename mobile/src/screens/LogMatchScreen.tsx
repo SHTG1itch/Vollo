@@ -51,6 +51,9 @@ export function LogMatchScreen() {
   const [showStats, setShowStats] = useState(false);
   const [stats, setStats] = useState<MatchStats>(emptyStats);
   const [courts, setCourts] = useState<Court[]>([]);
+  // Bumped on every court (re)load and when a freshly-added court is injected, so
+  // a slow background discovery refresh can't clobber a newer list/selection.
+  const courtsToken = useRef(0);
   const [submitting, setSubmitting] = useState(false);
 
   // Debounced player search for tagging a registered opponent. Typing in the
@@ -84,17 +87,19 @@ export function LogMatchScreen() {
   // player first (so the picker isn't empty), then lists them distance-sorted.
   const loadCourts = useCallback(async () => {
     const here = coords.current;
+    const t = ++courtsToken.current;
     try {
       if (here) {
         // Show the nearby DB courts immediately (no Overpass wait)…
         const { courts: nearby } = await api.getCourts({ lat: here.lat, lng: here.lng, radius_km: 50, limit: 30 });
-        setCourts(nearby);
-        // …then pull any new real-world courts in the background and refresh.
+        if (t === courtsToken.current) setCourts(nearby);
+        // …then pull any new real-world courts in the background and refresh
+        // (guarded so it can't clobber a newer load or an injected new court).
         const d = 0.15;
         void api
           .discoverCourts({ min_lng: here.lng - d, min_lat: here.lat - d, max_lng: here.lng + d, max_lat: here.lat + d }, { discover: true })
           .then(() => api.getCourts({ lat: here.lat, lng: here.lng, radius_km: 50, limit: 30 }))
-          .then(({ courts }) => setCourts(courts))
+          .then(({ courts }) => { if (t === courtsToken.current) setCourts(courts); })
           .catch(() => undefined);
         return;
       }
@@ -103,7 +108,7 @@ export function LogMatchScreen() {
     }
     try {
       const { courts: all } = await api.getCourts({ limit: 30 });
-      setCourts(all);
+      if (t === courtsToken.current) setCourts(all);
     } catch {
       /* offline / no courts */
     }
@@ -132,6 +137,8 @@ export function LogMatchScreen() {
     void (async () => {
       try {
         const { court } = await api.getCourt(newId);
+        // Invalidate any in-flight discovery refresh so it can't drop this court.
+        courtsToken.current++;
         setCourts((prev) => (prev.some((c) => c.id === court.id) ? prev : [court, ...prev]));
         // Only select once the court is in the list, so the selection always has
         // a visible chip (don't ship a court_id with nothing shown as picked).

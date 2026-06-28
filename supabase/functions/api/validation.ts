@@ -151,12 +151,13 @@ export const updateProfileSchema = z.object({
   equipment: equipmentSchema.optional(),
 });
 
-// A query-string boolean: "1"/"true" → true, "0"/"false" → false, absent → def.
+// A query-string boolean: "1"/"true" → true, anything else present → false,
+// absent or empty → the default. Tolerant so a stray/empty flag never 400s.
 const boolParam = (def: boolean) =>
   z
-    .enum(['0', '1', 'true', 'false'])
+    .string()
     .optional()
-    .transform((v) => (v == null ? def : v === '1' || v === 'true'));
+    .transform((v) => (v == null || v === '' ? def : v === '1' || v === 'true'));
 
 // Discovery imports real-world courts within a map viewport. Reuses the bbox
 // shape but requires all four corners (a viewport is never partial).

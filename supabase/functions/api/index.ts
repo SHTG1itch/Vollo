@@ -631,17 +631,19 @@ app.get('/api/courts/discover', requireAuth, async (c) => {
   // the map never blocks on discovery.
   if (b.import) {
     // Only reach out to Overpass when the viewport is reasonably zoomed in;
-    // importing a whole region on every pan would be wasteful. Wider viewports
-    // still return whatever courts already live in the DB.
+    // importing a whole region on every pan would be wasteful and the
+    // container-geometry payload grows quickly. Wider viewports still return
+    // whatever courts already live in the DB.
     const spanLng = b.max_lng - b.min_lng;
     const spanLat = b.max_lat - b.min_lat;
-    if (spanLng <= 1.0 && spanLat <= 1.0) {
+    if (spanLng <= 0.35 && spanLat <= 0.35) {
       const key = discoverCellKey(b);
       const now = Date.now();
       const fresh = discoveredCells.get(key);
       if (b.force || !fresh || fresh <= now) {
         try {
           await importOverpassCourts(b);
+          if (discoveredCells.size > 5000) discoveredCells.clear(); // bound per-isolate memory
           discoveredCells.set(key, now + DISCOVER_TTL_MS);
         } catch (err) {
           console.warn('[discover] overpass import failed', err instanceof Error ? err.message : err);

@@ -53,9 +53,9 @@ const CLUSTER_KM = 0.14; // 140 m
 // Courts mapped just outside a named park/school still adopt that name when its
 // boundary is within this distance.
 const NEAR_M = 90;
-// The cluster centroid is snapped to this grid to form a stable dedup key that
-// survives minor membership changes between overlapping viewports.
-const GEO_SNAP_DEG = 0.003;
+// Defensive cap on named container polygons parsed from one response, bounding
+// the point-in-polygon / nearest-feature work for a large viewport.
+const MAX_CONTAINERS = 2500;
 
 interface OsmTags {
   name?: string;
@@ -367,19 +367,13 @@ function groupIntoSectors(pitches: Pitch[], containers: Container[]): OverpassSe
   }
 
   // Fold anonymous neighbouring courts into one facility by single-linkage
-  // proximity, then key on the cluster centroid (snapped for cross-call stability)
-  // so a venue split by a grid line can't become two sectors.
+  // proximity, then key on the cluster's smallest member id. Distinct clusters
+  // have disjoint members so their keys never collide (a coarse centroid snap
+  // could merge two separate venues), and the key is deterministic across calls.
   for (const idx of clusterByRadius(loose, CLUSTER_KM)) {
-    let cLat = 0;
-    let cLng = 0;
-    for (const i of idx) {
-      cLat += loose[i]!.lat;
-      cLng += loose[i]!.lng;
-    }
-    cLat /= idx.length;
-    cLng /= idx.length;
-    const snap = (x: number) => (Math.round(x / GEO_SNAP_DEG) * GEO_SNAP_DEG).toFixed(4);
-    const key = `geo:${snap(cLat)},${snap(cLng)}`;
+    let minId = loose[idx[0]!]!.osm_id;
+    for (const i of idx) if (loose[i]!.osm_id < minId) minId = loose[i]!.osm_id;
+    const key = `geo:${minId}`;
     for (const i of idx) addToGroup(groups, key, loose[i]!, null, null);
   }
 
@@ -420,7 +414,7 @@ function parseElements(elements: OsmElement[]): { pitches: Pitch[]; containers: 
       ((el.geometry && el.geometry.length >= 3) || (el.type === 'relation' && el.members));
     if (isContainer) {
       // A container candidate (came back via `.c out geom`).
-      for (const c of containersFrom(el)) containers.push(c);
+      if (containers.length < MAX_CONTAINERS) for (const c of containersFrom(el)) containers.push(c);
       continue;
     }
     const lat = el.lat ?? el.center?.lat;
