@@ -22,13 +22,21 @@ import {
 import * as AppleAuthentication from 'expo-apple-authentication';
 
 const extra = Constants.expoConfig?.extra as
-  | { googleWebClientId?: string; googleIosClientId?: string }
+  | { googleWebClientId?: string; googleIosClientId?: string; googleAuthEnabled?: boolean }
   | undefined;
 
 // Public OAuth client ids (not secrets). Env wins so a build can inject them
 // without editing app.json; otherwise fall back to expo.extra.
 const GOOGLE_WEB_CLIENT_ID = (process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ?? extra?.googleWebClientId ?? '').trim();
 const GOOGLE_IOS_CLIENT_ID = (process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID ?? extra?.googleIosClientId ?? '').trim();
+
+// Master switch to hide the Google button without dropping the configured client
+// id — e.g. to test the email/username flow on its own. Defaults to enabled;
+// flip expo.extra.googleAuthEnabled to false (or set EXPO_PUBLIC_GOOGLE_AUTH=0)
+// to turn it off, and back to re-enable. The Google Cloud / Supabase setup is
+// untouched either way.
+const GOOGLE_AUTH_ENABLED =
+  process.env.EXPO_PUBLIC_GOOGLE_AUTH !== '0' && extra?.googleAuthEnabled !== false;
 
 /** Thrown when the user dismisses the provider sheet. Callers treat it as a
  *  no-op (no error shown) rather than a failure. */
@@ -41,10 +49,10 @@ export class OAuthCancelled extends Error {
 
 // ─── Google ────────────────────────────────────────────────────────────────
 
-/** True only once a real Google web client id is configured — drives whether
- *  the "Continue with Google" button is shown at all. */
+/** True only when Google auth is enabled AND a real web client id is configured —
+ *  drives whether the "Continue with Google" button is shown at all. */
 export function isGoogleConfigured(): boolean {
-  return GOOGLE_WEB_CLIENT_ID.length > 0;
+  return GOOGLE_AUTH_ENABLED && GOOGLE_WEB_CLIENT_ID.length > 0;
 }
 
 let googleConfigured = false;
