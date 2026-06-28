@@ -1,10 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import type { RootStackParamList } from '../navigation/types';
+import type { RootStackParamList, TabParamList } from '../navigation/types';
 import { api, ApiError, type CreateMatchPayload, type UserSearchResult } from '../api/client';
 import { useFeed } from '../store/feed';
 import { Avatar, Button, Card, Field, H2, Muted } from '../components/ui';
@@ -29,12 +29,17 @@ const emptyStats = (): MatchStats => ({
 
 export function LogMatchScreen() {
   const navigation = useNavigation<Nav>();
+  const route = useRoute<RouteProp<TabParamList, 'Log'>>();
   const insets = useSafeAreaInsets();
   const prepend = useFeed((s) => s.prepend);
+  const coords = useRef<{ lat: number; lng: number } | null>(null);
 
   const [surface, setSurface] = useState<Surface>('hard');
   const [surfaceTouched, setSurfaceTouched] = useState(false);
   const [courtId, setCourtId] = useState<string | null>(null);
+  // Set when this log fulfils a scheduled match, so we link the result on submit.
+  const [scheduledMatchId, setScheduledMatchId] = useState<string | null>(null);
+  const lastPrefillKey = useRef<string | null>(null);
   const [opponentName, setOpponentName] = useState('');
   const [opponentId, setOpponentId] = useState<string | null>(null);
   const [oppResults, setOppResults] = useState<UserSearchResult[]>([]);
@@ -49,6 +54,9 @@ export function LogMatchScreen() {
   const [showStats, setShowStats] = useState(false);
   const [stats, setStats] = useState<MatchStats>(emptyStats);
   const [courts, setCourts] = useState<Court[]>([]);
+  // Bumped on every court (re)load and when a freshly-added court is injected, so
+  // a slow background discovery refresh can't clobber a newer list/selection.
+  const courtsToken = useRef(0);
   const [submitting, setSubmitting] = useState(false);
 
   // Debounced player search for tagging a registered opponent. Typing in the
@@ -78,38 +86,134 @@ export function LogMatchScreen() {
     if (oppDebounce.current) clearTimeout(oppDebounce.current);
   }, []);
 
+  // Load courts to tie a match to. Discovers real-world OSM courts near the
+  // player first (so the picker isn't empty), then lists them distance-sorted.
+  const loadCourts = useCallback(async () => {
+    const here = coords.current;
+    const t = ++courtsToken.current;
+    try {
+      if (here) {
+        // Show the nearby DB courts immediately (no Overpass wait)…
+        const { courts: nearby } = await api.getCourts({ lat: here.lat, lng: here.lng, radius_km: 50, limit: 30 });
+        if (t === courtsToken.current) setCourts(nearby);
+        // …then pull any new real-world courts in the background and refresh
+        // (guarded so it can't clobber a newer load or an injected new court).
+        const d = 0.15;
+        void api
+          .discoverCourts({ min_lng: here.lng - d, min_lat: here.lat - d, max_lng: here.lng + d, max_lat: here.lat + d }, { discover: true })
+          .then(() => api.getCourts({ lat: here.lat, lng: here.lng, radius_km: 50, limit: 30 }))
+          .then(({ courts }) => { if (t === courtsToken.current) setCourts(courts); })
+          .catch(() => undefined);
+        return;
+      }
+    } catch {
+      /* fall through to all-courts */
+    }
+    try {
+      const { courts: all } = await api.getCourts({ limit: 30 });
+      if (t === courtsToken.current) setCourts(all);
+    } catch {
+      /* offline / no courts */
+    }
+  }, []);
+
   useEffect(() => {
     void (async () => {
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status === 'granted') {
           const pos = await Location.getCurrentPositionAsync({});
-          const { courts: nearby } = await api.getCourts({
-            lat: pos.coords.latitude,
-            lng: pos.coords.longitude,
-            radius_km: 50,
-            limit: 30,
-          });
-          setCourts(nearby);
-          return;
+          coords.current = { lat: pos.coords.latitude, lng: pos.coords.longitude };
         }
       } catch {
-        /* fall through to all-courts */
+        /* no location */
       }
-      try {
-        const { courts: all } = await api.getCourts({ limit: 30 });
-        setCourts(all);
-      } catch {
-        /* offline / no courts */
-      }
+      void loadCourts();
     })();
-  }, []);
+  }, [loadCourts]);
+
+  // When a court is added via the Log flow it's handed back as a route param —
+  // pull it into the list and auto-select it, then clear the param.
+  useEffect(() => {
+    const newId = route.params?.newCourtId;
+    if (!newId) return;
+    void (async () => {
+      try {
+        const { court } = await api.getCourt(newId);
+        // Invalidate any in-flight discovery refresh so it can't drop this court.
+        courtsToken.current++;
+        setCourts((prev) => (prev.some((c) => c.id === court.id) ? prev : [court, ...prev]));
+        // Only select once the court is in the list, so the selection always has
+        // a visible chip (don't ship a court_id with nothing shown as picked).
+        setCourtId(newId);
+      } catch {
+        /* couldn't load the new court — leave the selection unchanged */
+      }
+      // Clear the param so re-focusing the tab doesn't re-select it.
+      (navigation.setParams as (p: { newCourtId?: string }) => void)({ newCourtId: undefined });
+    })();
+  }, [route.params?.newCourtId, navigation]);
+
+  // Prefill from "Log result" on a scheduled match: seed opponent/court/surface
+  // and remember the schedule id so the result links back. Keyed so a fresh
+  // navigation re-applies, but a re-focus (params cleared) doesn't.
+  useEffect(() => {
+    const p = route.params;
+    if (!p) return;
+    const key =
+      p.scheduledMatchId ??
+      (p.prefillOpponentId || p.prefillOpponentName || p.prefillCourtId || p.prefillSurface
+        ? `${p.prefillOpponentId ?? ''}|${p.prefillOpponentName ?? ''}|${p.prefillCourtId ?? ''}|${p.prefillSurface ?? ''}`
+        : null);
+    if (!key || lastPrefillKey.current === key) return;
+    lastPrefillKey.current = key;
+
+    if (p.prefillOpponentId) {
+      setOpponentId(p.prefillOpponentId);
+      setOpponentName(p.prefillOpponentName ?? '');
+      setOppResults([]);
+    } else if (p.prefillOpponentName) {
+      setOpponentName(p.prefillOpponentName);
+    }
+    if (p.prefillSurface) {
+      setSurface(p.prefillSurface);
+      setSurfaceTouched(true);
+    }
+    if (p.scheduledMatchId) setScheduledMatchId(p.scheduledMatchId);
+    if (p.prefillCourtId) {
+      const cid = p.prefillCourtId;
+      setCourtId(cid);
+      void (async () => {
+        try {
+          const { court } = await api.getCourt(cid);
+          courtsToken.current++;
+          setCourts((prev) => (prev.some((c) => c.id === court.id) ? prev : [court, ...prev]));
+        } catch {
+          /* leave selection as-is */
+        }
+      })();
+    }
+    (navigation.setParams as (params: Partial<Record<string, undefined>>) => void)({
+      prefillOpponentId: undefined,
+      prefillOpponentName: undefined,
+      prefillCourtId: undefined,
+      prefillSurface: undefined,
+      scheduledMatchId: undefined,
+    });
+  }, [route.params, navigation]);
 
   const preview = useMemo(() => analyzeLocal(score, tiebreakFinal), [score, tiebreakFinal]);
   const result = preview.result;
   // Mirror the backend: valid when every set has a winner and the match isn't a
   // dead tie (games-decided matches with even sets are allowed).
   const scoreValid = score.every(([a, b]) => a !== b) && result !== 'tie';
+
+  const openAddCourt = useCallback(() => {
+    navigation.navigate('AddCourt', {
+      origin: 'log',
+      ...(coords.current ? { lat: coords.current.lat, lng: coords.current.lng } : {}),
+    });
+  }, [navigation]);
 
   const setStat = (k: keyof MatchStats, v: number) => setStats((s) => ({ ...s, [k]: v }));
   const statsTouched = showStats && Object.values(stats).some((v) => v > 0);
@@ -126,6 +230,7 @@ export function LogMatchScreen() {
         score_array: score,
         is_tiebreak: tiebreakFinal,
         ...(courtId ? { court_id: courtId } : {}),
+        ...(scheduledMatchId ? { scheduled_match_id: scheduledMatchId } : {}),
         // A tagged registered player takes precedence over a free-text name.
         ...(opponentId
           ? { opponent_id: opponentId }
@@ -150,6 +255,7 @@ export function LogMatchScreen() {
       setOpponentName('');
       setOpponentId(null);
       setOppResults([]);
+      setScheduledMatchId(null);
       setRpe(null);
       setDuration(0);
       setNotes('');
@@ -169,6 +275,9 @@ export function LogMatchScreen() {
       keyboardShouldPersistTaps="handled"
     >
       <H2>Log a match</H2>
+      {scheduledMatchId ? (
+        <Muted>📅 Logging your scheduled match — the result shows on both players’ cards.</Muted>
+      ) : null}
 
       {/* Result preview */}
       <Card style={styles.preview}>
@@ -272,6 +381,9 @@ export function LogMatchScreen() {
             ))}
           </>
         )}
+        {opponentId ? (
+          <Muted>⏳ {opponentName || 'They'}’ll need to verify this match before it counts toward your rating & territory.</Muted>
+        ) : null}
       </Section>
 
       {/* When */}
@@ -291,29 +403,31 @@ export function LogMatchScreen() {
         </ScrollView>
       </Section>
 
-      {/* Court */}
+      {/* Court — tie the match to a location so the domination engine counts it */}
       <Section title="Court">
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: spacing.sm }}>
+          <CourtChip label="No court" active={courtId === null} onPress={() => setCourtId(null)} />
+          <Pressable onPress={openAddCourt} style={[styles.courtChip, styles.addCourtChip]}>
+            <Text style={styles.addCourtChipText}>＋ Add court</Text>
+          </Pressable>
+          {courts.map((c) => (
+            <CourtChip
+              key={c.id}
+              label={c.name}
+              sub={c.distance_km != null ? `${c.distance_km.toFixed(1)} km` : (c.city ?? undefined)}
+              active={courtId === c.id}
+              onPress={() => {
+                setCourtId(c.id);
+                // Adopt the court's surface only if the user hasn't picked one
+                // themselves, so selecting a court can't silently override it.
+                if (!surfaceTouched) setSurface(c.surface);
+              }}
+            />
+          ))}
+        </ScrollView>
         {courts.length === 0 ? (
-          <Muted>No courts loaded — log without one, or add courts from the Map tab.</Muted>
-        ) : (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: spacing.sm }}>
-            <CourtChip label="No court" active={courtId === null} onPress={() => setCourtId(null)} />
-            {courts.map((c) => (
-              <CourtChip
-                key={c.id}
-                label={c.name}
-                sub={c.distance_km != null ? `${c.distance_km.toFixed(1)} km` : (c.city ?? undefined)}
-                active={courtId === c.id}
-                onPress={() => {
-                  setCourtId(c.id);
-                  // Adopt the court's surface only if the user hasn't picked one
-                  // themselves, so selecting a court can't silently override it.
-                  if (!surfaceTouched) setSurface(c.surface);
-                }}
-              />
-            ))}
-          </ScrollView>
-        )}
+          <Muted>No nearby courts yet — tap ＋ Add court to drop one on the map.</Muted>
+        ) : null}
       </Section>
 
       {/* RPE */}
@@ -435,6 +549,8 @@ const styles = StyleSheet.create({
   courtChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   courtChipText: { color: colors.text, fontWeight: '700', fontSize: font.small },
   courtChipSub: { color: colors.textFaint, fontSize: font.tiny },
+  addCourtChip: { borderColor: colors.primary, borderStyle: 'dashed', justifyContent: 'center' },
+  addCourtChipText: { color: colors.primary, fontWeight: '800', fontSize: font.small },
   tbToggle: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.xs },
   checkbox: {
     width: 22, height: 22, borderRadius: radius.sm, borderWidth: 1.5, borderColor: colors.border,

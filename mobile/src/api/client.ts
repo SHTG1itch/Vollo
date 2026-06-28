@@ -10,6 +10,8 @@ import type {
   NotificationItem,
   ProfileAnalytics,
   ProfileResponse,
+  ReverseGeocodeResult,
+  ScheduledMatchCard,
   ScoreArray,
   StreakState,
   Surface,
@@ -122,6 +124,7 @@ export interface CreateMatchPayload {
   opponent_id?: string;
   opponent_name?: string;
   court_id?: string;
+  scheduled_match_id?: string;
   surface: Surface;
   score_array: ScoreArray;
   is_tiebreak?: boolean;
@@ -132,12 +135,40 @@ export interface CreateMatchPayload {
   stats?: Partial<MatchCard['stats']>;
 }
 
+/** Session returned by the server-side sign-in proxy; fed straight into
+ *  supabase.auth.setSession so the client owns the refreshable session. */
+export interface SessionTokens {
+  access_token: string;
+  refresh_token: string;
+  expires_at?: number;
+  expires_in?: number;
+  token_type?: string;
+}
+
+export interface CreateScheduledMatchPayload {
+  opponent_id?: string;
+  opponent_name?: string;
+  court_id?: string;
+  surface?: Surface;
+  scheduled_at: string;
+  note?: string;
+  /** Frame the proposal as a competitive challenge (combative copy + push). */
+  is_challenge?: boolean;
+}
+
 export const api = {
   // ── Auth ──
-  register: (body: { username: string; email: string; password: string; display_name: string }) =>
-    request<AuthResponse>('/auth/register', { method: 'POST', body: JSON.stringify(body) }),
-  login: (body: { identifier: string; password: string }) =>
-    request<AuthResponse>('/auth/login', { method: 'POST', body: JSON.stringify(body) }),
+  // Sign-up runs client-side via Supabase Auth (see store/auth.ts); sign-in is
+  // proxied server-side so a username resolves to a session without the email
+  // ever reaching the client. `checkUsername` powers the sign-up "handle taken"
+  // check and discloses no email.
+  login: (identifier: string, password: string) =>
+    request<{ session: SessionTokens }>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ identifier, password }),
+    }),
+  checkUsername: (username: string) =>
+    request<{ available: boolean }>(`/auth/username-available${qs({ username })}`),
   me: () => request<{ user: AuthResponse['user'] }>('/auth/me'),
 
   // ── Feed ──
@@ -151,6 +182,11 @@ export const api = {
     request<{ match: MatchCard }>('/matches', { method: 'POST', body: JSON.stringify(body) }),
   getMatch: (id: string) => request<{ match: MatchCard }>(`/matches/${id}`),
   deleteMatch: (id: string) => request<void>(`/matches/${id}`, { method: 'DELETE' }),
+  // Matches awaiting my confirmation (I'm the tagged opponent).
+  getPendingMatches: () => request<{ matches: MatchCard[] }>('/matches/pending'),
+  // The tagged opponent confirms (it counts) or rejects (it never counts).
+  verifyMatch: (id: string, action: 'confirm' | 'reject') =>
+    request<{ match: MatchCard }>(`/matches/${id}/verify`, { method: 'POST', body: JSON.stringify({ action }) }),
   addKudos: (id: string) =>
     request<{ kudos_count: number; viewer_has_kudos: boolean }>(`/matches/${id}/kudos`, { method: 'POST' }),
   removeKudos: (id: string) =>
@@ -163,15 +199,37 @@ export const api = {
   // ── Courts ──
   getCourts: (params: { lat?: number; lng?: number; radius_km?: number; q?: string; limit?: number }) =>
     request<{ courts: Court[] }>(`/courts${qs(params)}`),
+  // Returns every court (OSM-imported + user-added) inside the viewport.
+  // `discover: false` is the instant first paint — it skips the slow Overpass
+  // import and just reads the DB, so the map never blocks on the network. The
+  // caller then re-runs with discover: true in the background to pull in new
+  // real-world courts.
+  discoverCourts: (
+    bbox: { min_lng: number; min_lat: number; max_lng: number; max_lat: number },
+    opts: { discover?: boolean } = {},
+  ) =>
+    request<{ courts: Court[] }>(
+      `/courts/discover${qs({ ...bbox, import: opts.discover === false ? 0 : 1 })}`,
+    ),
+  reverseGeocode: (lat: number, lng: number) =>
+    request<{ result: ReverseGeocodeResult | null }>(`/courts/reverse-geocode${qs({ lat, lng })}`),
   getCourt: (id: string) =>
     request<{ court: Court; controller: { user_id: string; username: string; display_name: string; score: number } | null }>(
       `/courts/${id}`,
     ),
   getCourtLeaderboard: (id: string) =>
     request<{ leaderboard: LeaderboardEntry[] }>(`/courts/${id}/leaderboard`),
-  createCourt: (body: { name: string; surface: Surface; lat: number; lng: number; city?: string; address?: string; description?: string }) =>
+  createCourt: (body: { name: string; surface: Surface; lat: number; lng: number; city?: string; address?: string; description?: string; court_count?: number }) =>
     request<{ court: Court }>('/courts', { method: 'POST', body: JSON.stringify(body) }),
   geocode: (q: string, limit = 5) => request<{ results: GeocodeResult[] }>(`/courts/geocode${qs({ q, limit })}`),
+
+  // ── Scheduled matches ──
+  getScheduledMatches: () =>
+    request<{ scheduled_matches: ScheduledMatchCard[] }>('/scheduled-matches'),
+  createScheduledMatch: (body: CreateScheduledMatchPayload) =>
+    request<{ scheduled_match: ScheduledMatchCard }>('/scheduled-matches', { method: 'POST', body: JSON.stringify(body) }),
+  respondToScheduledMatch: (id: string, action: 'accept' | 'decline' | 'cancel') =>
+    request<{ scheduled_match: ScheduledMatchCard }>(`/scheduled-matches/${id}`, { method: 'PATCH', body: JSON.stringify({ action }) }),
 
   // ── Territories ──
   getTerritories: (bbox?: { min_lng: number; min_lat: number; max_lng: number; max_lat: number }) =>

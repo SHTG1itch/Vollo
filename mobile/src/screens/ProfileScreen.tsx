@@ -9,7 +9,7 @@ import { useAuth } from '../store/auth';
 import { Avatar, Button, Card, ErrorState, Loading, Muted, Stat } from '../components/ui';
 import { FormDots, ProgressBar, RallyDistribution, SplitBar } from '../components/charts';
 import { SurfaceBadge } from '../components/SurfaceBadge';
-import { colors, font, radius, spacing, surfaceColors } from '../theme';
+import { colors, font, fonts, radius, spacing, surfaceColors } from '../theme';
 import type {
   Achievement,
   HeadToHead,
@@ -19,7 +19,10 @@ import type {
   StreakState,
   Surface,
   SurfaceRating,
+  Territory,
 } from '../types';
+
+const HEX6 = /^#[0-9A-Fa-f]{6}$/;
 import { formatScoreLine, timeAgo } from '../utils/format';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -32,7 +35,7 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
   const [ratings, setRatings] = useState<SurfaceRating[]>([]);
   const [achievements, setAchievements] = useState<Achievement[]>([]);
   const [streak, setStreak] = useState<StreakState | null>(null);
-  const [territories, setTerritories] = useState<{ id: string; district_name: string; court_count: number; area_sqkm: number }[]>([]);
+  const [territories, setTerritories] = useState<Territory[]>([]);
   const [h2h, setH2h] = useState<HeadToHead[]>([]);
   const [recent, setRecent] = useState<MatchCard[]>([]);
   const [following, setFollowing] = useState(false);
@@ -124,6 +127,16 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
   const avgRating =
     ratings.length > 0 ? Math.round(ratings.reduce((s, r) => s + r.rating, 0) / ratings.length) : null;
 
+  // Public gear loadout (what this player uses).
+  const eq = profile.user.equipment ?? {};
+  const gear = [
+    eq.racquet ? { icon: '🎾', label: 'Racquet', value: eq.racquet } : null,
+    eq.strings || eq.string_tension
+      ? { icon: '🧵', label: 'Strings', value: [eq.strings, eq.string_tension].filter(Boolean).join(' · ') }
+      : null,
+    eq.shoes ? { icon: '👟', label: 'Shoes', value: eq.shoes } : null,
+  ].filter(Boolean) as { icon: string; label: string; value: string }[];
+
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.bg }}
@@ -150,19 +163,39 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
         </View>
 
         {isSelf ? (
-          <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-            <Button label="Edit profile" variant="secondary" onPress={() => navigation.navigate('EditProfile')} style={{ flex: 1, height: 42 }} />
-            <Button label="Settings" variant="ghost" onPress={() => navigation.navigate('Settings')} style={{ flex: 1, height: 42 }} />
+          <View style={{ gap: spacing.sm }}>
+            <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+              <Button label="Edit profile" variant="secondary" onPress={() => navigation.navigate('EditProfile')} style={{ flex: 1, height: 42 }} />
+              <Button label="Settings" variant="ghost" onPress={() => navigation.navigate('Settings')} style={{ flex: 1, height: 42 }} />
+            </View>
+            <Button label="⚔️ Matches & challenges" variant="ghost" onPress={() => navigation.navigate('ScheduledMatches')} style={{ height: 42 }} />
           </View>
         ) : (
-          <Button
-            label={following ? 'Following' : 'Follow'}
-            variant={following ? 'secondary' : 'primary'}
-            onPress={toggleFollow}
-            loading={followLoading}
-            disabled={followLoading}
-            style={{ height: 42 }}
-          />
+          <View style={{ gap: spacing.sm }}>
+            <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+              <Button
+                label={following ? 'Following' : 'Follow'}
+                variant={following ? 'secondary' : 'primary'}
+                onPress={toggleFollow}
+                loading={followLoading}
+                disabled={followLoading}
+                style={{ flex: 1, height: 42 }}
+              />
+              <Button
+                label="⚔️ Challenge"
+                variant="primary"
+                onPress={() =>
+                  navigation.navigate('ScheduleMatch', {
+                    opponentId: profile.user.id,
+                    opponentName: profile.user.display_name,
+                    opponentUsername: profile.user.username,
+                    challenge: true,
+                  })
+                }
+                style={{ flex: 1, height: 42 }}
+              />
+            </View>
+          </View>
         )}
       </Card>
 
@@ -181,6 +214,20 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
           <Text style={styles.miniSub}>×{(streak?.streak_modifier ?? 1).toFixed(1)} court boost</Text>
         </Card>
       </View>
+
+      {/* Gear (public equipment) */}
+      {gear.length > 0 ? (
+        <Card style={{ gap: spacing.sm }}>
+          <SectionTitle>Gear</SectionTitle>
+          {gear.map((g) => (
+            <View key={g.label} style={styles.gearRow}>
+              <Text style={styles.gearIcon}>{g.icon}</Text>
+              <Text style={styles.gearLabel}>{g.label}</Text>
+              <Text style={styles.gearValue} numberOfLines={1}>{g.value}</Text>
+            </View>
+          ))}
+        </Card>
+      ) : null}
 
       {/* Recent form */}
       {analytics && analytics.recent_form.length > 0 ? (
@@ -215,8 +262,13 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
           {ratings.map((r) => (
             <View key={r.surface} style={styles.ratingRow}>
               <SurfaceBadge surface={r.surface as Surface} small />
-              <Text style={styles.ratingValue}>{r.rating}</Text>
-              <Text style={styles.ratingSub}>peak {r.peak_rating} · {r.wins}W {r.losses}L</Text>
+              <Text style={styles.ratingValue}>
+                {r.rating}
+                {r.rating_deviation != null ? <Text style={styles.ratingPm}> ±{r.rating_deviation}</Text> : null}
+              </Text>
+              <Text style={styles.ratingSub}>
+                peak {r.peak_rating} · {r.wins}W {r.losses}L{r.rating_deviation >= 150 ? ' · provisional' : ''}
+              </Text>
             </View>
           ))}
         </Card>
@@ -245,16 +297,34 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
         </Card>
       ) : null}
 
-      {/* Territories */}
+      {/* Territories — tap a zone to fly to it on the Domination Map */}
       {territories.length > 0 ? (
         <Card style={{ gap: spacing.sm }}>
           <SectionTitle>Territories</SectionTitle>
-          {territories.map((t) => (
-            <View key={t.id} style={styles.territoryRow}>
-              <Text style={styles.territoryName}>🗺️ {t.district_name}</Text>
-              <Text style={styles.territorySub}>{t.court_count} courts · {t.area_sqkm.toFixed(1)} km²</Text>
-            </View>
-          ))}
+          {territories.map((t) => {
+            const dot = t.owner_color && HEX6.test(t.owner_color) ? t.owner_color : colors.primary;
+            return (
+              <Pressable
+                key={t.id}
+                style={styles.territoryRow}
+                onPress={() =>
+                  navigation.navigate('Tabs', {
+                    screen: 'Map',
+                    params: { focusLat: t.center.lat, focusLng: t.center.lng, focusTerritoryId: t.id },
+                  })
+                }
+                accessibilityRole="button"
+                accessibilityLabel={`View ${t.district_name} on the map`}
+              >
+                <View style={[styles.zoneDot, { backgroundColor: dot }]} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.territoryName}>{t.district_name}</Text>
+                  <Text style={styles.territorySub}>{t.court_count} courts · {t.area_sqkm.toFixed(1)} km²</Text>
+                </View>
+                <Text style={styles.territoryGo}>View on map →</Text>
+              </Pressable>
+            );
+          })}
         </Card>
       ) : null}
 
@@ -334,24 +404,31 @@ export function UserProfileScreen({ route }: NativeStackScreenProps<RootStackPar
 const styles = StyleSheet.create({
   content: { padding: spacing.lg, gap: spacing.md },
   headerRow: { flexDirection: 'row', gap: spacing.md, alignItems: 'center' },
-  name: { color: colors.text, fontSize: font.h2, fontWeight: '800' },
+  name: { color: colors.text, fontSize: font.h2 + 2, fontFamily: fonts.display, letterSpacing: 0.2 },
   handle: { color: colors.textDim, fontSize: font.small },
   home: { color: colors.textFaint, fontSize: font.tiny, marginTop: 2 },
   bio: { color: colors.textDim, fontSize: font.body },
   statsRow: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.md },
   miniCard: { flex: 1, gap: 2 },
   miniLabel: { color: colors.textFaint, fontSize: font.tiny, fontWeight: '700', letterSpacing: 0.5 },
-  miniValue: { color: colors.text, fontSize: font.h2, fontWeight: '900' },
+  miniValue: { color: colors.text, fontSize: font.h1, fontFamily: fonts.display },
   miniSub: { color: colors.primary, fontSize: font.tiny, fontWeight: '600' },
   sectionTitle: { color: colors.textDim, fontWeight: '800', fontSize: font.small, textTransform: 'uppercase', letterSpacing: 0.5 },
   subhead: { color: colors.textDim, fontWeight: '700', fontSize: font.small },
   winRate: { color: colors.onAccent, fontWeight: '800', fontSize: font.small, backgroundColor: colors.accent, paddingHorizontal: spacing.sm, paddingVertical: 2, borderRadius: radius.pill, overflow: 'hidden' },
   ratingRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  ratingValue: { color: colors.text, fontWeight: '800', fontSize: font.body, width: 50 },
-  ratingSub: { color: colors.textFaint, fontSize: font.tiny, flex: 1 },
-  territoryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  territoryName: { color: colors.text, fontWeight: '700' },
+  ratingValue: { color: colors.text, fontWeight: '800', fontSize: font.body, minWidth: 50 },
+  ratingPm: { color: colors.textFaint, fontWeight: '600', fontSize: font.tiny },
+  ratingSub: { color: colors.textFaint, fontSize: font.tiny, flex: 1, textAlign: 'right' },
+  gearRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  gearIcon: { fontSize: 16, width: 22 },
+  gearLabel: { color: colors.textDim, fontSize: font.small, fontWeight: '700', width: 72 },
+  gearValue: { color: colors.text, fontSize: font.small, fontWeight: '600', flex: 1 },
+  territoryRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 2 },
+  zoneDot: { width: 14, height: 14, borderRadius: 4, borderWidth: 1, borderColor: colors.border },
+  territoryName: { color: colors.text, fontFamily: fonts.bold },
   territorySub: { color: colors.textDim, fontSize: font.small },
+  territoryGo: { color: colors.primary, fontSize: font.tiny, fontFamily: fonts.bold },
   badges: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   badge: { alignItems: 'center', width: 76, gap: 2, backgroundColor: colors.surfaceAlt, borderRadius: radius.md, padding: spacing.sm },
   badgeTitle: { color: colors.textDim, fontSize: 9, textAlign: 'center', fontWeight: '600' },

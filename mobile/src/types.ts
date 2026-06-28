@@ -5,6 +5,18 @@ export type MatchResult = 'win' | 'loss';
 export type SetScore = [number, number];
 export type ScoreArray = SetScore[];
 
+/** A match against a Vollo player starts 'pending' and only counts once the
+ *  opponent confirms it; matches with no Vollo opponent are 'auto'. */
+export type VerificationStatus = 'auto' | 'pending' | 'verified' | 'rejected';
+
+/** Public gear loadout shown on every profile. All fields optional. */
+export interface Equipment {
+  racquet?: string;
+  strings?: string;
+  string_tension?: string;
+  shoes?: string;
+}
+
 export interface User {
   id: string;
   username: string;
@@ -13,9 +25,12 @@ export interface User {
   avatar_url: string | null;
   bio: string | null;
   dominant_hand: 'right' | 'left';
+  /** Signature colour (#RRGGBB) used to wash this player's territories. */
+  color: string | null;
   home_lat: number | null;
   home_lng: number | null;
   home_label: string | null;
+  equipment: Equipment;
   created_at: string;
 }
 
@@ -29,6 +44,12 @@ export interface Court {
   address: string | null;
   city: string | null;
   osm_id: string | null;
+  /** 'user' for in-app additions, 'osm' for OpenStreetMap imports. */
+  source: string;
+  /** Stable identity for an imported facility; null for user-added courts. */
+  sector_key: string | null;
+  /** Number of physical courts this facility holds (a "sector"). */
+  court_count: number;
   created_by: string | null;
   created_at: string;
   distance_km?: number;
@@ -73,6 +94,8 @@ export interface MatchCard {
   duration_minutes: number | null;
   notes: string | null;
   is_tiebreak: boolean;
+  verification_status: VerificationStatus;
+  verified_at: string | null;
   played_at: string;
   created_at: string;
   author_username: string;
@@ -107,6 +130,11 @@ export interface Territory {
   updated_at: string;
   owner_username?: string;
   owner_display_name?: string;
+  /** Owner's signature colour (#RRGGBB), or null when unset. */
+  owner_color?: string | null;
+  /** Owner's verified wins across this zone's courts (30-day window) — the bar a
+   *  rival must clear to start claiming the territory. */
+  owner_zone_wins?: number;
 }
 
 export interface LeaderboardEntry {
@@ -128,6 +156,8 @@ export interface LeaderboardEntry {
 export interface SurfaceRating {
   surface: Surface;
   rating: number;
+  /** Bayesian rating deviation (σ) — uncertainty. High = provisional/new. */
+  rating_deviation: number;
   matches_played: number;
   wins: number;
   losses: number;
@@ -193,6 +223,36 @@ export interface ProfileAnalytics {
   avg_rpe: number;
 }
 
+export type ScheduleStatus = 'proposed' | 'accepted' | 'declined' | 'cancelled' | 'completed';
+
+export interface ScheduledMatchCard {
+  id: string;
+  creator_id: string;
+  creator_username: string;
+  creator_display_name: string;
+  creator_avatar_url: string | null;
+  opponent_id: string | null;
+  opponent_username: string | null;
+  opponent_display_name: string | null;
+  opponent_avatar_url: string | null;
+  opponent_name: string | null;
+  court_id: string | null;
+  court_name: string | null;
+  surface: Surface | null;
+  scheduled_at: string;
+  note: string | null;
+  status: ScheduleStatus;
+  /** True when framed as a competitive challenge rather than a plain plan. */
+  is_challenge: boolean;
+  match_id: string | null;
+  /** Score of the linked, played match (logger's games first) — shown to both. */
+  result_score: ScoreArray | null;
+  result_logged_by: string | null;
+  /** Which side the viewer is on, for rendering the right actions. */
+  viewer_role: 'creator' | 'opponent';
+  created_at: string;
+}
+
 export interface NotificationItem {
   id: string;
   type: string;
@@ -224,4 +284,11 @@ export interface GeocodeResult {
   lat: number;
   lng: number;
   city: string | null;
+}
+
+export interface ReverseGeocodeResult {
+  label: string;
+  city: string | null;
+  /** Neighbourhood/suburb used to name anonymous courts; may be absent. */
+  neighborhood?: string | null;
 }

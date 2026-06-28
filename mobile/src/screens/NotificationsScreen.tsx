@@ -31,8 +31,10 @@ export function NotificationsScreen() {
   const openTarget = (data: Record<string, unknown> | null | undefined) => {
     const matchId = typeof data?.matchId === 'string' ? data.matchId : null;
     const courtId = typeof data?.courtId === 'string' ? data.courtId : null;
+    const scheduledMatchId = typeof data?.scheduledMatchId === 'string' ? data.scheduledMatchId : null;
     if (matchId) navigation.navigate('MatchDetail', { matchId });
     else if (courtId) navigation.navigate('Court', { courtId });
+    else if (scheduledMatchId) navigation.navigate('ScheduledMatches');
   };
 
   return (
@@ -50,7 +52,10 @@ export function NotificationsScreen() {
           refreshControl={<RefreshControl refreshing={loading} onRefresh={() => fetch()} tintColor={colors.primary} />}
           renderItem={({ item }) => {
             const data = item.data as Record<string, unknown> | null | undefined;
-            const tappable = typeof data?.matchId === 'string' || typeof data?.courtId === 'string';
+            const tappable =
+              typeof data?.matchId === 'string' ||
+              typeof data?.courtId === 'string' ||
+              typeof data?.scheduledMatchId === 'string';
             return (
               <Pressable
                 disabled={!tappable}

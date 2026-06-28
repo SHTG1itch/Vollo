@@ -11,7 +11,7 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { SafeAreaView, type Edge } from 'react-native-safe-area-context';
-import { colors, font, radius, shadow, spacing } from '../theme';
+import { colors, font, fonts, radius, shadow, spacing } from '../theme';
 
 export function Screen({
   children,
@@ -267,8 +267,8 @@ const styles = StyleSheet.create({
   btnGhost: { backgroundColor: 'transparent' },
   btnDanger: { backgroundColor: colors.danger },
   btnDisabled: { opacity: 0.45 },
-  btnText: { fontSize: font.body, fontWeight: '700' },
-  label: { color: colors.textDim, fontSize: font.small, fontWeight: '600', marginLeft: 2 },
+  btnText: { fontSize: font.body, fontFamily: fonts.bold, letterSpacing: 0.3 },
+  label: { color: colors.textDim, fontSize: font.small, fontFamily: fonts.bold, marginLeft: 2 },
   input: {
     backgroundColor: colors.surfaceAlt,
     borderRadius: radius.md,
@@ -276,13 +276,14 @@ const styles = StyleSheet.create({
     height: 48,
     color: colors.text,
     fontSize: font.body,
+    fontFamily: fonts.body,
     borderWidth: 1,
     borderColor: colors.border,
   },
   badge: { paddingHorizontal: spacing.sm, paddingVertical: 3, borderRadius: radius.pill, alignSelf: 'flex-start' },
-  badgeText: { fontSize: font.tiny, fontWeight: '700' },
+  badgeText: { fontSize: font.tiny, fontFamily: fonts.bold },
   avatar: { backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' },
-  avatarText: { color: colors.primary, fontWeight: '800' },
+  avatarText: { color: colors.primary, fontFamily: fonts.display },
   segment: {
     flexDirection: 'row',
     backgroundColor: colors.surfaceAlt,
@@ -291,13 +292,13 @@ const styles = StyleSheet.create({
   },
   segmentItem: { flex: 1, paddingVertical: spacing.sm, alignItems: 'center', borderRadius: radius.sm },
   segmentItemActive: { backgroundColor: colors.primary },
-  segmentText: { color: colors.textDim, fontWeight: '600', fontSize: font.small },
-  segmentTextActive: { color: colors.onPrimary, fontWeight: '800' },
+  segmentText: { color: colors.textDim, fontFamily: fonts.bold, fontSize: font.small },
+  segmentTextActive: { color: colors.onPrimary, fontFamily: fonts.bold },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl, gap: spacing.xs },
-  dim: { color: colors.textDim, fontSize: font.small, textAlign: 'center' },
-  emptyTitle: { color: colors.text, fontSize: font.h3, fontWeight: '700' },
-  statValue: { fontSize: font.h2, fontWeight: '800' },
-  statLabel: { color: colors.textFaint, fontSize: font.tiny, marginTop: 2, textTransform: 'uppercase', letterSpacing: 0.5 },
-  h1: { color: colors.text, fontSize: font.h1, fontWeight: '800' },
-  h2: { color: colors.text, fontSize: font.h2, fontWeight: '800' },
+  dim: { color: colors.textDim, fontSize: font.small, fontFamily: fonts.body, textAlign: 'center' },
+  emptyTitle: { color: colors.text, fontSize: font.h3, fontFamily: fonts.heading },
+  statValue: { fontSize: font.h1, fontFamily: fonts.display },
+  statLabel: { color: colors.textFaint, fontSize: font.tiny, fontFamily: fonts.bold, marginTop: 2, textTransform: 'uppercase', letterSpacing: 0.5 },
+  h1: { color: colors.text, fontSize: font.h1 + 2, fontFamily: fonts.display, letterSpacing: 0.3 },
+  h2: { color: colors.text, fontSize: font.h2, fontFamily: fonts.display, letterSpacing: 0.2 },
 });

@@ -26,6 +26,7 @@ export function MatchDetailScreen({ route, navigation }: Props) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [posting, setPosting] = useState(false);
+  const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -106,6 +107,21 @@ export function MatchDetailScreen({ route, navigation }: Props) {
     }
   };
 
+  const verify = async (action: 'confirm' | 'reject') => {
+    if (!match || verifying) return;
+    setVerifying(true);
+    try {
+      const { match: updated } = await api.verifyMatch(matchId, action);
+      setMatch(updated);
+      // Reflect the new status in any feed card already on screen.
+      useFeed.setState((s) => ({ matches: s.matches.map((m) => (m.id === matchId ? updated : m)) }));
+    } catch (e) {
+      Alert.alert('Could not update', e instanceof ApiError ? e.message : 'Try again');
+    } finally {
+      setVerifying(false);
+    }
+  };
+
   const remove = () => {
     Alert.alert('Delete match', 'This cannot be undone.', [
       { text: 'Cancel', style: 'cancel' },
@@ -132,6 +148,9 @@ export function MatchDetailScreen({ route, navigation }: Props) {
   const win = match.result === 'win';
   const opponent = match.opponent_display_name ?? match.opponent_name ?? 'an unrecorded opponent';
   const isOwner = match.user_id === user?.id;
+  const isOpponent = !!match.opponent_id && match.opponent_id === user?.id;
+  const pending = match.verification_status === 'pending';
+  const rejected = match.verification_status === 'rejected';
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, backgroundColor: colors.bg }}>
@@ -193,6 +212,31 @@ export function MatchDetailScreen({ route, navigation }: Props) {
             </View>
           </View>
         </Card>
+
+        {/* Verification — competitive integrity gate */}
+        {pending && isOpponent ? (
+          <Card style={{ gap: spacing.sm, borderColor: colors.warning }}>
+            <Text style={styles.verifyTitle}>🎾 Verify this match</Text>
+            <Text style={styles.verifyBody}>
+              @{match.author_username} logged this against you. Confirm it so it counts toward their rating and
+              territory — or dispute it if it’s wrong.
+            </Text>
+            <View style={styles.verifyActions}>
+              <Button label="Dispute" variant="danger" onPress={() => verify('reject')} loading={verifying} disabled={verifying} style={{ flex: 1, height: 42 }} />
+              <Button label="Confirm" onPress={() => verify('confirm')} loading={verifying} disabled={verifying} style={{ flex: 1, height: 42 }} />
+            </View>
+          </Card>
+        ) : pending ? (
+          <Card style={{ borderColor: colors.warning }}>
+            <Text style={styles.verifyBody}>
+              ⏳ Awaiting {opponent}’s verification — this match won’t count until they confirm it.
+            </Text>
+          </Card>
+        ) : rejected ? (
+          <Card style={{ borderColor: colors.loss }}>
+            <Text style={styles.verifyBody}>🚫 This match was disputed, so it doesn’t count.</Text>
+          </Card>
+        ) : null}
 
         {match.stats ? <StatsCard stats={match.stats} /> : null}
 
@@ -270,6 +314,9 @@ const styles = StyleSheet.create({
   subhead: { color: colors.textFaint, fontWeight: '700', fontSize: font.tiny, letterSpacing: 0.5, textTransform: 'uppercase' },
   serveRow: { flexDirection: 'row', justifyContent: 'space-between' },
   serveStat: { color: colors.text, fontSize: font.small, fontWeight: '600' },
+  verifyTitle: { color: colors.text, fontWeight: '800', fontSize: font.h3 },
+  verifyBody: { color: colors.textDim, fontSize: font.small, lineHeight: 18 },
+  verifyActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.xs },
   commentsTitle: { color: colors.text, fontWeight: '800', fontSize: font.h3 },
   comment: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start' },
   commentAuthor: { color: colors.text, fontWeight: '700', fontSize: font.small },

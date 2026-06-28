@@ -61,7 +61,6 @@ export function FeedScreen() {
         <FlashList
           data={matches}
           keyExtractor={(m) => m.id}
-          estimatedItemSize={220}
           contentContainerStyle={styles.list}
           ItemSeparatorComponent={() => <View style={{ height: spacing.md }} />}
           refreshControl={

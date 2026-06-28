@@ -74,6 +74,14 @@ export function CourtDetailScreen({ route, navigation }: Props) {
         {court.city ? <Muted>{court.city}</Muted> : null}
         {court.address ? <Muted>{court.address}</Muted> : null}
 
+        {court.court_count > 1 ? (
+          <View style={styles.sectorPill}>
+            <Text style={styles.sectorText}>
+              🎾 {court.court_count} courts · one domination sector
+            </Text>
+          </View>
+        ) : null}
+
         <View style={styles.controllerBox}>
           <Text style={styles.crown}>👑</Text>
           <View style={{ flex: 1 }}>
@@ -135,6 +143,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: spacing.md, backgroundColor: colors.accentSoft,
     borderRadius: radius.md, padding: spacing.md, marginTop: spacing.sm,
   },
+  sectorPill: {
+    alignSelf: 'flex-start',
+    backgroundColor: colors.primarySoft,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 4,
+    marginTop: 2,
+  },
+  sectorText: { color: colors.primary, fontWeight: '700', fontSize: font.small },
   crown: { fontSize: 24 },
   controllerLabel: { color: colors.textDim, fontSize: font.tiny, textTransform: 'uppercase', letterSpacing: 0.5 },
   controllerName: { color: colors.text, fontWeight: '800', fontSize: font.body },

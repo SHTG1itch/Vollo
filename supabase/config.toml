@@ -1,0 +1,47 @@
+# Vollo — Supabase project configuration.
+# The backend runs entirely on Supabase free tier: Postgres + PostGIS for data,
+# a single Edge Function ("api") for the application logic, and pg_cron for the
+# periodic sweeps. No paid resources are used.
+project_id = "pfophuqopwfupxjonsty"
+
+[functions.api]
+# The function validates Supabase Auth bearer tokens itself (adminClient.auth
+# .getUser) and serves several genuinely public routes (feed, login proxy,
+# courts/territories reads), which would be 401'd by the platform gate before
+# reaching us — so the platform JWT gate stays disabled.
+verify_jwt = false
+
+# ── Email confirmation deep link (mobile) ────────────────────────────────────
+# Vollo has no website, so email-confirmation / password-recovery links must open
+# the app via its deep-link scheme instead of a web page. Set live in the
+# dashboard (Authentication → URL Configuration); mirrored here as config-as-code.
+# Without this the link falls back to the default http://localhost:3000 and dead-
+# ends on a phone (the email is still confirmed server-side before that redirect).
+[auth]
+site_url = "vollo://"
+additional_redirect_urls = ["vollo://**"]
+
+# ── Social sign-in (Google / Apple) ──────────────────────────────────────────
+# The mobile app uses the NATIVE id-token flow (supabase.auth.signInWithIdToken),
+# so the provider must trust the platform OAuth client ids whose tokens the app
+# sends. These blocks document intent and drive a CLI-based config push; the LIVE
+# project is configured in the Supabase dashboard (Authentication → Providers).
+# Full walk-through: supabase/OAUTH_SETUP.md. Secrets resolve from the
+# environment so nothing sensitive is committed.
+[auth.external.google]
+enabled = true
+# OAuth *web* client id/secret (the audience Supabase mints sessions for).
+client_id = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID)"
+secret    = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET)"
+# Native sign-in: the iOS/Android OAuth client ids must ALSO be trusted as token
+# audiences. In the dashboard these go in Google → "Authorized Client IDs".
+# (CLI: list them on the dashboard; this key documents the requirement.)
+skip_nonce_check = false
+
+[auth.external.apple]
+enabled = true
+# For NATIVE iOS sign-in, the id token's audience is the app bundle id
+# (app.vollo.mobile) — add it to Apple → "Authorized Client IDs" in the
+# dashboard. A Services ID + signing key is only needed for the web/Android leg.
+client_id = "env(SUPABASE_AUTH_EXTERNAL_APPLE_CLIENT_ID)"
+secret    = "env(SUPABASE_AUTH_EXTERNAL_APPLE_SECRET)"
