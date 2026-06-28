@@ -44,6 +44,27 @@ cd mobile
 eas build -p android --profile development   # uses the SHA-1 above
 ```
 
+> **The Google button only works in this dev/standalone build — never in Expo
+> Go.** `@react-native-google-signin/google-signin` is a native module that
+> Expo Go doesn't bundle, so the button is hidden in Expo Go (tapping it there
+> would otherwise throw *"Cannot read property 'GoogleSignin' of undefined"*).
+>
+> **Build prerequisites (already set in this repo — here so the build stays
+> reproducible):**
+> - **`expo.newArchEnabled: true`** in `app.json`. `react-native-reanimated` 4
+>   and `@shopify/flash-list` 2 are New-Architecture-only; `react-native-worklets`
+>   fails the Android build at preBuild with `GradleException("[Worklets]
+>   Worklets require new architecture to be enabled")` if it's false. Expo Go
+>   (SDK 54) always runs the New Architecture and ignores this flag — which is
+>   why the app runs there but an old-arch custom build fails.
+> - **`expo-dev-client`** must be installed (it is, in `package.json`) because
+>   the `development` EAS profile sets `developmentClient: true`.
+>
+> After the build installs, native sign-in additionally needs the **Android
+> OAuth client** (package `app.vollo.mobile` + the dev keystore SHA-1, already
+> created) — a missing/mismatched SHA-1 gives a runtime `DEVELOPER_ERROR`, not a
+> build failure.
+
 If you ever build with a **different** keystore (e.g. a `preview`/`production`
 profile, or a new dev keystore), add that keystore's SHA-1 as another **Android**
 OAuth client in the Vollo project (§2d), or Google returns `DEVELOPER_ERROR`.
