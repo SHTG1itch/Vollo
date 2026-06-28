@@ -12,7 +12,9 @@
       "backgroundColor": "#F4F6F3",
       "resizeMode": "contain"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "app.vollo.mobile",
@@ -22,14 +24,19 @@
     },
     "android": {
       "package": "app.vollo.mobile",
-      "permissions": ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"]
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ]
     },
     "web": {
       "bundler": "metro"
     },
     "plugins": [
       "expo-location",
-      "expo-notifications"
+      "expo-notifications",
+      "expo-asset",
+      "expo-font"
     ],
     "extra": {
       "apiUrl": "https://pfophuqopwfupxjonsty.supabase.co/functions/v1"
