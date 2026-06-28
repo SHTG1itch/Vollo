@@ -87,6 +87,12 @@ BEGIN
 END;
 $$;
 
+-- This is only ever invoked by the trigger below — never as a PostgREST RPC.
+-- Triggers run the function regardless of the caller's EXECUTE grant, so locking
+-- it down here keeps anon/authenticated from poking a SECURITY DEFINER function
+-- through /rest/v1/rpc without breaking sign-up.
+REVOKE EXECUTE ON FUNCTION public.handle_new_auth_user() FROM PUBLIC, anon, authenticated;
+
 -- Fire on insert (covers the auto-confirm case) and when email_confirmed_at flips
 -- on confirmation. The function itself guards against running before confirmation
 -- or running twice.
