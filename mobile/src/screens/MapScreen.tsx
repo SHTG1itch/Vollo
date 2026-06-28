@@ -88,12 +88,39 @@ function sameIds(a: { id: string }[], b: { id: string }[]): boolean {
   return true;
 }
 
-/** Territories also need a refresh when their geometry/owner data changes even if
- *  the id set is identical (e.g. after a match shifts a zone), so key on
- *  updated_at too. */
+/** Territories also need a refresh when their data changes even if the id set is
+ *  identical. updated_at catches geometry/zone shifts, but owner colour/name/wins
+ *  are JOINed from the users table (which doesn't bump territories.updated_at), so
+ *  compare those explicitly or a profile colour edit would leave a stale polygon. */
 function territoriesEqual(a: Territory[], b: Territory[]): boolean {
   if (!sameIds(a, b)) return false;
-  for (let i = 0; i < a.length; i++) if (a[i]!.updated_at !== b[i]!.updated_at) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]!;
+    const y = b[i]!;
+    if (
+      x.updated_at !== y.updated_at ||
+      x.owner_color !== y.owner_color ||
+      x.owner_username !== y.owner_username ||
+      x.owner_display_name !== y.owner_display_name ||
+      x.owner_zone_wins !== y.owner_zone_wins
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** Courts have no updated_at, so sameIds alone would suppress a surface/name/count
+ *  change on an already-loaded facility. Compare the display-relevant fields too. */
+function courtsEqual(a: Court[], b: Court[]): boolean {
+  if (!sameIds(a, b)) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]!;
+    const y = b[i]!;
+    if (x.surface !== y.surface || x.court_count !== y.court_count || x.name !== y.name || x.city !== y.city) {
+      return false;
+    }
+  }
   return true;
 }
 
@@ -154,6 +181,11 @@ export function MapScreen() {
   // Remember the last viewport so we can refresh courts when the screen regains
   // focus (e.g. returning after adding a court) and pass a centre to Add Court.
   const lastRegion = useRef<Region>(DEFAULT_REGION);
+  // The viewport a load actually fired for — the baseline the change-threshold is
+  // measured against. Kept separate from lastRegion so a run of sub-threshold
+  // pans (which keep advancing lastRegion) still accumulates and eventually
+  // crosses the threshold instead of resetting the baseline every settle.
+  const lastLoadedRegion = useRef<Region>(DEFAULT_REGION);
   // Drop out-of-order responses: a slow earlier load must not overwrite a newer
   // viewport's overlays (several callers can be in flight — pan, recenter, focus).
   const loadSeq = useRef(0);
@@ -173,19 +205,20 @@ export function MapScreen() {
   const commitCourts = useCallback((seq: number, next: Court[]) => {
     InteractionManager.runAfterInteractions(() => {
       if (seq !== loadSeq.current) return;
-      setCourts((prev) => (sameIds(prev, next) ? prev : next));
+      setCourts((prev) => (courtsEqual(prev, next) ? prev : next));
     });
   }, []);
 
   const load = useCallback(
     async (r: Region, opts: { force?: boolean } = {}) => {
-      // Coalesce negligible viewport changes: a fast flurry of pans/zooms would
-      // otherwise each swap the native overlay set and can crash the map.
-      if (!opts.force && !regionChangedEnough(lastRegion.current, r)) {
-        lastRegion.current = r;
-        return;
-      }
+      // Always track the live viewport (Add Court centre, focus refresh).
       lastRegion.current = r;
+      // Coalesce negligible viewport changes vs the last viewport we actually
+      // loaded — a fast flurry of pans/zooms would otherwise each swap the native
+      // overlay set and can crash the map. Comparing against lastLoadedRegion (not
+      // the live ref) means cumulative small pans still eventually reload.
+      if (!opts.force && !regionChangedEnough(lastLoadedRegion.current, r)) return;
+      lastLoadedRegion.current = r;
       const zoom = r.latitudeDelta <= MAX_COURT_DELTA;
       setZoomedIn(zoom);
       const seq = ++loadSeq.current;
@@ -382,7 +415,9 @@ export function MapScreen() {
         ))}
 
         {visibleCourts.map((court) => (
-          <CourtMarker key={court.id} court={court} onPress={openCourt} />
+          // Key includes surface so a pin recolours on a surface change despite
+          // tracksViewChanges={false} (which otherwise freezes the native pin).
+          <CourtMarker key={`${court.id}:${court.surface}`} court={court} onPress={openCourt} />
         ))}
       </MapView>
 

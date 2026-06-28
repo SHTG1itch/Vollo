@@ -567,7 +567,13 @@ app.post('/api/matches/:id/verify', requireAuth, async (c) => {
   const verifier = c.get('user')!.username;
 
   if (action === 'reject') {
-    await query("UPDATE matches SET verification_status = 'rejected', verified_at = now() WHERE id = $1", [id]);
+    // Status-guarded so a concurrent confirm/reject (double-tap, retry) can't
+    // both fire — only the request that flips it off 'pending' proceeds.
+    const rejected = await query<{ id: string }>(
+      "UPDATE matches SET verification_status = 'rejected', verified_at = now() WHERE id = $1 AND verification_status = 'pending' RETURNING id",
+      [id],
+    );
+    if (rejected.length === 0) throw ApiError.badRequest('This match has already been resolved');
     await notify({
       userId: match.user_id,
       type: 'match_rejected',
@@ -578,10 +584,17 @@ app.post('/api/matches/:id/verify', requireAuth, async (c) => {
     return c.json({ match: await fetchMatchCard(id, userId) });
   }
 
-  // confirm → the match now counts: apply its effects to the logger.
+  // confirm → the match now counts: apply its effects to the logger. The
+  // status-guarded UPDATE (with the row lock it takes) serialises concurrent
+  // verifies under READ COMMITTED — the loser matches 0 rows and bails BEFORE
+  // applyMatchEffects, so ELO/territory are applied exactly once.
   const previousControllerId = match.court_id ? await getCourtController(match.court_id) : null;
   await withTransaction(async (client) => {
-    await client.query("UPDATE matches SET verification_status = 'verified', verified_at = now() WHERE id = $1", [id]);
+    const claimed = await client.query<{ id: string }>(
+      "UPDATE matches SET verification_status = 'verified', verified_at = now() WHERE id = $1 AND verification_status = 'pending' RETURNING id",
+      [id],
+    );
+    if (claimed.rows.length === 0) throw ApiError.badRequest('This match has already been resolved');
     await applyMatchEffects(client, {
       matchId: id,
       userId: match.user_id,
@@ -1229,7 +1242,7 @@ app.get('/api/users/:username', optionalAuth, async (c) => {
   const viewerId = c.get('user')?.sub ?? null;
   const row = await queryOne<Record<string, unknown>>(
     `SELECT ${USER_SELECT},
-            (SELECT COUNT(*) FROM matches  WHERE user_id = u.id)     AS match_count,
+            (SELECT COUNT(*) FROM matches  WHERE user_id = u.id AND verification_status IN ('auto','verified')) AS match_count,
             (SELECT COUNT(*) FROM follows  WHERE following_id = u.id) AS follower_count,
             (SELECT COUNT(*) FROM follows  WHERE follower_id = u.id)  AS following_count,
             (SELECT COUNT(*) FROM territories WHERE user_id = u.id)   AS territory_count,
