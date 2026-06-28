@@ -52,6 +52,13 @@
         {
           "iosUrlScheme": "com.googleusercontent.apps.REPLACE_WITH_REVERSED_IOS_CLIENT_ID"
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Vollo needs access to your photos so you can set a profile or cover photo and add photos to a match.",
+          "cameraPermission": "Vollo needs camera access so you can take a photo for your profile or a match."
+        }
       ]
     ],
     "extra": {

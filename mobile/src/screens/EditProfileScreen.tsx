@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { api, ApiError } from '../api/client';
 import { useAuth } from '../store/auth';
 import { Avatar, Button, Card, Field, Muted } from '../components/ui';
+import { pickAndUploadProfileImage } from '../lib/uploadImage';
 import { colors, font, fonts, radius, spacing } from '../theme';
 import type { GeocodeResult } from '../types';
 
@@ -56,6 +57,7 @@ export function EditProfileScreen({ navigation }: Props) {
   const [displayName, setDisplayName] = useState(user?.display_name ?? '');
   const [bio, setBio] = useState(user?.bio ?? '');
   const [avatarUrl, setAvatarUrl] = useState(user?.avatar_url ?? '');
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [hand, setHand] = useState<'right' | 'left'>(user?.dominant_hand ?? 'right');
   const [color, setColor] = useState<string | null>(user?.color ?? null);
   const [homeQuery, setHomeQuery] = useState(user?.home_label ?? '');
@@ -68,6 +70,19 @@ export function EditProfileScreen({ navigation }: Props) {
   const [strings, setStrings] = useState(eq.strings ?? '');
   const [tension, setTension] = useState(eq.string_tension ?? '');
   const [shoes, setShoes] = useState(eq.shoes ?? '');
+
+  const onPickAvatar = async () => {
+    if (uploadingAvatar) return;
+    setUploadingAvatar(true);
+    try {
+      const url = await pickAndUploadProfileImage('avatar');
+      if (url) setAvatarUrl(url); // save() persists it via api.updateProfile
+    } catch (e) {
+      Alert.alert('Upload failed', e instanceof Error ? e.message : 'Please try again.');
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
 
   const findHome = async () => {
     if (!homeQuery.trim()) return;
@@ -109,9 +124,32 @@ export function EditProfileScreen({ navigation }: Props) {
     <ScrollView style={{ flex: 1, backgroundColor: colors.bg }} contentContainerStyle={styles.content}>
       <Card style={{ gap: spacing.md }}>
         <View style={styles.avatarRow}>
-          <Avatar name={displayName || user?.username || '🎾'} uri={avatarUrl.trim() || null} size={64} />
-          <View style={{ flex: 1 }}>
-            <Field label="Avatar image URL" value={avatarUrl} onChangeText={setAvatarUrl} placeholder="https://…/photo.jpg" autoCapitalize="none" autoCorrect={false} />
+          <Pressable
+            onPress={onPickAvatar}
+            disabled={uploadingAvatar}
+            style={styles.avatarPick}
+            accessibilityRole="button"
+            accessibilityLabel="Change profile photo"
+          >
+            <Avatar name={displayName || user?.username || '🎾'} uri={avatarUrl.trim() || null} size={76} />
+            <View style={styles.avatarBadge}>
+              {uploadingAvatar ? (
+                <ActivityIndicator size="small" color={colors.onPrimary} />
+              ) : (
+                <Text style={styles.avatarBadgeIcon}>📷</Text>
+              )}
+            </View>
+          </Pressable>
+          <View style={{ flex: 1, gap: spacing.xs }}>
+            <Text style={styles.photoTitle}>Profile photo</Text>
+            <Muted>Tap your photo to upload a new one from your library.</Muted>
+            <Button
+              label={uploadingAvatar ? 'Uploading…' : avatarUrl.trim() ? 'Change photo' : 'Add photo'}
+              variant="secondary"
+              loading={uploadingAvatar}
+              onPress={onPickAvatar}
+              style={{ height: 40, alignSelf: 'flex-start', paddingHorizontal: spacing.lg, marginTop: spacing.xs }}
+            />
           </View>
         </View>
         <Field label="Display name" value={displayName} onChangeText={setDisplayName} />
@@ -207,6 +245,22 @@ export function EditProfileScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   content: { padding: spacing.lg, gap: spacing.lg },
   avatarRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  avatarPick: { position: 'relative' },
+  avatarBadge: {
+    position: 'absolute',
+    right: -2,
+    bottom: -2,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: colors.primary,
+    borderWidth: 2,
+    borderColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarBadgeIcon: { fontSize: 13 },
+  photoTitle: { color: colors.text, fontFamily: fonts.bold, fontSize: font.body },
   label: { color: colors.textDim, fontSize: font.small, fontWeight: '600', marginLeft: 2 },
   handChip: { flex: 1, paddingVertical: spacing.md, borderRadius: radius.md, alignItems: 'center', backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border },
   handChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
