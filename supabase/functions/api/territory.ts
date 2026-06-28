@@ -238,6 +238,64 @@ export async function recomputeAfterMatch(args: {
   }
 
   await emitCourtTakeoverNotifications(courtId, previousControllerId);
+  await emitTurfWarNotification(courtId, loggerUserId).catch(() => {});
+}
+
+/**
+ * Turf War: when the player who just logged a match (the challenger) climbs to
+ * within `turfWarThreshold` of the rank-1 controller at a court that's part of
+ * the controller's established territory — but hasn't overtaken them yet — alert
+ * the controller that their zone is under threat. Only fires for the challenger's
+ * own match (so the controller's own wins don't self-trigger it), and is
+ * de-duped to at most once per 6h per court to avoid a barrage.
+ */
+async function emitTurfWarNotification(courtId: string, loggerUserId: string): Promise<void> {
+  const top = await query<{ user_id: string; score: string; rank: number }>(
+    `SELECT user_id, score, rank::int AS rank
+       FROM court_leaderboard
+      WHERE court_id = $1 AND rank <= 2 AND score > 0
+      ORDER BY rank ASC`,
+    [courtId],
+  );
+  const leader = top.find((r) => r.rank === 1);
+  const challenger = top.find((r) => r.rank === 2);
+  if (!leader || !challenger) return;
+
+  // Only the challenger's own fresh result escalates a turf war, and only while
+  // they're closing in (not after they've already taken the lead).
+  if (challenger.user_id !== loggerUserId || leader.user_id === loggerUserId) return;
+  const leaderScore = Number(leader.score);
+  const challengerScore = Number(challenger.score);
+  if (leaderScore <= 0 || challengerScore >= leaderScore) return;
+  if (challengerScore < config.territory.turfWarThreshold * leaderScore) return;
+
+  // Only meaningful for an established territory the leader actually holds here.
+  const ownsZone = await queryOne<{ ok: boolean }>(
+    'SELECT true AS ok FROM territories WHERE user_id = $1 AND court_ids @> ARRAY[$2]::uuid[] LIMIT 1',
+    [leader.user_id, courtId],
+  );
+  if (!ownsZone) return;
+
+  // De-dupe: don't re-alert the same court more than once every 6 hours.
+  const recent = await queryOne<{ ok: boolean }>(
+    `SELECT true AS ok FROM notifications
+      WHERE user_id = $1 AND type = 'turf_war' AND data->>'courtId' = $2
+        AND created_at > now() - INTERVAL '6 hours' LIMIT 1`,
+    [leader.user_id, courtId],
+  );
+  if (recent) return;
+
+  const court = await queryOne<{ name: string }>('SELECT name FROM courts WHERE id = $1', [courtId]);
+  const challengerUser = await queryOne<{ username: string }>('SELECT username FROM users WHERE id = $1', [challenger.user_id]);
+  const courtName = court?.name ?? 'one of your courts';
+
+  await notify({
+    userId: leader.user_id,
+    type: 'turf_war',
+    title: '⚔️ Turf War Initiated',
+    body: `@${challengerUser?.username ?? 'A rival'} is closing in on your control of ${courtName}. Defend your turf!`,
+    data: { courtId, courtName },
+  }).catch(() => {});
 }
 
 async function emitCourtTakeoverNotifications(
