@@ -5,8 +5,17 @@ import type { RootStackParamList } from '../navigation/types';
 import { api, ApiError } from '../api/client';
 import { useAuth } from '../store/auth';
 import { Avatar, Button, Card, Field, Muted } from '../components/ui';
-import { colors, font, radius, spacing } from '../theme';
+import { colors, font, fonts, radius, spacing } from '../theme';
 import type { GeocodeResult } from '../types';
+
+// Curated signature-colour palette. A player's territories render in a 40%
+// wash of their pick, so rivals can tell zones apart at a glance. `null` = unset
+// (the map falls back to a deterministic hue), shown as a "Default" chip.
+const COLOR_OPTIONS: (string | null)[] = [
+  null,
+  '#0F7A3D', '#E0432B', '#2477C9', '#7E6CC4', '#E8990C',
+  '#C05B22', '#1F9E8A', '#D81B8C', '#5B7CFA', '#15241B',
+];
 
 type Props = NativeStackScreenProps<RootStackParamList, 'EditProfile'>;
 
@@ -48,6 +57,7 @@ export function EditProfileScreen({ navigation }: Props) {
   const [bio, setBio] = useState(user?.bio ?? '');
   const [avatarUrl, setAvatarUrl] = useState(user?.avatar_url ?? '');
   const [hand, setHand] = useState<'right' | 'left'>(user?.dominant_hand ?? 'right');
+  const [color, setColor] = useState<string | null>(user?.color ?? null);
   const [homeQuery, setHomeQuery] = useState(user?.home_label ?? '');
   const [home, setHome] = useState<GeocodeResult | null>(null);
   const [results, setResults] = useState<GeocodeResult[]>([]);
@@ -73,6 +83,8 @@ export function EditProfileScreen({ navigation }: Props) {
     setSaving(true);
     try {
       const body: Record<string, unknown> = { display_name: displayName.trim(), bio: bio.trim(), dominant_hand: hand };
+      // Send '' to clear back to the default hashed hue; a hex sets the signature.
+      body.color = color ?? '';
       const trimmedAvatar = avatarUrl.trim();
       if (trimmedAvatar) body.avatar_url = trimmedAvatar;
       if (home) body.home = { lat: home.lat, lng: home.lng, label: home.label };
@@ -114,6 +126,32 @@ export function EditProfileScreen({ navigation }: Props) {
             ))}
           </View>
         </View>
+        <View style={{ gap: spacing.xs }}>
+          <Text style={styles.label}>Signature colour</Text>
+          <Muted>Your domination zones show in a 40% wash of this colour on the map.</Muted>
+          <View style={styles.swatchRow}>
+            {COLOR_OPTIONS.map((opt) => {
+              const active = (color ?? null) === opt;
+              return (
+                <Pressable
+                  key={opt ?? 'default'}
+                  onPress={() => setColor(opt)}
+                  style={[
+                    styles.swatch,
+                    opt ? { backgroundColor: opt } : styles.swatchDefault,
+                    active && styles.swatchActive,
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel={opt ? `Colour ${opt}` : 'Default colour'}
+                >
+                  {opt == null ? <Text style={styles.swatchDefaultText}>—</Text> : null}
+                  {active && opt != null ? <Text style={styles.swatchCheck}>✓</Text> : null}
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+
         <View style={{ gap: spacing.xs }}>
           <Field
             label="Home base"
@@ -176,6 +214,15 @@ const styles = StyleSheet.create({
   handTextActive: { color: colors.onPrimary, fontWeight: '800' },
   result: { backgroundColor: colors.surfaceAlt, borderRadius: radius.sm, padding: spacing.md, borderWidth: 1, borderColor: colors.border },
   resultText: { color: colors.textDim, fontSize: font.small },
+  swatchRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.xs },
+  swatch: {
+    width: 38, height: 38, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 2, borderColor: 'transparent',
+  },
+  swatchDefault: { backgroundColor: colors.surfaceAlt, borderColor: colors.border },
+  swatchDefaultText: { color: colors.textFaint, fontFamily: fonts.bold },
+  swatchActive: { borderColor: colors.text },
+  swatchCheck: { position: 'absolute', color: colors.white, fontFamily: fonts.bold, fontSize: 16 },
   cardTitle: { color: colors.text, fontWeight: '800', fontSize: font.h3 },
   pickRow: { gap: spacing.sm, paddingVertical: 2 },
   pick: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.pill, backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border },
