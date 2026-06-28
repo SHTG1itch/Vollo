@@ -22,22 +22,30 @@ enable the providers in Supabase, and paste the client ids back into the app.
 
 ---
 
-## Live status (Google: set up 2026-06-27)
+## Live status (Google: fully set up 2026-06-27)
 
-**Google sign-in is configured and published — only the Android client (SHA-1) is left.**
+**Google sign-in is configured, published, and Android-ready. Nothing left in the consoles — just build & install a dev client.**
 
 | Done | Detail |
 | --- | --- |
 | Google Cloud project | **Vollo** (`stable-course-500806-f0`), owner `you@example.com` |
 | OAuth consent screen | App "Vollo", External, **published to Production** (basic scopes → no verification needed) |
 | Web OAuth client | **Vollo Web** — `958415288431-fol1pk22asmc748feuvbo1gkntcegis2.apps.googleusercontent.com`; redirect URI = the Supabase callback |
+| Android OAuth client | **Vollo Android** — `958415288431-ui589sqprbac8v4e87h1f143m5qq5gtu.apps.googleusercontent.com`; package `app.vollo.mobile`, SHA-1 `9B:1A:88:97:8F:1B:29:D4:0E:CA:8A:75:EC:F8:65:27:8C:2D:CF:D9` (EAS `development` keystore) |
 | Supabase Google provider | **Enabled** with the Web client id + secret |
-| App config | `expo.extra.googleWebClientId` set in `mobile/app.json` |
+| App config | `expo.extra.googleWebClientId` set in `mobile/app.json`; EAS project linked (`eas.json` + `extra.eas.projectId`) |
 
-**Remaining for Android sign-in to actually work:** create an **Android** OAuth
-client in the Vollo project (package `app.vollo.mobile` + your build's **SHA-1**)
-— see §2d. Without it, `GoogleSignin.signIn()` returns `DEVELOPER_ERROR` on
-Android. The SHA-1 comes from your EAS build keystore (`eas credentials`).
+**To use it:** build & install the Android dev client signed with that same
+keystore, then tap "Continue with Google":
+
+```bash
+cd mobile
+eas build -p android --profile development   # uses the SHA-1 above
+```
+
+If you ever build with a **different** keystore (e.g. a `preview`/`production`
+profile, or a new dev keystore), add that keystore's SHA-1 as another **Android**
+OAuth client in the Vollo project (§2d), or Google returns `DEVELOPER_ERROR`.
 
 **Apple sign-in is intentionally not set up** — Sign In with Apple requires the
 Apple Developer Program ($99/yr), which conflicts with the $0 constraint. The
