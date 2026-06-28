@@ -10,20 +10,26 @@ export function PressableBounce({
   children,
   style,
   scaleTo = 0.94,
+  onPressIn,
+  onPressOut,
   ...rest
 }: PressableProps & { children: React.ReactNode; style?: StyleProp<ViewStyle>; scaleTo?: number }) {
   const scale = useSharedValue(1);
   const aStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+  // Spread rest first and compose any consumer onPressIn/onPressOut so the
+  // bounce can never be silently clobbered by a passed-through handler.
   return (
     <AnimatedPressable
-      onPressIn={() => {
+      {...rest}
+      onPressIn={(e) => {
         scale.value = withSpring(scaleTo, { damping: 15, stiffness: 320 });
+        onPressIn?.(e);
       }}
-      onPressOut={() => {
+      onPressOut={(e) => {
         scale.value = withSpring(1, { damping: 12, stiffness: 260 });
+        onPressOut?.(e);
       }}
       style={[aStyle, style]}
-      {...rest}
     >
       {children}
     </AnimatedPressable>

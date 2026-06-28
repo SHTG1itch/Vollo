@@ -61,7 +61,10 @@ export function CountUp({
       progress.value = 1;
       return;
     }
-    from.value = to.value; // start from whatever is on screen
+    // Snapshot the value currently painted (the live interpolation), so an
+    // update that lands mid-tween continues smoothly instead of snapping back to
+    // the previous target before animating to the new one.
+    from.value = from.value + (to.value - from.value) * progress.value;
     to.value = value;
     progress.value = 0;
     progress.value = withTiming(1, { duration, easing: Easing.out(Easing.cubic) });
