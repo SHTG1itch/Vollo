@@ -37,6 +37,9 @@ export function LogMatchScreen() {
   const [surface, setSurface] = useState<Surface>('hard');
   const [surfaceTouched, setSurfaceTouched] = useState(false);
   const [courtId, setCourtId] = useState<string | null>(null);
+  // Set when this log fulfils a scheduled match, so we link the result on submit.
+  const [scheduledMatchId, setScheduledMatchId] = useState<string | null>(null);
+  const lastPrefillKey = useRef<string | null>(null);
   const [opponentName, setOpponentName] = useState('');
   const [opponentId, setOpponentId] = useState<string | null>(null);
   const [oppResults, setOppResults] = useState<UserSearchResult[]>([]);
@@ -151,6 +154,54 @@ export function LogMatchScreen() {
     })();
   }, [route.params?.newCourtId, navigation]);
 
+  // Prefill from "Log result" on a scheduled match: seed opponent/court/surface
+  // and remember the schedule id so the result links back. Keyed so a fresh
+  // navigation re-applies, but a re-focus (params cleared) doesn't.
+  useEffect(() => {
+    const p = route.params;
+    if (!p) return;
+    const key =
+      p.scheduledMatchId ??
+      (p.prefillOpponentId || p.prefillOpponentName || p.prefillCourtId || p.prefillSurface
+        ? `${p.prefillOpponentId ?? ''}|${p.prefillOpponentName ?? ''}|${p.prefillCourtId ?? ''}|${p.prefillSurface ?? ''}`
+        : null);
+    if (!key || lastPrefillKey.current === key) return;
+    lastPrefillKey.current = key;
+
+    if (p.prefillOpponentId) {
+      setOpponentId(p.prefillOpponentId);
+      setOpponentName(p.prefillOpponentName ?? '');
+      setOppResults([]);
+    } else if (p.prefillOpponentName) {
+      setOpponentName(p.prefillOpponentName);
+    }
+    if (p.prefillSurface) {
+      setSurface(p.prefillSurface);
+      setSurfaceTouched(true);
+    }
+    if (p.scheduledMatchId) setScheduledMatchId(p.scheduledMatchId);
+    if (p.prefillCourtId) {
+      const cid = p.prefillCourtId;
+      setCourtId(cid);
+      void (async () => {
+        try {
+          const { court } = await api.getCourt(cid);
+          courtsToken.current++;
+          setCourts((prev) => (prev.some((c) => c.id === court.id) ? prev : [court, ...prev]));
+        } catch {
+          /* leave selection as-is */
+        }
+      })();
+    }
+    (navigation.setParams as (params: Partial<Record<string, undefined>>) => void)({
+      prefillOpponentId: undefined,
+      prefillOpponentName: undefined,
+      prefillCourtId: undefined,
+      prefillSurface: undefined,
+      scheduledMatchId: undefined,
+    });
+  }, [route.params, navigation]);
+
   const preview = useMemo(() => analyzeLocal(score, tiebreakFinal), [score, tiebreakFinal]);
   const result = preview.result;
   // Mirror the backend: valid when every set has a winner and the match isn't a
@@ -179,6 +230,7 @@ export function LogMatchScreen() {
         score_array: score,
         is_tiebreak: tiebreakFinal,
         ...(courtId ? { court_id: courtId } : {}),
+        ...(scheduledMatchId ? { scheduled_match_id: scheduledMatchId } : {}),
         // A tagged registered player takes precedence over a free-text name.
         ...(opponentId
           ? { opponent_id: opponentId }
@@ -203,6 +255,7 @@ export function LogMatchScreen() {
       setOpponentName('');
       setOpponentId(null);
       setOppResults([]);
+      setScheduledMatchId(null);
       setRpe(null);
       setDuration(0);
       setNotes('');
@@ -222,6 +275,9 @@ export function LogMatchScreen() {
       keyboardShouldPersistTaps="handled"
     >
       <H2>Log a match</H2>
+      {scheduledMatchId ? (
+        <Muted>📅 Logging your scheduled match — the result shows on both players’ cards.</Muted>
+      ) : null}
 
       {/* Result preview */}
       <Card style={styles.preview}>

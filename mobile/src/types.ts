@@ -212,6 +212,34 @@ export interface ProfileAnalytics {
   avg_rpe: number;
 }
 
+export type ScheduleStatus = 'proposed' | 'accepted' | 'declined' | 'cancelled' | 'completed';
+
+export interface ScheduledMatchCard {
+  id: string;
+  creator_id: string;
+  creator_username: string;
+  creator_display_name: string;
+  creator_avatar_url: string | null;
+  opponent_id: string | null;
+  opponent_username: string | null;
+  opponent_display_name: string | null;
+  opponent_avatar_url: string | null;
+  opponent_name: string | null;
+  court_id: string | null;
+  court_name: string | null;
+  surface: Surface | null;
+  scheduled_at: string;
+  note: string | null;
+  status: ScheduleStatus;
+  match_id: string | null;
+  /** Score of the linked, played match (logger's games first) — shown to both. */
+  result_score: ScoreArray | null;
+  result_logged_by: string | null;
+  /** Which side the viewer is on, for rendering the right actions. */
+  viewer_role: 'creator' | 'opponent';
+  created_at: string;
+}
+
 export interface NotificationItem {
   id: string;
   type: string;

@@ -163,19 +163,36 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
         </View>
 
         {isSelf ? (
-          <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-            <Button label="Edit profile" variant="secondary" onPress={() => navigation.navigate('EditProfile')} style={{ flex: 1, height: 42 }} />
-            <Button label="Settings" variant="ghost" onPress={() => navigation.navigate('Settings')} style={{ flex: 1, height: 42 }} />
+          <View style={{ gap: spacing.sm }}>
+            <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+              <Button label="Edit profile" variant="secondary" onPress={() => navigation.navigate('EditProfile')} style={{ flex: 1, height: 42 }} />
+              <Button label="Settings" variant="ghost" onPress={() => navigation.navigate('Settings')} style={{ flex: 1, height: 42 }} />
+            </View>
+            <Button label="📅 Scheduled matches" variant="ghost" onPress={() => navigation.navigate('ScheduledMatches')} style={{ height: 42 }} />
           </View>
         ) : (
-          <Button
-            label={following ? 'Following' : 'Follow'}
-            variant={following ? 'secondary' : 'primary'}
-            onPress={toggleFollow}
-            loading={followLoading}
-            disabled={followLoading}
-            style={{ height: 42 }}
-          />
+          <View style={{ gap: spacing.sm }}>
+            <Button
+              label={following ? 'Following' : 'Follow'}
+              variant={following ? 'secondary' : 'primary'}
+              onPress={toggleFollow}
+              loading={followLoading}
+              disabled={followLoading}
+              style={{ height: 42 }}
+            />
+            <Button
+              label="📅 Schedule a match"
+              variant="secondary"
+              onPress={() =>
+                navigation.navigate('ScheduleMatch', {
+                  opponentId: profile.user.id,
+                  opponentName: profile.user.display_name,
+                  opponentUsername: profile.user.username,
+                })
+              }
+              style={{ height: 42 }}
+            />
+          </View>
         )}
       </Card>
 

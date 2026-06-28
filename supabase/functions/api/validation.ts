@@ -64,6 +64,9 @@ export const createMatchSchema = z
     opponent_id: z.string().uuid().optional(),
     opponent_name: z.string().trim().max(60).optional(),
     court_id: z.string().uuid().optional(),
+    // When this match fulfils a scheduled proposal, link it so the result shows
+    // on both players' scheduled-match cards.
+    scheduled_match_id: z.string().uuid().optional(),
     surface: surfaceSchema,
     score_array: scoreArraySchema,
     rpe_index: z.number().int().min(1).max(10).optional(),
@@ -103,6 +106,39 @@ export const createMatchSchema = z
       }
     }
   });
+
+// ─── Scheduled matches ──────────────────────────────────────────────────────
+const SCHEDULE_MAX_AHEAD_MS = 365 * 86_400_000; // a year out is plenty
+
+export const createScheduledMatchSchema = z
+  .object({
+    opponent_id: z.string().uuid().optional(),
+    opponent_name: z.string().trim().max(60).optional(),
+    court_id: z.string().uuid().optional(),
+    surface: surfaceSchema.optional(),
+    scheduled_at: z
+      .string()
+      .datetime()
+      .refine((v) => new Date(v).getTime() >= Date.now() - PLAYED_AT_SKEW_MS, {
+        message: 'scheduled_at cannot be in the past',
+      })
+      .refine((v) => new Date(v).getTime() <= Date.now() + SCHEDULE_MAX_AHEAD_MS, {
+        message: 'scheduled_at is too far in the future',
+      }),
+    note: z.string().trim().max(280).optional(),
+  })
+  .refine((b) => b.opponent_id || b.opponent_name, {
+    message: 'Provide an opponent (a Vollo player or a name)',
+    path: ['opponent_name'],
+  })
+  .refine((b) => !(b.opponent_id && b.opponent_name), {
+    message: 'Provide either opponent_id or opponent_name, not both',
+    path: ['opponent_name'],
+  });
+
+export const updateScheduledMatchSchema = z.object({
+  action: z.enum(['accept', 'decline', 'cancel']),
+});
 
 export const createCourtSchema = z.object({
   name: z.string().trim().min(1).max(120),

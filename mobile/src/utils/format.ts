@@ -20,6 +20,19 @@ export function timeAgo(iso: string): string {
   return date.toLocaleDateString(undefined, opts);
 }
 
+/**
+ * Format a scheduled-match time as "Sat, Jun 28 · 5:00 PM" (year appended when
+ * it isn't the current one). Used by the scheduling screens.
+ */
+export function formatSchedule(iso: string): string {
+  const date = new Date(iso);
+  const dayOpts: Intl.DateTimeFormatOptions = { weekday: 'short', month: 'short', day: 'numeric' };
+  if (date.getFullYear() !== new Date().getFullYear()) dayOpts.year = 'numeric';
+  const day = date.toLocaleDateString(undefined, dayOpts);
+  const time = date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  return `${day} · ${time}`;
+}
+
 /** Abbreviate large counts for compact UI, e.g. 1200 -> "1.2k", 12000 -> "12k". */
 export function formatCount(n: number): string {
   if (n < 1000) return String(n);

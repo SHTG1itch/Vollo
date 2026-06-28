@@ -1,7 +1,7 @@
 // Helpers that convert raw Postgres rows into the API DTOs declared in types.ts.
 // NUMERIC columns arrive as strings from the driver; we coerce the specific
 // fields the client expects to be numbers.
-import type { Court, Equipment, Match, MatchCard, User } from './types.ts';
+import type { Court, Equipment, Match, MatchCard, ScheduledMatchCard, ScoreArray, User } from './types.ts';
 
 /**
  * timestamptz columns arrive as JS `Date` objects. `String(date)` yields a
@@ -104,6 +104,32 @@ function mapMatchBase(r: Record<string, unknown>): Match {
 
 export function mapMatch(r: Record<string, unknown>): Match {
   return mapMatchBase(r);
+}
+
+export function mapScheduledMatch(r: Record<string, unknown>, viewerId: string): ScheduledMatchCard {
+  return {
+    id: r.id as string,
+    creator_id: r.creator_id as string,
+    creator_username: r.creator_username as string,
+    creator_display_name: r.creator_display_name as string,
+    creator_avatar_url: (r.creator_avatar_url as string | null) ?? null,
+    opponent_id: (r.opponent_id as string | null) ?? null,
+    opponent_username: (r.opponent_username as string | null) ?? null,
+    opponent_display_name: (r.opponent_display_name as string | null) ?? null,
+    opponent_avatar_url: (r.opponent_avatar_url as string | null) ?? null,
+    opponent_name: (r.opponent_name as string | null) ?? null,
+    court_id: (r.court_id as string | null) ?? null,
+    court_name: (r.court_name as string | null) ?? null,
+    surface: (r.surface as ScheduledMatchCard['surface']) ?? null,
+    scheduled_at: toIso(r.scheduled_at),
+    note: (r.note as string | null) ?? null,
+    status: r.status as ScheduledMatchCard['status'],
+    match_id: (r.match_id as string | null) ?? null,
+    result_score: (r.result_score as ScoreArray | null) ?? null,
+    result_logged_by: (r.result_logged_by as string | null) ?? null,
+    viewer_role: (r.creator_id as string) === viewerId ? 'creator' : 'opponent',
+    created_at: toIso(r.created_at),
+  };
 }
 
 export function mapMatchCard(r: Record<string, unknown>): MatchCard {

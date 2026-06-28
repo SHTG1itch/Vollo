@@ -1,4 +1,5 @@
 import type { NavigatorScreenParams } from '@react-navigation/native';
+import type { Surface } from '../types';
 
 export type TabParamList = {
   Feed: undefined;
@@ -6,7 +7,17 @@ export type TabParamList = {
   // (used by the "view on map" action on a profile's territory).
   Map: { focusLat?: number; focusLng?: number; focusTerritoryId?: string } | undefined;
   // A court just added from the Log flow is handed back here to auto-select.
-  Log: { newCourtId?: string } | undefined;
+  // Prefill params let "Log result" on a scheduled match seed the opponent/court.
+  Log:
+    | {
+        newCourtId?: string;
+        prefillOpponentId?: string;
+        prefillOpponentName?: string;
+        prefillCourtId?: string;
+        prefillSurface?: Surface;
+        scheduledMatchId?: string;
+      }
+    | undefined;
   Alerts: undefined;
   Me: undefined;
 };
@@ -25,6 +36,9 @@ export type RootStackParamList = {
   EditProfile: undefined;
   UserSearch: undefined;
   Settings: undefined;
+  ScheduledMatches: undefined;
+  // Propose a match; opponent is prefilled when launched from their profile.
+  ScheduleMatch: { opponentId?: string; opponentName?: string; opponentUsername?: string } | undefined;
 };
 
 declare global {

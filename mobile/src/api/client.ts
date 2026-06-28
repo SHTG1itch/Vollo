@@ -11,6 +11,7 @@ import type {
   ProfileAnalytics,
   ProfileResponse,
   ReverseGeocodeResult,
+  ScheduledMatchCard,
   ScoreArray,
   StreakState,
   Surface,
@@ -123,6 +124,7 @@ export interface CreateMatchPayload {
   opponent_id?: string;
   opponent_name?: string;
   court_id?: string;
+  scheduled_match_id?: string;
   surface: Surface;
   score_array: ScoreArray;
   is_tiebreak?: boolean;
@@ -131,6 +133,15 @@ export interface CreateMatchPayload {
   notes?: string;
   played_at?: string;
   stats?: Partial<MatchCard['stats']>;
+}
+
+export interface CreateScheduledMatchPayload {
+  opponent_id?: string;
+  opponent_name?: string;
+  court_id?: string;
+  surface?: Surface;
+  scheduled_at: string;
+  note?: string;
 }
 
 export const api = {
@@ -187,6 +198,14 @@ export const api = {
   createCourt: (body: { name: string; surface: Surface; lat: number; lng: number; city?: string; address?: string; description?: string; court_count?: number }) =>
     request<{ court: Court }>('/courts', { method: 'POST', body: JSON.stringify(body) }),
   geocode: (q: string, limit = 5) => request<{ results: GeocodeResult[] }>(`/courts/geocode${qs({ q, limit })}`),
+
+  // ── Scheduled matches ──
+  getScheduledMatches: () =>
+    request<{ scheduled_matches: ScheduledMatchCard[] }>('/scheduled-matches'),
+  createScheduledMatch: (body: CreateScheduledMatchPayload) =>
+    request<{ scheduled_match: ScheduledMatchCard }>('/scheduled-matches', { method: 'POST', body: JSON.stringify(body) }),
+  respondToScheduledMatch: (id: string, action: 'accept' | 'decline' | 'cancel') =>
+    request<{ scheduled_match: ScheduledMatchCard }>(`/scheduled-matches/${id}`, { method: 'PATCH', body: JSON.stringify({ action }) }),
 
   // ── Territories ──
   getTerritories: (bbox?: { min_lng: number; min_lat: number; max_lng: number; max_lat: number }) =>

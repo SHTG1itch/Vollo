@@ -16,12 +16,12 @@ import { config } from './config.ts';
 import { query, queryOne, withTransaction, getSecret } from './db.ts';
 import { ApiError } from './errors.ts';
 import { hashPassword, signToken, verifyPassword, verifyToken } from './auth.ts';
-import { mapCourt, mapMatchCard, mapPublicUser, mapUser, toIso } from './mappers.ts';
+import { mapCourt, mapMatchCard, mapPublicUser, mapScheduledMatch, mapUser, toIso } from './mappers.ts';
 import {
   bboxQuerySchema, commentSchema, commentsQuerySchema, courtsQuerySchema,
-  createCourtSchema, createMatchSchema, discoverQuerySchema, feedQuerySchema,
+  createCourtSchema, createMatchSchema, createScheduledMatchSchema, discoverQuerySchema, feedQuerySchema,
   geocodeQuerySchema, loginSchema, notificationIdsSchema, pushTokenSchema,
-  registerSchema, reverseGeocodeQuerySchema, updateProfileSchema, userSearchQuerySchema,
+  registerSchema, reverseGeocodeQuerySchema, updateProfileSchema, updateScheduledMatchSchema, userSearchQuerySchema,
 } from './validation.ts';
 import type { CreateMatchInput } from './validation.ts';
 import { analyzeScore, matchScore } from './scoring.ts';
@@ -412,6 +412,20 @@ app.post('/api/matches', requireAuth, async (c) => {
     }).catch(() => {});
   }
 
+  // If this match fulfils a scheduled proposal, link it so the score surfaces on
+  // both players' scheduled-match cards. Best-effort; the match is already saved.
+  if (body.scheduled_match_id) {
+    try {
+      await query(
+        `UPDATE scheduled_matches SET status = 'completed', match_id = $1
+          WHERE id = $2 AND (creator_id = $3 OR opponent_id = $3) AND status <> 'completed'`,
+        [matchId, body.scheduled_match_id, userId],
+      );
+    } catch (err) {
+      console.error('[matches] scheduled-match link failed', err instanceof Error ? err.message : err);
+    }
+  }
+
   const card = await fetchMatchCard(matchId, userId);
   return c.json({ match: card }, 201);
 });
@@ -545,6 +559,110 @@ app.post('/api/matches/:id/comments', requireAuth, async (c) => {
     }).catch(() => {});
   }
   return c.json({ comment }, 201);
+});
+
+// ─── Scheduled matches ───────────────────────────────────────────────────
+const SCHEDULED_SELECT = `
+  SELECT s.id, s.creator_id, s.opponent_id, s.opponent_name, s.court_id, s.surface,
+         s.scheduled_at, s.note, s.status, s.match_id, s.created_at,
+         cu.username AS creator_username, cu.display_name AS creator_display_name, cu.avatar_url AS creator_avatar_url,
+         ou.username AS opponent_username, ou.display_name AS opponent_display_name, ou.avatar_url AS opponent_avatar_url,
+         c.name AS court_name,
+         m.score_array AS result_score, m.user_id AS result_logged_by
+    FROM scheduled_matches s
+    JOIN users cu ON cu.id = s.creator_id
+    LEFT JOIN users ou ON ou.id = s.opponent_id
+    LEFT JOIN courts c ON c.id = s.court_id
+    LEFT JOIN matches m ON m.id = s.match_id`;
+
+async function fetchScheduledMatch(id: string, viewerId: string) {
+  const row = await queryOne<Record<string, unknown>>(`${SCHEDULED_SELECT} WHERE s.id = $1`, [id]);
+  return row ? mapScheduledMatch(row, viewerId) : null;
+}
+
+app.get('/api/scheduled-matches', requireAuth, async (c) => {
+  const userId = uid(c);
+  const rows = await query<Record<string, unknown>>(
+    `${SCHEDULED_SELECT} WHERE s.creator_id = $1 OR s.opponent_id = $1 ORDER BY s.scheduled_at DESC LIMIT 100`,
+    [userId],
+  );
+  return c.json({ scheduled_matches: rows.map((r) => mapScheduledMatch(r, userId)) });
+});
+
+app.post('/api/scheduled-matches', requireAuth, async (c) => {
+  const userId = uid(c);
+  const b = createScheduledMatchSchema.parse(await jsonBody(c));
+  if (b.opponent_id === userId) throw ApiError.badRequest('You cannot schedule a match against yourself');
+
+  // A proposal to a Vollo player needs their acceptance; an off-app opponent is
+  // just a personal plan, so it starts accepted.
+  const status = b.opponent_id ? 'proposed' : 'accepted';
+  const inserted = await queryOne<{ id: string }>(
+    `INSERT INTO scheduled_matches (creator_id, opponent_id, opponent_name, court_id, surface, scheduled_at, note, status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+    [userId, b.opponent_id ?? null, b.opponent_id ? null : b.opponent_name ?? null, b.court_id ?? null, b.surface ?? null, b.scheduled_at, b.note ?? null, status],
+  );
+  const card = await fetchScheduledMatch(inserted!.id, userId);
+
+  if (b.opponent_id) {
+    await notify({
+      userId: b.opponent_id,
+      type: 'match_scheduled',
+      title: '📅 Match proposed',
+      body: `${c.get('user')!.username} wants to play you. Tap to respond.`,
+      data: { scheduledMatchId: inserted!.id },
+      push: false,
+    }).catch(() => {});
+  }
+  return c.json({ scheduled_match: card }, 201);
+});
+
+app.patch('/api/scheduled-matches/:id', requireAuth, async (c) => {
+  const userId = uid(c);
+  const id = c.req.param('id');
+  const { action } = updateScheduledMatchSchema.parse(await jsonBody(c));
+
+  const row = await queryOne<{ creator_id: string; opponent_id: string | null; status: string }>(
+    'SELECT creator_id, opponent_id, status FROM scheduled_matches WHERE id = $1',
+    [id],
+  );
+  if (!row) throw ApiError.notFound('Scheduled match not found');
+
+  let newStatus: string;
+  let notifyUserId: string | null;
+  let notifyType: 'schedule_accepted' | 'schedule_declined' | 'schedule_cancelled';
+  let notifyBody: string;
+  const actor = c.get('user')!.username;
+
+  if (action === 'cancel') {
+    if (row.creator_id !== userId && row.opponent_id !== userId) throw ApiError.forbidden('Not your match to cancel');
+    if (row.status !== 'proposed' && row.status !== 'accepted') throw ApiError.badRequest('This match can no longer be cancelled');
+    newStatus = 'cancelled';
+    notifyUserId = userId === row.creator_id ? row.opponent_id : row.creator_id;
+    notifyType = 'schedule_cancelled';
+    notifyBody = `${actor} cancelled your scheduled match.`;
+  } else {
+    // Only the invited player can accept or decline a proposal.
+    if (row.opponent_id !== userId) throw ApiError.forbidden('Only the invited player can respond');
+    if (row.status !== 'proposed') throw ApiError.badRequest('This proposal has already been answered');
+    newStatus = action === 'accept' ? 'accepted' : 'declined';
+    notifyUserId = row.creator_id;
+    notifyType = action === 'accept' ? 'schedule_accepted' : 'schedule_declined';
+    notifyBody = action === 'accept' ? `${actor} accepted your match. Game on!` : `${actor} declined your match.`;
+  }
+
+  await query('UPDATE scheduled_matches SET status = $1 WHERE id = $2', [newStatus, id]);
+  if (notifyUserId) {
+    await notify({
+      userId: notifyUserId,
+      type: notifyType,
+      title: action === 'cancel' ? '🗓️ Match cancelled' : action === 'accept' ? '✅ Match accepted' : '❌ Match declined',
+      body: notifyBody,
+      data: { scheduledMatchId: id },
+      push: false,
+    }).catch(() => {});
+  }
+  return c.json({ scheduled_match: await fetchScheduledMatch(id, userId) });
 });
 
 // ─── Courts ────────────────────────────────────────────────────────────────
