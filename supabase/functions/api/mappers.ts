@@ -69,6 +69,8 @@ export function mapCourt(r: Record<string, unknown>): Court {
     city: (r.city as string | null) ?? null,
     osm_id: (r.osm_id as string | null) ?? null,
     source: (r.source as string | null) ?? 'user',
+    sector_key: (r.sector_key as string | null) ?? null,
+    court_count: r.court_count != null ? Number(r.court_count) : 1,
     created_by: (r.created_by as string | null) ?? null,
     created_at: toIso(r.created_at),
   };

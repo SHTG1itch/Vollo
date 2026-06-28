@@ -31,7 +31,7 @@ import { evaluateAchievements, getAchievements } from './achievements.ts';
 import { getCourtController, recomputeAfterMatch, getUserTerritories, listTerritories } from './territory.ts';
 import { notify } from './notifications.ts';
 import { geocode, reverseGeocode } from './geocoding.ts';
-import { fetchOverpassCourts } from './overpass.ts';
+import { fetchOverpassSectors } from './overpass.ts';
 import { getProfileAnalytics, getHeadToHead } from './analytics.ts';
 import { runStreakSweep, runTerritorySweep } from './sweeps.ts';
 import type { AuthClaims, LeaderboardEntry, MatchCard, MatchStats } from './types.ts';
@@ -549,7 +549,7 @@ app.post('/api/matches/:id/comments', requireAuth, async (c) => {
 
 // ─── Courts ────────────────────────────────────────────────────────────────
 const COURT_COLS = `id, name, description, surface, ST_Y(geom) AS lat, ST_X(geom) AS lng,
-                    address, city, osm_id, source, created_by, created_at`;
+                    address, city, osm_id, source, sector_key, court_count, created_by, created_at`;
 
 app.get('/api/courts/geocode', requireAuth, async (c) => {
   if (!geocodeLimiterFn(clientIp(c))) throw ApiError.tooManyRequests();
@@ -574,24 +574,33 @@ function discoverCellKey(b: { min_lng: number; min_lat: number; max_lng: number;
 }
 
 async function importOverpassCourts(b: { min_lng: number; min_lat: number; max_lng: number; max_lat: number }): Promise<number> {
-  const candidates = await fetchOverpassCourts({ minLng: b.min_lng, minLat: b.min_lat, maxLng: b.max_lng, maxLat: b.max_lat });
-  if (candidates.length === 0) return 0;
+  const sectors = await fetchOverpassSectors({ minLng: b.min_lng, minLat: b.min_lat, maxLng: b.max_lng, maxLat: b.max_lat });
+  if (sectors.length === 0) return 0;
   let imported = 0;
   const CHUNK = 50;
-  for (let i = 0; i < candidates.length; i += CHUNK) {
-    const chunk = candidates.slice(i, i + CHUNK);
+  for (let i = 0; i < sectors.length; i += CHUNK) {
+    const chunk = sectors.slice(i, i + CHUNK);
     const values: string[] = [];
     const params: unknown[] = [];
     let p = 0;
-    for (const court of chunk) {
-      values.push(`($${++p}, $${++p}, ST_SetSRID(ST_MakePoint($${++p}, $${++p}), 4326), $${++p}, $${++p}, 'osm')`);
-      params.push(court.name, court.surface, court.lng, court.lat, court.city, court.osm_id);
+    for (const s of chunk) {
+      values.push(
+        `($${++p}, $${++p}, ST_SetSRID(ST_MakePoint($${++p}, $${++p}), 4326), $${++p}, $${++p}, 'osm', $${++p}, $${++p})`,
+      );
+      params.push(s.name, s.surface, s.lng, s.lat, s.city, s.osm_id, s.sector_key, s.court_count);
     }
-    // Dedup on the partial unique index over osm_id: re-imports cost nothing.
+    // Upsert on sector_key (one row per facility). DO UPDATE so re-imports
+    // self-heal names/counts as OSM improves — re-imports are otherwise free.
     const rows = await query<{ id: string }>(
-      `INSERT INTO courts (name, surface, geom, city, osm_id, source)
+      `INSERT INTO courts (name, surface, geom, city, osm_id, source, sector_key, court_count)
        VALUES ${values.join(', ')}
-       ON CONFLICT (osm_id) WHERE osm_id IS NOT NULL DO NOTHING
+       ON CONFLICT (sector_key) WHERE sector_key IS NOT NULL DO UPDATE SET
+         name        = EXCLUDED.name,
+         surface     = EXCLUDED.surface,
+         geom        = EXCLUDED.geom,
+         city        = COALESCE(EXCLUDED.city, courts.city),
+         osm_id      = COALESCE(EXCLUDED.osm_id, courts.osm_id),
+         court_count = EXCLUDED.court_count
        RETURNING id`,
       params,
     );
@@ -600,38 +609,48 @@ async function importOverpassCourts(b: { min_lng: number; min_lat: number; max_l
   return imported;
 }
 
+async function courtsInBbox(b: { min_lng: number; min_lat: number; max_lng: number; max_lat: number }) {
+  const rows = await query<Record<string, unknown>>(
+    `SELECT ${COURT_COLS} FROM courts
+      WHERE geom && ST_MakeEnvelope($1, $2, $3, $4, 4326)
+      ORDER BY court_count DESC, created_at DESC
+      LIMIT 400`,
+    [b.min_lng, b.min_lat, b.max_lng, b.max_lat],
+  );
+  return rows.map(mapCourt);
+}
+
 app.get('/api/courts/discover', requireAuth, async (c) => {
   if (!discoverLimiterFn(clientIp(c))) throw ApiError.tooManyRequests();
   const b = discoverQuerySchema.parse(c.req.query());
   if (b.min_lng >= b.max_lng || b.min_lat >= b.max_lat) throw ApiError.badRequest('min must be < max for both axes');
 
-  // Only reach out to Overpass when the viewport is reasonably zoomed in;
-  // importing a whole region on every pan would be wasteful. Wider viewports
-  // still return whatever courts already live in the DB.
-  const spanLng = b.max_lng - b.min_lng;
-  const spanLat = b.max_lat - b.min_lat;
-  if (spanLng <= 1.0 && spanLat <= 1.0) {
-    const key = discoverCellKey(b);
-    const now = Date.now();
-    const fresh = discoveredCells.get(key);
-    if (!fresh || fresh <= now) {
-      try {
-        await importOverpassCourts(b);
-        discoveredCells.set(key, now + DISCOVER_TTL_MS);
-      } catch (err) {
-        console.warn('[discover] overpass import failed', err instanceof Error ? err.message : err);
+  // `import=0` is the client's instant first paint: return whatever courts are
+  // already in the DB without touching the (slow) Overpass network. The client
+  // then re-requests with import=1 in the background to pull in new courts, so
+  // the map never blocks on discovery.
+  if (b.import) {
+    // Only reach out to Overpass when the viewport is reasonably zoomed in;
+    // importing a whole region on every pan would be wasteful. Wider viewports
+    // still return whatever courts already live in the DB.
+    const spanLng = b.max_lng - b.min_lng;
+    const spanLat = b.max_lat - b.min_lat;
+    if (spanLng <= 1.0 && spanLat <= 1.0) {
+      const key = discoverCellKey(b);
+      const now = Date.now();
+      const fresh = discoveredCells.get(key);
+      if (b.force || !fresh || fresh <= now) {
+        try {
+          await importOverpassCourts(b);
+          discoveredCells.set(key, now + DISCOVER_TTL_MS);
+        } catch (err) {
+          console.warn('[discover] overpass import failed', err instanceof Error ? err.message : err);
+        }
       }
     }
   }
 
-  const rows = await query<Record<string, unknown>>(
-    `SELECT ${COURT_COLS} FROM courts
-      WHERE geom && ST_MakeEnvelope($1, $2, $3, $4, 4326)
-      ORDER BY created_at DESC
-      LIMIT 300`,
-    [b.min_lng, b.min_lat, b.max_lng, b.max_lat],
-  );
-  return c.json({ courts: rows.map(mapCourt) });
+  return c.json({ courts: await courtsInBbox(b) });
 });
 
 app.get('/api/courts/reverse-geocode', requireAuth, async (c) => {
@@ -681,10 +700,10 @@ app.get('/api/courts', async (c) => {
 app.post('/api/courts', requireAuth, async (c) => {
   const b = createCourtSchema.parse(await jsonBody(c));
   const row = await queryOne<Record<string, unknown>>(
-    `INSERT INTO courts (name, description, surface, geom, address, city, osm_id, created_by)
-     VALUES ($1, $2, $3, ST_SetSRID(ST_MakePoint($4, $5), 4326), $6, $7, $8, $9)
+    `INSERT INTO courts (name, description, surface, geom, address, city, osm_id, court_count, created_by)
+     VALUES ($1, $2, $3, ST_SetSRID(ST_MakePoint($4, $5), 4326), $6, $7, $8, $9, $10)
      RETURNING ${COURT_COLS}`,
-    [b.name, b.description ?? null, b.surface, b.lng, b.lat, b.address ?? null, b.city ?? null, b.osm_id ?? null, uid(c)],
+    [b.name, b.description ?? null, b.surface, b.lng, b.lat, b.address ?? null, b.city ?? null, b.osm_id ?? null, b.court_count ?? 1, uid(c)],
   );
   return c.json({ court: mapCourt(row!) }, 201);
 });

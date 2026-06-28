@@ -113,6 +113,9 @@ export const createCourtSchema = z.object({
   address: z.string().trim().max(240).optional(),
   city: z.string().trim().max(120).optional(),
   osm_id: z.string().trim().max(60).optional(),
+  // How many physical courts the facility holds — a user adding a multi-court
+  // venue can mark it as one sector (defaults to 1).
+  court_count: z.number().int().min(1).max(60).optional(),
 });
 
 // Public gear loadout. A blank string in any field is normalised to "unset" so
@@ -148,13 +151,24 @@ export const updateProfileSchema = z.object({
   equipment: equipmentSchema.optional(),
 });
 
+// A query-string boolean: "1"/"true" → true, "0"/"false" → false, absent → def.
+const boolParam = (def: boolean) =>
+  z
+    .enum(['0', '1', 'true', 'false'])
+    .optional()
+    .transform((v) => (v == null ? def : v === '1' || v === 'true'));
+
 // Discovery imports real-world courts within a map viewport. Reuses the bbox
 // shape but requires all four corners (a viewport is never partial).
+//   import=0 → return DB courts only (instant first paint, no Overpass call)
+//   force=1  → bypass the per-viewport import cache (used by the backfill)
 export const discoverQuerySchema = z.object({
   min_lng: z.coerce.number().min(-180).max(180),
   min_lat: z.coerce.number().min(-90).max(90),
   max_lng: z.coerce.number().min(-180).max(180),
   max_lat: z.coerce.number().min(-90).max(90),
+  import: boolParam(true),
+  force: boolParam(false),
 });
 
 export const reverseGeocodeQuerySchema = z.object({

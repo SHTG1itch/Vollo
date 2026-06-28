@@ -59,6 +59,10 @@ export interface Court {
   osm_id: string | null;
   /** 'user' for in-app additions, 'osm' for OpenStreetMap imports. */
   source: string;
+  /** Stable identity for an imported facility; null for user-added courts. */
+  sector_key: string | null;
+  /** Number of physical courts this facility holds (a "sector"). */
+  court_count: number;
   created_by: string | null;
   created_at: string;
 }
