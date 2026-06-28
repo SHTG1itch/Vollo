@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { InteractionManager, Pressable, StyleSheet, Text, View } from 'react-native';
 import MapView, { Marker, Polygon, UrlTile, type Region } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
@@ -30,9 +30,14 @@ const MAX_COURT_DELTA = 0.4;
 // Hard caps on simultaneously-rendered native overlays. Courts arrive ordered by
 // court_count (biggest facilities first) and territories by area, so the caps
 // keep the most significant ones and a dense metro can't flood — and crash — the
-// map with native views.
-const MAX_MARKERS = 120;
-const MAX_TERRITORIES = 60;
+// map with native views. Kept conservative: every marker/polygon is a native
+// view, and fast pan/zoom churns them, so fewer = far less crash surface.
+const MAX_MARKERS = 90;
+const MAX_TERRITORIES = 40;
+// A single polygon ring with hundreds of vertices is itself a native-render
+// hazard on Android. Concave-hull territories can be detailed, so cap the
+// vertices we hand the native layer and evenly downsample anything larger.
+const MAX_POLY_VERTICES = 80;
 
 // A fixed, map-legible palette for rivals who haven't picked a colour. Hex only:
 // react-native-maps' native layer is unreliable with hsl()/hsla() colour strings
@@ -62,7 +67,47 @@ function zoneColors(t: Territory, self: boolean): { fill: string; stroke: string
 
 function polygonCoords(t: Territory): { latitude: number; longitude: number }[] {
   const ring = t.geometry.coordinates[0] ?? [];
-  return ring.map(([lng, lat]) => ({ latitude: lat, longitude: lng }));
+  const points = ring.map(([lng, lat]) => ({ latitude: lat, longitude: lng }));
+  if (points.length <= MAX_POLY_VERTICES) return points;
+  // Evenly downsample an over-detailed ring, always keeping the closing vertex so
+  // the polygon stays closed.
+  const step = points.length / MAX_POLY_VERTICES;
+  const out: { latitude: number; longitude: number }[] = [];
+  for (let i = 0; i < MAX_POLY_VERTICES; i++) out.push(points[Math.floor(i * step)]!);
+  out.push(points[points.length - 1]!);
+  return out;
+}
+
+/** True only when two overlay sets differ enough to be worth swapping into the
+ *  native layer — i.e. the id list changed. Re-using the previous array keeps
+ *  React from unmounting/remounting every native Marker/Polygon on a pan that
+ *  returned the same features (the main fast-gesture crash/jank driver). */
+function sameIds(a: { id: string }[], b: { id: string }[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i]!.id !== b[i]!.id) return false;
+  return true;
+}
+
+/** Territories also need a refresh when their geometry/owner data changes even if
+ *  the id set is identical (e.g. after a match shifts a zone), so key on
+ *  updated_at too. */
+function territoriesEqual(a: Territory[], b: Territory[]): boolean {
+  if (!sameIds(a, b)) return false;
+  for (let i = 0; i < a.length; i++) if (a[i]!.updated_at !== b[i]!.updated_at) return false;
+  return true;
+}
+
+/** Skip reloading overlays for negligible viewport changes (micro-pans / no real
+ *  zoom). This is what stops a flurry of fast gestures from each triggering a
+ *  full overlay swap on the native map. */
+function regionChangedEnough(prev: Region, next: Region): boolean {
+  const latSpan = Math.max(prev.latitudeDelta, next.latitudeDelta, 1e-6);
+  const lngSpan = Math.max(prev.longitudeDelta, next.longitudeDelta, 1e-6);
+  const movedLat = Math.abs(prev.latitude - next.latitude) / latSpan;
+  const movedLng = Math.abs(prev.longitude - next.longitude) / lngSpan;
+  const zoomRatio = prev.latitudeDelta / Math.max(next.latitudeDelta, 1e-6);
+  const zoomed = zoomRatio < 0.8 || zoomRatio > 1.25;
+  return movedLat > 0.25 || movedLng > 0.25 || zoomed;
 }
 
 /**
@@ -116,46 +161,68 @@ export function MapScreen() {
   // from a profile's "view on map"); cleared as soon as we select it.
   const pendingFocusId = useRef<string | null>(null);
 
-  const load = useCallback(async (r: Region) => {
-    lastRegion.current = r;
-    const zoom = r.latitudeDelta <= MAX_COURT_DELTA;
-    setZoomedIn(zoom);
-    const seq = ++loadSeq.current;
-    const bbox = {
-      min_lng: r.longitude - r.longitudeDelta,
-      min_lat: r.latitude - r.latitudeDelta,
-      max_lng: r.longitude + r.longitudeDelta,
-      max_lat: r.latitude + r.latitudeDelta,
-    };
-    // 1) Instant paint: territories + courts straight from the DB (no Overpass),
-    //    so overlays appear immediately and panning never waits on the network.
-    try {
-      const [{ territories: terr }, courtRes] = await Promise.all([
-        api.getTerritories(bbox),
-        api
-          .discoverCourts(bbox, { discover: false })
-          .catch(() => api.getCourts({ lat: r.latitude, lng: r.longitude, radius_km: 60, limit: MAX_MARKERS })),
-      ]);
-      if (seq !== loadSeq.current) return; // a newer load already won
-      setTerritories(terr);
-      setCourts(courtRes.courts);
-    } catch {
-      /* keep current overlays */
-    }
-
-    // 2) Background: pull any new real-world courts from OpenStreetMap. This is
-    //    the slow call (Overpass), so it runs AFTER paint and only when zoomed in
-    //    enough to matter — the visible map is never blocked by it. The seq guard
-    //    makes this the authoritative set for the current viewport.
-    if (!zoom) return;
-    void api
-      .discoverCourts(bbox, { discover: true })
-      .then((res) => {
-        if (seq !== loadSeq.current) return;
-        setCourts(res.courts);
-      })
-      .catch(() => {});
+  // Commit overlay state on the next idle frame and only when the content
+  // actually changed, so a swap never competes with an in-flight gesture and
+  // unchanged features keep their existing native views (no remount churn).
+  const commitTerritories = useCallback((seq: number, next: Territory[]) => {
+    InteractionManager.runAfterInteractions(() => {
+      if (seq !== loadSeq.current) return;
+      setTerritories((prev) => (territoriesEqual(prev, next) ? prev : next));
+    });
   }, []);
+  const commitCourts = useCallback((seq: number, next: Court[]) => {
+    InteractionManager.runAfterInteractions(() => {
+      if (seq !== loadSeq.current) return;
+      setCourts((prev) => (sameIds(prev, next) ? prev : next));
+    });
+  }, []);
+
+  const load = useCallback(
+    async (r: Region, opts: { force?: boolean } = {}) => {
+      // Coalesce negligible viewport changes: a fast flurry of pans/zooms would
+      // otherwise each swap the native overlay set and can crash the map.
+      if (!opts.force && !regionChangedEnough(lastRegion.current, r)) {
+        lastRegion.current = r;
+        return;
+      }
+      lastRegion.current = r;
+      const zoom = r.latitudeDelta <= MAX_COURT_DELTA;
+      setZoomedIn(zoom);
+      const seq = ++loadSeq.current;
+      const bbox = {
+        min_lng: r.longitude - r.longitudeDelta,
+        min_lat: r.latitude - r.latitudeDelta,
+        max_lng: r.longitude + r.longitudeDelta,
+        max_lat: r.latitude + r.latitudeDelta,
+      };
+      // 1) Instant paint: territories + courts straight from the DB (no Overpass),
+      //    so overlays appear immediately and panning never waits on the network.
+      try {
+        const [{ territories: terr }, courtRes] = await Promise.all([
+          api.getTerritories(bbox),
+          api
+            .discoverCourts(bbox, { discover: false })
+            .catch(() => api.getCourts({ lat: r.latitude, lng: r.longitude, radius_km: 60, limit: MAX_MARKERS })),
+        ]);
+        if (seq !== loadSeq.current) return; // a newer load already won
+        commitTerritories(seq, terr);
+        commitCourts(seq, courtRes.courts);
+      } catch {
+        /* keep current overlays */
+      }
+
+      // 2) Background: pull any new real-world courts from OpenStreetMap. This is
+      //    the slow call (Overpass), so it runs AFTER paint and only when zoomed in
+      //    enough to matter — the visible map is never blocked by it. The seq guard
+      //    makes this the authoritative set for the current viewport.
+      if (!zoom) return;
+      void api
+        .discoverCourts(bbox, { discover: true })
+        .then((res) => commitCourts(seq, res.courts))
+        .catch(() => {});
+    },
+    [commitTerritories, commitCourts],
+  );
 
   useEffect(() => {
     // If we were opened to focus a specific zone (deep-link), let the focus
@@ -177,7 +244,7 @@ export function MapScreen() {
       } catch {
         setLocationOff(true);
       }
-      void load(start);
+      void load(start, { force: true });
     })();
     // route.params is read once at mount to decide whether to defer; later focus
     // navigations arrive while mounted and are handled by the focus effect below.
@@ -198,7 +265,7 @@ export function MapScreen() {
     };
     pendingFocusId.current = p.focusTerritoryId ?? null;
     mapRef.current?.animateToRegion(region, 700);
-    void load(region);
+    void load(region, { force: true });
     (navigation.setParams as (params: Record<string, undefined>) => void)({
       focusLat: undefined,
       focusLng: undefined,
@@ -230,7 +297,7 @@ export function MapScreen() {
       const pos = await Location.getCurrentPositionAsync({});
       const region = { ...DEFAULT_REGION, latitude: pos.coords.latitude, longitude: pos.coords.longitude };
       mapRef.current?.animateToRegion(region, 600);
-      void load(region);
+      void load(region, { force: true });
     } catch {
       /* keep current view */
     }
@@ -250,7 +317,7 @@ export function MapScreen() {
         didFocus.current = true;
         return;
       }
-      void load(lastRegion.current);
+      void load(lastRegion.current, { force: true });
     }, [load]),
   );
 
