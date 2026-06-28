@@ -8,6 +8,7 @@ import { RegisterScreen } from '../screens/RegisterScreen';
 import { MatchDetailScreen } from '../screens/MatchDetailScreen';
 import { CourtDetailScreen } from '../screens/CourtDetailScreen';
 import { CourtsScreen } from '../screens/CourtsScreen';
+import { AddCourtScreen } from '../screens/AddCourtScreen';
 import { LeaderboardScreen } from '../screens/LeaderboardScreen';
 import { UserProfileScreen } from '../screens/ProfileScreen';
 import { EditProfileScreen } from '../screens/EditProfileScreen';
@@ -36,6 +37,7 @@ export function RootNavigator() {
           <Stack.Screen name="MatchDetail" component={MatchDetailScreen} options={{ title: 'Match' }} />
           <Stack.Screen name="Court" component={CourtDetailScreen} options={{ title: 'Court' }} />
           <Stack.Screen name="Courts" component={CourtsScreen} options={{ headerShown: false }} />
+          <Stack.Screen name="AddCourt" component={AddCourtScreen} options={{ title: 'Add a court' }} />
           <Stack.Screen name="Leaderboard" component={LeaderboardScreen} options={{ title: 'Leaderboard' }} />
           <Stack.Screen name="UserProfile" component={UserProfileScreen} options={{ title: 'Player' }} />
           <Stack.Screen name="EditProfile" component={EditProfileScreen} options={{ title: 'Edit profile' }} />

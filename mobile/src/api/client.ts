@@ -10,6 +10,7 @@ import type {
   NotificationItem,
   ProfileAnalytics,
   ProfileResponse,
+  ReverseGeocodeResult,
   ScoreArray,
   StreakState,
   Surface,
@@ -163,6 +164,12 @@ export const api = {
   // ── Courts ──
   getCourts: (params: { lat?: number; lng?: number; radius_km?: number; q?: string; limit?: number }) =>
     request<{ courts: Court[] }>(`/courts${qs(params)}`),
+  // Imports real-world tennis courts from OpenStreetMap within the viewport and
+  // returns every court (imported + user-added) inside it.
+  discoverCourts: (bbox: { min_lng: number; min_lat: number; max_lng: number; max_lat: number }) =>
+    request<{ courts: Court[] }>(`/courts/discover${qs(bbox)}`),
+  reverseGeocode: (lat: number, lng: number) =>
+    request<{ result: ReverseGeocodeResult | null }>(`/courts/reverse-geocode${qs({ lat, lng })}`),
   getCourt: (id: string) =>
     request<{ court: Court; controller: { user_id: string; username: string; display_name: string; score: number } | null }>(
       `/courts/${id}`,
