@@ -177,6 +177,19 @@ export function MapScreen() {
   const [locationOff, setLocationOff] = useState(false);
   // Drives the zoom gate: true only when zoomed in enough to render court pins.
   const [zoomedIn, setZoomedIn] = useState(true);
+  // While the user is actively panning/zooming we unmount ALL native overlays
+  // (markers + polygons) and re-mount them only once the gesture settles. A fast
+  // zoom otherwise churns dozens of native views every frame — the dominant
+  // Android crash vector. One unmount at gesture start + one remount at settle is
+  // cheap; the per-frame churn it removes is what crashed the map.
+  const [interacting, setInteracting] = useState(false);
+  // Mirrors `interacting` so the per-frame onRegionChange handler can flip the
+  // state exactly once per gesture instead of calling setState every frame.
+  const interactingRef = useRef(false);
+  // Latest region seen during a gesture, so the settle safety-net loads where the
+  // user actually ended up (onRegionChange fires before any load updates refs).
+  const liveRegion = useRef<Region>(DEFAULT_REGION);
+  const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Remember the last viewport so we can refresh courts when the screen regains
   // focus (e.g. returning after adding a court) and pass a centre to Add Court.
@@ -336,9 +349,10 @@ export function MapScreen() {
     }
   }, [load]);
 
-  // Clear any pending debounce when the screen unmounts.
+  // Clear any pending timers when the screen unmounts.
   useEffect(() => () => {
     if (debounce.current) clearTimeout(debounce.current);
+    if (settleTimer.current) clearTimeout(settleTimer.current);
   }, []);
 
   // Refresh courts/territories when the screen regains focus (e.g. after adding
@@ -354,27 +368,61 @@ export function MapScreen() {
     }, [load]),
   );
 
-  const onRegionChange = (r: Region) => {
-    // Toggle the zoom gate promptly (cheap) even before the debounced load runs.
-    setZoomedIn(r.latitudeDelta <= MAX_COURT_DELTA);
-    if (debounce.current) clearTimeout(debounce.current);
-    debounce.current = setTimeout(() => void load(r), 600);
-  };
+  // Continuous: fires every frame during a gesture (and during programmatic
+  // animations). Flip into "interacting" exactly once so the native overlays
+  // unmount for the duration of the gesture — no per-frame view churn.
+  const onRegionChange = useCallback(
+    (r: Region) => {
+      liveRegion.current = r;
+      if (!interactingRef.current) {
+        interactingRef.current = true;
+        setInteracting(true);
+      }
+      // Safety net: if onRegionChangeComplete never fires (it can be dropped on
+      // Android for a flung gesture), settle off the last frame's region so
+      // overlays don't stay hidden and we still load where the user ended up.
+      if (settleTimer.current) clearTimeout(settleTimer.current);
+      settleTimer.current = setTimeout(() => {
+        interactingRef.current = false;
+        setInteracting(false);
+        setZoomedIn(liveRegion.current.latitudeDelta <= MAX_COURT_DELTA);
+        void load(liveRegion.current);
+      }, 900);
+    },
+    [load],
+  );
+
+  // Settled: the gesture finished. Remount overlays, update the zoom gate, and
+  // debounce the data reload for the new viewport.
+  const onRegionChangeComplete = useCallback(
+    (r: Region) => {
+      if (settleTimer.current) clearTimeout(settleTimer.current);
+      interactingRef.current = false;
+      setInteracting(false);
+      setZoomedIn(r.latitudeDelta <= MAX_COURT_DELTA);
+      if (debounce.current) clearTimeout(debounce.current);
+      debounce.current = setTimeout(() => void load(r), 550);
+    },
+    [load],
+  );
 
   const openCourt = useCallback((id: string) => navigation.navigate('Court', { courtId: id }), [navigation]);
 
-  // Only render pins when zoomed in, capped so a dense metro can't flood the map
-  // with native views.
+  // Only render pins when zoomed in AND not mid-gesture, capped so a dense metro
+  // can't flood the map with native views. Hiding them while interacting is the
+  // key anti-crash move: the native marker set never churns during a zoom/pan.
   const visibleCourts = useMemo(
-    () => (zoomedIn ? courts.slice(0, MAX_MARKERS) : []),
-    [courts, zoomedIn],
+    () => (zoomedIn && !interacting ? courts.slice(0, MAX_MARKERS) : []),
+    [courts, zoomedIn, interacting],
   );
 
   // Pre-build capped polygon descriptors once per territory/identity change, so
   // panning doesn't re-derive every ring's coordinates (and colour) each render.
   // A focused/selected zone is always included even if it sorts past the cap, so
-  // the highlighted polygon the detail card refers to is actually drawn.
+  // the highlighted polygon the detail card refers to is actually drawn. Empty
+  // while interacting so polygons don't churn during a gesture either.
   const polygons = useMemo(() => {
+    if (interacting) return [];
     const shown = territories.slice(0, MAX_TERRITORIES);
     if (selected && !shown.some((t) => t.id === selected.id)) {
       const extra = territories.find((t) => t.id === selected.id);
@@ -384,7 +432,7 @@ export function MapScreen() {
       const isSelf = t.user_id === user?.id;
       return { t, coords: polygonCoords(t), ...zoneColors(t, isSelf) };
     });
-  }, [territories, user?.id, selected]);
+  }, [territories, user?.id, selected, interacting]);
 
   const selectedColors = selected ? zoneColors(selected, selected.user_id === user?.id) : null;
 
@@ -394,13 +442,23 @@ export function MapScreen() {
         ref={mapRef}
         style={StyleSheet.absoluteFill}
         initialRegion={DEFAULT_REGION}
-        onRegionChangeComplete={onRegionChange}
+        onRegionChange={onRegionChange}
+        onRegionChangeComplete={onRegionChangeComplete}
         mapType="none"
         showsUserLocation
         rotateEnabled={false}
+        pitchEnabled={false}
         moveOnMarkerPress={false}
+        toolbarEnabled={false}
+        // Bound the zoom range: zooming far out would request a huge bbox (and a
+        // world of raster tiles + every territory) — a memory/crash risk — and
+        // the deep zoom past tile coverage just wastes work.
+        minZoomLevel={3}
+        maxZoomLevel={19}
+        // Don't animate to the user dot on first fix; we drive the camera ourselves.
+        followsUserLocation={false}
       >
-        <UrlTile urlTemplate={OSM_TILE_URL} maximumZ={19} flipY={false} zIndex={-1} />
+        <UrlTile urlTemplate={OSM_TILE_URL} maximumZ={19} minimumZ={1} flipY={false} zIndex={-1} />
 
         {polygons.map(({ t, coords, fill, stroke }) => (
           <Polygon
