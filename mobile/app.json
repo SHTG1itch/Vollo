@@ -18,6 +18,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "app.vollo.mobile",
+      "usesAppleSignIn": true,
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Vollo uses your location to find courts near you and map your territories."
       }
@@ -36,12 +37,20 @@
       "expo-location",
       "expo-notifications",
       "expo-asset",
-      "expo-font"
+      "expo-font",
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.REPLACE_WITH_REVERSED_IOS_CLIENT_ID"
+        }
+      ]
     ],
     "extra": {
       "apiUrl": "https://pfophuqopwfupxjonsty.supabase.co/functions/v1",
       "supabaseUrl": "https://pfophuqopwfupxjonsty.supabase.co",
-      "supabaseAnonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBmb3BodXFvcHdmdXB4am9uc3R5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI1MTE1NTksImV4cCI6MjA5ODA4NzU1OX0.xl6PXZC1iUasQZ5RsTgnIuQmoN2RzzsmWdDGtHssnP4"
+      "supabaseAnonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBmb3BodXFvcHdmdXB4am9uc3R5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI1MTE1NTksImV4cCI6MjA5ODA4NzU1OX0.xl6PXZC1iUasQZ5RsTgnIuQmoN2RzzsmWdDGtHssnP4",
+      "googleWebClientId": "",
+      "googleIosClientId": ""
     }
   }
 }
