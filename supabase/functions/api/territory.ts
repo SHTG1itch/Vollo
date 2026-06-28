@@ -295,6 +295,14 @@ export async function getCourtController(courtId: string): Promise<string | null
   return row?.user_id ?? null;
 }
 
+// The dominant player's confirmed wins across the courts in this territory over
+// the rolling 30-day window — what a rival has to beat to start taking the zone.
+// Sums the court_leaderboard (already verified-only + windowed) for the owner.
+const OWNER_ZONE_WINS = `COALESCE((
+  SELECT SUM(cl.wins) FROM court_leaderboard cl
+   WHERE cl.user_id = t.user_id AND cl.court_id = ANY(t.court_ids)
+), 0)`;
+
 /** All territories as GeoJSON-ready rows, optionally limited to a bbox. */
 export async function listTerritories(bbox?: {
   minLng: number;
@@ -312,7 +320,8 @@ export async function listTerritories(bbox?: {
     `SELECT t.id, t.user_id, ST_AsGeoJSON(t.geom) AS geojson,
             ST_Y(t.center_geom) AS center_lat, ST_X(t.center_geom) AS center_lng,
             t.court_count, t.area_sqkm, t.district_name, t.court_ids, t.updated_at,
-            u.username AS owner_username, u.display_name AS owner_display_name, u.color AS owner_color
+            u.username AS owner_username, u.display_name AS owner_display_name, u.color AS owner_color,
+            ${OWNER_ZONE_WINS} AS owner_zone_wins
        FROM territories t
        JOIN users u ON u.id = t.user_id
        ${where}
@@ -328,7 +337,8 @@ export async function getUserTerritories(userId: string): Promise<Territory[]> {
     `SELECT t.id, t.user_id, ST_AsGeoJSON(t.geom) AS geojson,
             ST_Y(t.center_geom) AS center_lat, ST_X(t.center_geom) AS center_lng,
             t.court_count, t.area_sqkm, t.district_name, t.court_ids, t.updated_at,
-            u.username AS owner_username, u.display_name AS owner_display_name, u.color AS owner_color
+            u.username AS owner_username, u.display_name AS owner_display_name, u.color AS owner_color,
+            ${OWNER_ZONE_WINS} AS owner_zone_wins
        FROM territories t
        JOIN users u ON u.id = t.user_id
       WHERE t.user_id = $1
@@ -352,6 +362,7 @@ interface TerritoryRow {
   owner_username: string;
   owner_display_name: string;
   owner_color: string | null;
+  owner_zone_wins: string | number;
 }
 
 function mapTerritoryRow(r: TerritoryRow): Territory {
@@ -368,5 +379,6 @@ function mapTerritoryRow(r: TerritoryRow): Territory {
     owner_username: r.owner_username,
     owner_display_name: r.owner_display_name,
     owner_color: r.owner_color ?? null,
+    owner_zone_wins: Number(r.owner_zone_wins ?? 0),
   };
 }

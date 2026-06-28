@@ -38,7 +38,10 @@ export type RootStackParamList = {
   Settings: undefined;
   ScheduledMatches: undefined;
   // Propose a match; opponent is prefilled when launched from their profile.
-  ScheduleMatch: { opponentId?: string; opponentName?: string; opponentUsername?: string } | undefined;
+  // `challenge` frames it as a competitive challenge (combative copy + alert).
+  ScheduleMatch:
+    | { opponentId?: string; opponentName?: string; opponentUsername?: string; challenge?: boolean }
+    | undefined;
 };
 
 declare global {

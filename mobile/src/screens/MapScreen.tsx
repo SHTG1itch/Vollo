@@ -444,35 +444,64 @@ export function MapScreen() {
         <Text style={styles.recenterIcon}>◎</Text>
       </Pressable>
 
-      {/* Selected territory card — who's dominating this zone */}
+      {/* Selected territory card — who's dominating this zone, and what it takes
+          to claim it */}
       {selected && selectedColors ? (
         <View style={[styles.detailCard, { borderColor: selectedColors.stroke }]}>
-          <View style={[styles.zoneSwatch, { backgroundColor: selectedColors.fill, borderColor: selectedColors.stroke }]} />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.detailDistrict}>{selected.district_name}</Text>
-            <Text style={styles.detailOwner}>
-              Dominated by @{selected.owner_username ?? 'unknown'} · {selected.court_count} courts · {selected.area_sqkm.toFixed(1)} km²
-            </Text>
+          <View style={styles.detailTop}>
+            <View style={[styles.zoneSwatch, { backgroundColor: selectedColors.fill, borderColor: selectedColors.stroke }]} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.detailDistrict}>{selected.district_name}</Text>
+              <Text style={styles.detailOwner}>👑 Dominated by @{selected.owner_username ?? 'unknown'}</Text>
+            </View>
+            <Pressable
+              onPress={() => setSelected(null)}
+              hitSlop={8}
+              style={{ paddingHorizontal: spacing.xs }}
+              accessibilityRole="button"
+              accessibilityLabel="Dismiss territory details"
+            >
+              <Text style={styles.close}>✕</Text>
+            </Pressable>
           </View>
-          <Pressable
-            onPress={() =>
-              selected.owner_username
-                ? navigation.navigate('UserProfile', { username: selected.owner_username })
-                : setSelected(null)
-            }
-            style={styles.detailBtn}
-          >
-            <Text style={styles.detailBtnText}>View</Text>
-          </Pressable>
-          <Pressable
-            onPress={() => setSelected(null)}
-            hitSlop={8}
-            style={{ paddingHorizontal: spacing.sm }}
-            accessibilityRole="button"
-            accessibilityLabel="Dismiss territory details"
-          >
-            <Text style={styles.close}>✕</Text>
-          </Pressable>
+
+          <View style={styles.detailStats}>
+            <Text style={styles.detailStat}>🎾 {selected.court_count} courts</Text>
+            <Text style={styles.detailStat}>📐 {selected.area_sqkm.toFixed(1)} km²</Text>
+            <Text style={styles.detailStat}>🏆 {selected.owner_zone_wins ?? 0} wins here</Text>
+          </View>
+
+          <Text style={styles.detailHint}>
+            {selected.user_id === user?.id
+              ? 'Your turf — keep winning here to hold it.'
+              : `Beat ${selected.owner_zone_wins ?? 0} wins in this zone to claim it from @${selected.owner_username ?? 'them'}.`}
+          </Text>
+
+          <View style={styles.detailActions}>
+            {selected.owner_username ? (
+              <Pressable
+                onPress={() => navigation.navigate('UserProfile', { username: selected.owner_username! })}
+                style={[styles.detailBtn, { flex: 1 }]}
+              >
+                <Text style={styles.detailBtnText}>View player</Text>
+              </Pressable>
+            ) : null}
+            {selected.owner_username && selected.user_id !== user?.id ? (
+              <Pressable
+                onPress={() =>
+                  navigation.navigate('ScheduleMatch', {
+                    opponentId: selected.user_id,
+                    opponentName: selected.owner_display_name ?? selected.owner_username,
+                    opponentUsername: selected.owner_username,
+                    challenge: true,
+                  })
+                }
+                style={[styles.detailBtn, styles.detailBtnPrimary, { flex: 1 }]}
+              >
+                <Text style={[styles.detailBtnText, styles.detailBtnTextPrimary]}>⚔️ Challenge</Text>
+              </Pressable>
+            ) : null}
+          </View>
         </View>
       ) : (
         <View style={styles.legend}>
@@ -532,18 +561,23 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
     padding: spacing.lg,
-    flexDirection: 'row',
-    alignItems: 'center',
     gap: spacing.sm,
     borderWidth: 1,
     borderColor: colors.primary,
     ...shadow.card,
   },
+  detailTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   zoneSwatch: { width: 22, height: 22, borderRadius: radius.sm, borderWidth: 2 },
   detailDistrict: { color: colors.text, fontFamily: fonts.heading, fontSize: font.h3 },
   detailOwner: { color: colors.textDim, fontSize: font.small, marginTop: 2 },
-  detailBtn: { backgroundColor: colors.primarySoft, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.md },
+  detailStats: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
+  detailStat: { color: colors.textDim, fontSize: font.small, fontFamily: fonts.medium },
+  detailHint: { color: colors.textFaint, fontSize: font.tiny },
+  detailActions: { flexDirection: 'row', gap: spacing.sm, marginTop: 2 },
+  detailBtn: { backgroundColor: colors.primarySoft, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.md, alignItems: 'center' },
   detailBtnText: { color: colors.primary, fontFamily: fonts.bold },
+  detailBtnPrimary: { backgroundColor: colors.primary },
+  detailBtnTextPrimary: { color: colors.onPrimary },
   close: { color: colors.textDim, fontSize: font.body },
   legend: {
     position: 'absolute',

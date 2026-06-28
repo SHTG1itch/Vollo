@@ -126,6 +126,9 @@ export interface Territory {
   owner_display_name?: string;
   /** Owner's signature colour (#RRGGBB), or null when unset. */
   owner_color?: string | null;
+  /** Owner's verified wins across this zone's courts (30-day window) — the bar a
+   *  rival must clear to start claiming the territory. */
+  owner_zone_wins?: number;
 }
 
 export interface LeaderboardEntry {
