@@ -3,12 +3,12 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import MapView, { Marker, Polygon, UrlTile, type Region } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import type { RootStackParamList } from '../navigation/types';
+import type { RootStackParamList, TabParamList } from '../navigation/types';
 import { api } from '../api/client';
 import { useAuth } from '../store/auth';
-import { colors, font, radius, shadow, spacing, surfaceColors, TERRITORY_FILL, TERRITORY_STROKE } from '../theme';
+import { colors, font, fonts, radius, shadow, spacing, surfaceColors, TERRITORY_STROKE } from '../theme';
 import type { Court, Territory } from '../types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -27,9 +27,43 @@ const DEFAULT_REGION: Region = {
 // native view) — slow and a known crash vector. Above it we hide court pins and
 // show a "zoom in" hint; territories still render.
 const MAX_COURT_DELTA = 0.4;
-// Hard cap on simultaneously-rendered pins. Courts arrive ordered by court_count
-// (biggest facilities first) so the cap keeps the most significant ones.
-const MAX_MARKERS = 150;
+// Hard caps on simultaneously-rendered native overlays. Courts arrive ordered by
+// court_count (biggest facilities first) and territories by area, so the caps
+// keep the most significant ones and a dense metro can't flood — and crash — the
+// map with native views.
+const MAX_MARKERS = 120;
+const MAX_TERRITORIES = 60;
+
+// A fixed, map-legible palette for rivals who haven't picked a colour. Hex only:
+// react-native-maps' native layer is unreliable with hsl()/hsla() colour strings
+// (a known Android crash), so every polygon colour we emit is #RRGGBB / #RRGGBBAA.
+const RIVAL_PALETTE = ['#E0432B', '#2477C9', '#7E6CC4', '#E8990C', '#C05B22', '#1F9E8A', '#D81B8C', '#5B7CFA'];
+const HEX6 = /^#[0-9A-Fa-f]{6}$/;
+// 0x66 / 255 ≈ 0.40 — the 40%-transparent wash the spec calls for.
+const FILL_ALPHA = '66';
+
+function hashIndex(id: string, mod: number): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 100000;
+  return h % mod;
+}
+
+/**
+ * A player's signature colour as a solid stroke + a 40%-opacity fill, so rivals'
+ * overlapping zones stay see-through and distinguishable. Falls back to brand
+ * green for you and a deterministic palette hue for rivals with no colour set.
+ */
+function zoneColors(t: Territory, self: boolean): { fill: string; stroke: string } {
+  const base =
+    (t.owner_color && HEX6.test(t.owner_color) ? t.owner_color : null) ??
+    (self ? TERRITORY_STROKE : RIVAL_PALETTE[hashIndex(t.user_id, RIVAL_PALETTE.length)]!);
+  return { fill: `${base}${FILL_ALPHA}`, stroke: base };
+}
+
+function polygonCoords(t: Territory): { latitude: number; longitude: number }[] {
+  const ring = t.geometry.coordinates[0] ?? [];
+  return ring.map(([lng, lat]) => ({ latitude: lat, longitude: lng }));
+}
 
 /**
  * A single court pin. Memoised + tracksViewChanges={false} so react-native-maps
@@ -59,21 +93,9 @@ const CourtMarker = React.memo(function CourtMarker({
   );
 });
 
-/** Deterministic colour per owner so rival territories are distinguishable. */
-function ownerColor(userId: string, self: boolean): { fill: string; stroke: string } {
-  if (self) return { fill: TERRITORY_FILL, stroke: TERRITORY_STROKE };
-  let hash = 0;
-  for (let i = 0; i < userId.length; i++) hash = (hash * 31 + userId.charCodeAt(i)) % 360;
-  return { fill: `hsla(${hash}, 70%, 55%, 0.22)`, stroke: `hsl(${hash}, 70%, 60%)` };
-}
-
-function polygonCoords(t: Territory): { latitude: number; longitude: number }[] {
-  const ring = t.geometry.coordinates[0] ?? [];
-  return ring.map(([lng, lat]) => ({ latitude: lat, longitude: lng }));
-}
-
 export function MapScreen() {
   const navigation = useNavigation<Nav>();
+  const route = useRoute<RouteProp<TabParamList, 'Map'>>();
   const insets = useSafeAreaInsets();
   const user = useAuth((s) => s.user);
   const mapRef = useRef<MapView>(null);
@@ -90,10 +112,16 @@ export function MapScreen() {
   // Drop out-of-order responses: a slow earlier load must not overwrite a newer
   // viewport's overlays (several callers can be in flight — pan, recenter, focus).
   const loadSeq = useRef(0);
+  // A territory id we've been asked to highlight once its data lands (deep-link
+  // from a profile's "view on map"); cleared as soon as we select it.
+  const pendingFocusId = useRef<string | null>(null);
+  // Last handled focus param key, so re-renders don't re-trigger the fly-to.
+  const lastFocusKey = useRef<string | null>(null);
 
   const load = useCallback(async (r: Region) => {
     lastRegion.current = r;
-    setZoomedIn(r.latitudeDelta <= MAX_COURT_DELTA);
+    const zoom = r.latitudeDelta <= MAX_COURT_DELTA;
+    setZoomedIn(zoom);
     const seq = ++loadSeq.current;
     const bbox = {
       min_lng: r.longitude - r.longitudeDelta,
@@ -102,7 +130,7 @@ export function MapScreen() {
       max_lat: r.latitude + r.latitudeDelta,
     };
     // 1) Instant paint: territories + courts straight from the DB (no Overpass),
-    //    so markers appear immediately and panning never waits on the network.
+    //    so overlays appear immediately and panning never waits on the network.
     try {
       const [{ territories: terr }, courtRes] = await Promise.all([
         api.getTerritories(bbox),
@@ -118,10 +146,10 @@ export function MapScreen() {
     }
 
     // 2) Background: pull any new real-world courts from OpenStreetMap. This is
-    //    the slow call (Overpass), so it runs AFTER paint — the visible map is
-    //    never blocked by it. The seq guard makes this the authoritative set for
-    //    the current viewport, so replace unconditionally (don't compare counts:
-    //    panning to a sparser area legitimately returns fewer courts).
+    //    the slow call (Overpass), so it runs AFTER paint and only when zoomed in
+    //    enough to matter — the visible map is never blocked by it. The seq guard
+    //    makes this the authoritative set for the current viewport.
+    if (!zoom) return;
     void api
       .discoverCourts(bbox, { discover: true })
       .then((res) => {
@@ -150,6 +178,37 @@ export function MapScreen() {
       void load(start);
     })();
   }, [load]);
+
+  // Deep-link focus: a profile asked us to fly to and highlight a zone. Guarded
+  // by a key ref so re-renders don't replay the animation.
+  useEffect(() => {
+    const p = route.params;
+    if (p?.focusLat == null || p?.focusLng == null) return;
+    const key = `${p.focusLat},${p.focusLng},${p.focusTerritoryId ?? ''}`;
+    if (lastFocusKey.current === key) return;
+    lastFocusKey.current = key;
+    const region: Region = {
+      latitude: p.focusLat,
+      longitude: p.focusLng,
+      latitudeDelta: 0.08,
+      longitudeDelta: 0.08,
+    };
+    pendingFocusId.current = p.focusTerritoryId ?? null;
+    mapRef.current?.animateToRegion(region, 700);
+    void load(region);
+  }, [route.params, load]);
+
+  // Once territories for a focused viewport arrive, select the requested one so
+  // its "who's dominating" card pops without another tap.
+  useEffect(() => {
+    const id = pendingFocusId.current;
+    if (!id) return;
+    const found = territories.find((t) => t.id === id);
+    if (found) {
+      setSelected(found);
+      pendingFocusId.current = null;
+    }
+  }, [territories]);
 
   // Re-request location and recenter the map on the user.
   const recenter = useCallback(async () => {
@@ -203,6 +262,19 @@ export function MapScreen() {
     [courts, zoomedIn],
   );
 
+  // Pre-build capped polygon descriptors once per territory/identity change, so
+  // panning doesn't re-derive every ring's coordinates (and colour) each render.
+  const polygons = useMemo(
+    () =>
+      territories.slice(0, MAX_TERRITORIES).map((t) => {
+        const isSelf = t.user_id === user?.id;
+        return { t, coords: polygonCoords(t), ...zoneColors(t, isSelf) };
+      }),
+    [territories, user?.id],
+  );
+
+  const selectedColors = selected ? zoneColors(selected, selected.user_id === user?.id) : null;
+
   return (
     <View style={styles.container}>
       <MapView
@@ -213,24 +285,21 @@ export function MapScreen() {
         mapType="none"
         showsUserLocation
         rotateEnabled={false}
+        moveOnMarkerPress={false}
       >
         <UrlTile urlTemplate={OSM_TILE_URL} maximumZ={19} flipY={false} zIndex={-1} />
 
-        {territories.map((t) => {
-          const isSelf = t.user_id === user?.id;
-          const c = ownerColor(t.user_id, isSelf);
-          return (
-            <Polygon
-              key={t.id}
-              coordinates={polygonCoords(t)}
-              fillColor={c.fill}
-              strokeColor={c.stroke}
-              strokeWidth={2}
-              tappable
-              onPress={() => setSelected(t)}
-            />
-          );
-        })}
+        {polygons.map(({ t, coords, fill, stroke }) => (
+          <Polygon
+            key={t.id}
+            coordinates={coords}
+            fillColor={fill}
+            strokeColor={stroke}
+            strokeWidth={2}
+            tappable
+            onPress={() => setSelected(t)}
+          />
+        ))}
 
         {visibleCourts.map((court) => (
           <CourtMarker key={court.id} court={court} onPress={openCourt} />
@@ -244,18 +313,20 @@ export function MapScreen() {
         </View>
       ) : null}
 
-      {/* Title + add-court control */}
+      {/* Title + search control */}
       <View style={[styles.topBar, { top: insets.top + spacing.sm }]} pointerEvents="box-none">
         <View style={styles.titlePill}>
           <Text style={styles.title}>🗺️ Domination Map</Text>
         </View>
+        {/* A search icon (distinct from the ＋ Court FAB) so it's clear this is
+            for finding/browsing courts, not adding one. */}
         <Pressable
-          style={styles.addBtn}
+          style={styles.searchBtn}
           onPress={() => navigation.navigate('Courts')}
           accessibilityRole="button"
-          accessibilityLabel="Add or browse courts"
+          accessibilityLabel="Search courts"
         >
-          <Text style={styles.addBtnText}>＋ Courts</Text>
+          <Text style={styles.searchIcon}>🔍</Text>
         </Pressable>
       </View>
 
@@ -293,13 +364,14 @@ export function MapScreen() {
         <Text style={styles.recenterIcon}>◎</Text>
       </Pressable>
 
-      {/* Selected territory card */}
-      {selected ? (
-        <View style={styles.detailCard}>
+      {/* Selected territory card — who's dominating this zone */}
+      {selected && selectedColors ? (
+        <View style={[styles.detailCard, { borderColor: selectedColors.stroke }]}>
+          <View style={[styles.zoneSwatch, { backgroundColor: selectedColors.fill, borderColor: selectedColors.stroke }]} />
           <View style={{ flex: 1 }}>
             <Text style={styles.detailDistrict}>{selected.district_name}</Text>
             <Text style={styles.detailOwner}>
-              held by @{selected.owner_username ?? 'unknown'} · {selected.court_count} courts · {selected.area_sqkm.toFixed(1)} km²
+              Dominated by @{selected.owner_username ?? 'unknown'} · {selected.court_count} courts · {selected.area_sqkm.toFixed(1)} km²
             </Text>
           </View>
           <Pressable
@@ -326,14 +398,13 @@ export function MapScreen() {
         <View style={styles.legend}>
           <View style={[styles.legendDot, { backgroundColor: colors.primary }]} />
           <Text style={styles.legendText}>You</Text>
-          {/* Each rival gets a distinct hashed hue, so show a few sample colours
-              rather than one swatch the rendered polygons never actually use. */}
+          {/* Rivals each get their own colour (their pick, else a palette hue). */}
           <View style={styles.rivalDots}>
-            <View style={[styles.legendDot, { backgroundColor: 'hsl(20, 70%, 60%)' }]} />
-            <View style={[styles.legendDot, { backgroundColor: 'hsl(140, 70%, 60%)', marginLeft: -3 }]} />
-            <View style={[styles.legendDot, { backgroundColor: 'hsl(260, 70%, 60%)', marginLeft: -3 }]} />
+            <View style={[styles.legendDot, { backgroundColor: RIVAL_PALETTE[0] }]} />
+            <View style={[styles.legendDot, { backgroundColor: RIVAL_PALETTE[1], marginLeft: -3 }]} />
+            <View style={[styles.legendDot, { backgroundColor: RIVAL_PALETTE[2], marginLeft: -3 }]} />
           </View>
-          <Text style={styles.legendText}>Rivals</Text>
+          <Text style={styles.legendText}>Rivals · tap a zone</Text>
         </View>
       )}
     </View>
@@ -360,9 +431,19 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     ...shadow.card,
   },
-  title: { color: colors.text, fontWeight: '800', fontSize: font.small },
-  addBtn: { backgroundColor: colors.primary, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.pill, ...shadow.card },
-  addBtnText: { color: colors.onPrimary, fontWeight: '800', fontSize: font.small },
+  title: { color: colors.text, fontFamily: fonts.heading, fontSize: font.body },
+  searchBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadow.card,
+  },
+  searchIcon: { fontSize: 20 },
   detailCard: {
     position: 'absolute',
     bottom: spacing.xl,
@@ -378,10 +459,11 @@ const styles = StyleSheet.create({
     borderColor: colors.primary,
     ...shadow.card,
   },
-  detailDistrict: { color: colors.text, fontWeight: '800', fontSize: font.h3 },
+  zoneSwatch: { width: 22, height: 22, borderRadius: radius.sm, borderWidth: 2 },
+  detailDistrict: { color: colors.text, fontFamily: fonts.heading, fontSize: font.h3 },
   detailOwner: { color: colors.textDim, fontSize: font.small, marginTop: 2 },
   detailBtn: { backgroundColor: colors.primarySoft, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.md },
-  detailBtnText: { color: colors.primary, fontWeight: '800' },
+  detailBtnText: { color: colors.primary, fontFamily: fonts.bold },
   close: { color: colors.textDim, fontSize: font.body },
   legend: {
     position: 'absolute',
@@ -414,7 +496,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     ...shadow.card,
   },
-  bannerText: { color: colors.textDim, fontSize: font.small, fontWeight: '600' },
+  bannerText: { color: colors.textDim, fontSize: font.small, fontFamily: fonts.medium },
   recenter: {
     position: 'absolute',
     right: spacing.lg,
@@ -429,7 +511,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     ...shadow.card,
   },
-  recenterIcon: { color: colors.primary, fontSize: 22, fontWeight: '800' },
+  recenterIcon: { color: colors.primary, fontSize: 22, fontFamily: fonts.display },
   addCourt: {
     position: 'absolute',
     right: spacing.lg,
@@ -443,6 +525,6 @@ const styles = StyleSheet.create({
     gap: 4,
     ...shadow.card,
   },
-  addCourtIcon: { color: colors.onPrimary, fontSize: 20, fontWeight: '900' },
-  addCourtText: { color: colors.onPrimary, fontSize: font.small, fontWeight: '800' },
+  addCourtIcon: { color: colors.onPrimary, fontSize: 20, fontFamily: fonts.display },
+  addCourtText: { color: colors.onPrimary, fontSize: font.small, fontFamily: fonts.bold },
 });

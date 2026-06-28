@@ -2,7 +2,9 @@ import type { NavigatorScreenParams } from '@react-navigation/native';
 
 export type TabParamList = {
   Feed: undefined;
-  Map: undefined;
+  // Optional focus target: fly to and highlight a player's domination zone
+  // (used by the "view on map" action on a profile's territory).
+  Map: { focusLat?: number; focusLng?: number; focusTerritoryId?: string } | undefined;
   // A court just added from the Log flow is handed back here to auto-select.
   Log: { newCourtId?: string } | undefined;
   Alerts: undefined;
