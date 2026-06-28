@@ -6,7 +6,7 @@
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
-    "newArchEnabled": false,
+    "newArchEnabled": true,
     "backgroundColor": "#F4F6F3",
     "splash": {
       "backgroundColor": "#F4F6F3",
