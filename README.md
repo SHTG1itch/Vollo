@@ -23,8 +23,11 @@ stream). Each match feeds three systems:
    **Vollo Rating** (Elo), and a rolling **streak heat index**.
 3. **The Geospatial Domination Engine** — win matches at courts to top their 30-day
    leaderboard; control ≥3 courts within 10 km and PostGIS draws a neon-green
-   **convex-hull territory** over the map. Lose your grip and the polygon contracts,
-   mutates, or shatters — with push notifications when a rival cuts off your district.
+   **concave-hull territory** whose vertices sit on the courts you actually hold.
+   Lose your grip and the polygon contracts, mutates, or shatters — with push
+   notifications when a rival cuts off your district or starts a **Turf War**.
+   Matches against another Vollo player only count once that opponent **verifies**
+   them, so domination and Elo stay honest.
 
 ---
 
@@ -38,7 +41,7 @@ stream). Each match feeds three systems:
 | Courts | **OpenStreetMap Overpass API** | Imports real-world tennis courts into the map at $0 (no key) |
 | Lists | **@shopify/flash-list** | High-performance feed rendering |
 | API | **Node.js + Express + TypeScript** | Shared language with the app |
-| Database | **PostgreSQL + PostGIS** | Native spatial geometry + `ST_ConvexHull` |
+| Database | **PostgreSQL + PostGIS** | Native spatial geometry + `ST_ConcaveHull` territories |
 | Geocoding | **Nominatim (OSM)** / Geoapify free tier | Address → coordinates at no cost |
 | Hosting | **Render** (API) + **Supabase** (Postgres/PostGIS) free tiers | $0 runway |
 | Push | **Expo Push** → APNs + FCM | Free relay |
@@ -123,19 +126,33 @@ Activity is bucketed into rolling 7-day windows. The streak is the run of consec
 windows with ≥1 match; the modifier scales up `+0.1` per maintained week, capped at
 `×2.0`. A daily cron sweep decays modifiers the moment a window lapses.
 
-### Court leaderboards
-Per court, over a trailing **30-day window**, players are ranked by `Σ MatchScore`.
-Rank #1 is the **Court Controller**; ranks 1–2 "control" a court for territory purposes.
+### Match verification (competitive integrity)
+A match logged against a **registered Vollo player** starts `pending` and counts for
+**nothing** — not Elo, streak, court leaderboard or territory — until that opponent
+**confirms** it (they get a push to Confirm/Dispute). A disputed match is `rejected`
+and never counts; a match against an off-app opponent is `auto` and counts immediately.
+The court leaderboard view, streak, analytics and achievements all read only
+`auto`/`verified` matches, and the confirm transition is status-guarded so a double-tap
+can't apply Elo twice.
 
-### The Domination Engine (convex hull)
-On every match (and on a 6-hourly sweep) the engine, for each affected player:
+### Court leaderboards
+Per court, over a trailing **30-day window**, players are ranked by `Σ MatchScore`
+(verified matches only). Rank #1 is the **Court Controller**; ranks 1–2 "control" a
+court for territory purposes. When a challenger climbs to within ~70 % of the
+controller's score at a court inside their territory, the controller gets a
+**⚔️ Turf War Initiated** alert.
+
+### The Domination Engine (concave hull)
+On every counting match (and on a 6-hourly sweep) the engine, for each affected player:
 
 1. pulls **controlled courts** (rank ≤ 2 in the 30-day window),
 2. **clusters** them by the 10 km radius (single-linkage),
-3. for each cluster of **≥ 3 courts**, runs the spec's PostGIS query:
+3. for each cluster of **≥ 3 courts**, runs a PostGIS concave hull so the polygon's
+   vertices land on the courts the player holds (convex-hull / 75 m-buffer fallback for
+   degenerate cases):
 
    ```sql
-   SELECT ST_AsGeoJSON(ST_ConvexHull(ST_Collect(court_geom)))
+   SELECT ST_AsGeoJSON(ST_ConcaveHull(ST_Collect(court_geom), 0.7, false))
    FROM courts WHERE id = ANY(:controlled_court_ids);
    ```
 4. **diffs** against existing territories → fires `territory_gained` / `territory_changed`
@@ -161,16 +178,26 @@ compass district naming) lives in `backend/src/utils/geo.ts` and is fully unit-t
   it, name it, pick a surface, set how many courts the venue has, and it's saved
   as a shared court everyone sees (reverse-geocoding fills the city best-effort).
 - **Match → location → domination** — every match can be tied to a court/sector,
-  which feeds the 30-day court leaderboard and the convex-hull territory engine.
+  which feeds the 30-day court leaderboard and the concave-hull territory engine.
+- **Match verification** — a match tagged against a registered player only counts
+  once they confirm it (pending → verified / rejected), keeping Elo and turf honest.
+- **Turf Wars** — when a rival closes in on a court you control inside your
+  territory, you get a "⚔️ Turf War Initiated" alert so control is a constant fight.
+- **Challenge a player** — a ⚔️ Challenge button on any profile (or on a domination
+  zone's card) proposes a schedulable match; the opponent gets a challenge push.
+- **Tap a zone to see who to beat** — the map's sector card shows the dominant
+  player and how many wins they hold there, so you know the bar to claim it.
 - **Fast, crash-free map** — courts paint instantly from the DB while new ones
-  import from OSM in the background; markers don't re-render their native views
-  (`tracksViewChanges={false}`), are capped, and hide when zoomed far out.
+  import from OSM in the background; overlays commit on the idle frame, reuse their
+  native views when unchanged, coalesce fast pans/zooms, and cap vertices/markers —
+  so rapid gestures no longer churn (and crash) the native map.
 - **Public equipment loadout** — racquet, strings, tension and shoes on every
   profile, so you can see what gear strong players use.
-- **Per-surface Vollo Rating** — Elo with a game-margin multiplier. Only the
-  logging player's rating moves: a unilateral log never mutates a tagged
-  opponent's rating (that would let anyone tank another player's record). The
-  exact delta is stored per match so deleting a match backs it out precisely.
+- **Per-surface Vollo Rating** — Elo with a game-margin multiplier, applied only
+  once a match counts (verified/auto). Only the logging player's rating moves: a
+  unilateral log never mutates a tagged opponent's rating (that would let anyone
+  tank another player's record). The exact delta is stored per match so deleting a
+  match backs it out precisely.
 - **Achievements / badges** — Clay Grinder, Comeback King, Territory Lord, On Fire…
 - **Head-to-head rivalries**, **comments**, **follows**, and a following-only feed.
 - **Playstyle labeling** — "Clay Court Grinder" vs "Hard Court Specialist" from your
@@ -185,9 +212,10 @@ compass district naming) lives in `backend/src/utils/geo.ts` and is fully unit-t
 | Method & path | Purpose |
 |---|---|
 | `POST /api/auth/login` · `GET /api/auth/username-available?username=` · `GET /api/auth/me` | Auth — sign-up is client-side via **Supabase Auth**; sign-in is proxied server-side so a username resolves to a session without exposing email; the function validates the token and resolves the profile. **Google / Apple sign-in** use the native ID-token flow client-side (no new route) and validate through the same path — see [`supabase/OAUTH_SETUP.md`](supabase/OAUTH_SETUP.md). (The legacy Express backend in `backend/` still uses custom JWT.) |
-| `GET /api/scheduled-matches` · `POST …` · `PATCH /:id` | Propose/accept/decline/cancel matches; a logged match links its result back |
+| `GET /api/scheduled-matches` · `POST …` · `PATCH /:id` | Propose/accept/decline/cancel matches & **challenges** (`is_challenge`); a logged match links its result back |
 | `GET /api/feed?scope=global\|following&before=` | Paginated match cards |
-| `POST /api/matches` | Log a match (+ optional stat matrix) |
+| `POST /api/matches` | Log a match (+ optional stat matrix); tagging a Vollo player makes it **pending verification** |
+| `GET /api/matches/pending` · `POST /api/matches/:id/verify` | Matches awaiting my confirmation; opponent confirms (counts) or rejects (disputed) |
 | `POST /api/matches/:id/kudos` · `DELETE …` | Kudos (idempotent) |
 | `GET /api/courts?lat=&lng=&radius_km=` | Nearby courts (PostGIS `ST_DWithin`) |
 | `GET /api/courts/discover?min_lng=&min_lat=&max_lng=&max_lat=` | Import + name + group OSM courts into facility sectors, list them (`import=0` = DB-only fast paint) |
