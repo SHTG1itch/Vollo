@@ -33,7 +33,10 @@ export default function App() {
   const token = useAuth((s) => s.token);
   const refreshMe = useAuth((s) => s.refreshMe);
   const fetchNotifications = useNotifications((s) => s.fetch);
-  const [fontsLoaded] = useFonts(FONT_ASSETS);
+  // Gate render on fonts, but never hang on a load failure — RN simply falls
+  // back to the system font for an unresolved family, so proceed on error too.
+  const [fontsLoaded, fontError] = useFonts(FONT_ASSETS);
+  const fontsReady = fontsLoaded || fontError != null;
 
   useEffect(() => {
     if (!token) return;
@@ -54,7 +57,7 @@ export default function App() {
     };
   }, [token, refreshMe, fetchNotifications]);
 
-  if (!hydrated || !fontsLoaded) {
+  if (!hydrated || !fontsReady) {
     return (
       <View style={styles.splash}>
         <Text style={styles.logo}>🎾</Text>

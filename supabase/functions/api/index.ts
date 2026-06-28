@@ -57,38 +57,60 @@ function uid(c: Context<Env>): string {
   return u.sub;
 }
 
-async function authFromHeader(c: Context): Promise<{ claims: AuthClaims | null; hadToken: boolean }> {
+interface AuthResult {
+  claims: AuthClaims | null;
+  hadToken: boolean;
+  /** True when validation couldn't complete (GoTrue/DB blip) rather than the
+   *  token being definitively invalid — so callers surface a retryable 503
+   *  instead of a 401 that would force the client to sign out. */
+  transient: boolean;
+}
+
+async function authFromHeader(c: Context): Promise<AuthResult> {
   const header = c.req.header('Authorization') ?? c.req.header('authorization');
-  if (!header) return { claims: null, hadToken: false };
+  if (!header) return { claims: null, hadToken: false, transient: false };
   const parts = header.trim().split(/ +/);
-  if (parts[0]?.toLowerCase() !== 'bearer') return { claims: null, hadToken: false };
+  if (parts[0]?.toLowerCase() !== 'bearer') return { claims: null, hadToken: false, transient: false };
   const token = parts.slice(1).join(' ').trim();
-  if (!token) return { claims: null, hadToken: false };
+  if (!token) return { claims: null, hadToken: false, transient: false };
   try {
     // Validate the Supabase Auth access token, then resolve it to our profile.
     // We keep claims.sub = users.id (NOT the auth id) so every existing FK
     // reference and ownership check stays intact.
     const { data, error } = await adminClient.auth.getUser(token);
-    if (error || !data.user) return { claims: null, hadToken: true };
+    if (error) {
+      // A 4xx (other than rate-limit) means the token is genuinely invalid;
+      // anything else (network, 5xx, rate-limit) is a transient failure.
+      const status = (error as { status?: number }).status ?? 0;
+      const definitelyInvalid = status >= 400 && status < 500 && status !== 429;
+      return { claims: null, hadToken: true, transient: !definitelyInvalid };
+    }
+    if (!data.user) return { claims: null, hadToken: true, transient: false };
     const row = await queryOne<{ id: string; username: string }>(
       'SELECT id, username FROM users WHERE auth_id = $1',
       [data.user.id],
     );
-    if (!row) return { claims: null, hadToken: true };
-    return { claims: { sub: row.id, username: row.username }, hadToken: true };
+    if (!row) return { claims: null, hadToken: true, transient: false };
+    return { claims: { sub: row.id, username: row.username }, hadToken: true, transient: false };
   } catch {
-    return { claims: null, hadToken: true };
+    // Threw before we could decide (GoTrue network error, DB error) — transient.
+    return { claims: null, hadToken: true, transient: true };
   }
 }
 
 const requireAuth: MiddlewareHandler<Env> = async (c, next) => {
-  const { claims, hadToken } = await authFromHeader(c);
-  if (!claims) throw hadToken ? ApiError.unauthorized('Invalid or expired token') : ApiError.unauthorized();
+  const { claims, hadToken, transient } = await authFromHeader(c);
+  if (!claims) {
+    if (transient) throw new ApiError(503, 'auth_unavailable', 'Sign-in check is temporarily unavailable, please retry');
+    throw hadToken ? ApiError.unauthorized('Invalid or expired token') : ApiError.unauthorized();
+  }
   c.set('user', claims);
   await next();
 };
 
 const optionalAuth: MiddlewareHandler<Env> = async (c, next) => {
+  // A transient failure here just means we treat the request as unauthenticated
+  // (these routes are public) rather than failing it.
   const { claims } = await authFromHeader(c);
   if (claims) c.set('user', claims);
   await next();
@@ -393,11 +415,13 @@ app.post('/api/matches', requireAuth, async (c) => {
 
   // If this match fulfils a scheduled proposal, link it so the score surfaces on
   // both players' scheduled-match cards. Best-effort; the match is already saved.
+  // Only a live (proposed/accepted) schedule the user is part of can be completed
+  // — never resurrect a declined/cancelled one.
   if (body.scheduled_match_id) {
     try {
       await query(
         `UPDATE scheduled_matches SET status = 'completed', match_id = $1
-          WHERE id = $2 AND (creator_id = $3 OR opponent_id = $3) AND status <> 'completed'`,
+          WHERE id = $2 AND (creator_id = $3 OR opponent_id = $3) AND status IN ('proposed', 'accepted')`,
         [matchId, body.scheduled_match_id, userId],
       );
     } catch (err) {
@@ -992,13 +1016,15 @@ app.delete('/api/users/me/push-token', requireAuth, async (c) => {
 app.delete('/api/users/me', requireAuth, async (c) => {
   const userId = uid(c);
   const row = await queryOne<{ auth_id: string | null }>('SELECT auth_id FROM users WHERE id = $1', [userId]);
-  // Remove the application profile (cascades all the user's data) now…
-  await query('DELETE FROM users WHERE id = $1', [userId]);
-  // …then best-effort remove the Supabase Auth identity so the login is gone too.
   if (row?.auth_id) {
-    await adminClient.auth.admin.deleteUser(row.auth_id).catch((err) =>
-      console.error('[users] auth identity delete failed', err instanceof Error ? err.message : err),
-    );
+    // Delete the auth identity first: users.auth_id ON DELETE CASCADE removes the
+    // profile and all owned data atomically. If this throws, the account is left
+    // intact (the request 500s and can be retried) rather than orphaning an auth
+    // user with no profile — which would soft-lock the login.
+    await adminClient.auth.admin.deleteUser(row.auth_id);
+  } else {
+    // Legacy row with no linked auth identity — remove the profile directly.
+    await query('DELETE FROM users WHERE id = $1', [userId]);
   }
   return c.body(null, 204);
 });

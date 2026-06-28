@@ -115,8 +115,6 @@ export function MapScreen() {
   // A territory id we've been asked to highlight once its data lands (deep-link
   // from a profile's "view on map"); cleared as soon as we select it.
   const pendingFocusId = useRef<string | null>(null);
-  // Last handled focus param key, so re-renders don't re-trigger the fly-to.
-  const lastFocusKey = useRef<string | null>(null);
 
   const load = useCallback(async (r: Region) => {
     lastRegion.current = r;
@@ -160,6 +158,10 @@ export function MapScreen() {
   }, []);
 
   useEffect(() => {
+    // If we were opened to focus a specific zone (deep-link), let the focus
+    // effect own the initial camera + load — otherwise this mount load races it
+    // and, by incrementing loadSeq last, deterministically clobbers the focus.
+    if (route.params?.focusLat != null && route.params?.focusLng != null) return;
     void (async () => {
       let start = DEFAULT_REGION;
       try {
@@ -177,16 +179,17 @@ export function MapScreen() {
       }
       void load(start);
     })();
+    // route.params is read once at mount to decide whether to defer; later focus
+    // navigations arrive while mounted and are handled by the focus effect below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load]);
 
-  // Deep-link focus: a profile asked us to fly to and highlight a zone. Guarded
-  // by a key ref so re-renders don't replay the animation.
+  // Deep-link focus: a profile asked us to fly to and highlight a zone. After
+  // handling we clear the params, which both prevents a re-render loop and lets
+  // a repeat tap (even of the same zone) re-fire a fresh focus.
   useEffect(() => {
     const p = route.params;
     if (p?.focusLat == null || p?.focusLng == null) return;
-    const key = `${p.focusLat},${p.focusLng},${p.focusTerritoryId ?? ''}`;
-    if (lastFocusKey.current === key) return;
-    lastFocusKey.current = key;
     const region: Region = {
       latitude: p.focusLat,
       longitude: p.focusLng,
@@ -196,7 +199,12 @@ export function MapScreen() {
     pendingFocusId.current = p.focusTerritoryId ?? null;
     mapRef.current?.animateToRegion(region, 700);
     void load(region);
-  }, [route.params, load]);
+    (navigation.setParams as (params: Record<string, undefined>) => void)({
+      focusLat: undefined,
+      focusLng: undefined,
+      focusTerritoryId: undefined,
+    });
+  }, [route.params, load, navigation]);
 
   // Once territories for a focused viewport arrive, select the requested one so
   // its "who's dominating" card pops without another tap.
@@ -264,14 +272,19 @@ export function MapScreen() {
 
   // Pre-build capped polygon descriptors once per territory/identity change, so
   // panning doesn't re-derive every ring's coordinates (and colour) each render.
-  const polygons = useMemo(
-    () =>
-      territories.slice(0, MAX_TERRITORIES).map((t) => {
-        const isSelf = t.user_id === user?.id;
-        return { t, coords: polygonCoords(t), ...zoneColors(t, isSelf) };
-      }),
-    [territories, user?.id],
-  );
+  // A focused/selected zone is always included even if it sorts past the cap, so
+  // the highlighted polygon the detail card refers to is actually drawn.
+  const polygons = useMemo(() => {
+    const shown = territories.slice(0, MAX_TERRITORIES);
+    if (selected && !shown.some((t) => t.id === selected.id)) {
+      const extra = territories.find((t) => t.id === selected.id);
+      if (extra) shown.push(extra);
+    }
+    return shown.map((t) => {
+      const isSelf = t.user_id === user?.id;
+      return { t, coords: polygonCoords(t), ...zoneColors(t, isSelf) };
+    });
+  }, [territories, user?.id, selected]);
 
   const selectedColors = selected ? zoneColors(selected, selected.user_id === user?.id) : null;
 

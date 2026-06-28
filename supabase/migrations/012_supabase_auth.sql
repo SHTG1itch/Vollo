@@ -33,7 +33,9 @@ AS $$
 DECLARE
   v_username TEXT;
   v_display  TEXT;
+  v_base     TEXT;
   v_user_id  UUID;
+  v_suffix   INT := 0;
 BEGIN
   v_username := NULLIF(trim(NEW.raw_user_meta_data ->> 'username'), '');
   v_display  := NULLIF(trim(NEW.raw_user_meta_data ->> 'display_name'), '');
@@ -41,6 +43,17 @@ BEGIN
   -- username/display_name constraints always hold even without metadata.
   v_username := COALESCE(v_username, 'player_' || substr(replace(NEW.id::text, '-', ''), 1, 10));
   v_display  := COALESCE(v_display, v_username);
+
+  -- The mobile client pre-checks username availability, but a concurrent race
+  -- (or a leftover legacy row) could still collide. Rather than raising — which
+  -- would abort the auth.users insert and fail signUp with an opaque error —
+  -- derive a free handle by suffixing. (Email collisions can't happen here:
+  -- auth.users already enforces a unique email before this trigger fires.)
+  v_base := v_username;
+  WHILE EXISTS (SELECT 1 FROM public.users WHERE username = v_username) AND v_suffix < 1000 LOOP
+    v_suffix := v_suffix + 1;
+    v_username := left(v_base, 14) || v_suffix::text;
+  END LOOP;
 
   INSERT INTO public.users (auth_id, username, email, display_name)
   VALUES (NEW.id, v_username, NEW.email, v_display)
