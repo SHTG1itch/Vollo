@@ -89,6 +89,15 @@ interface ReplayMatch {
  * or reversal is needed.
  */
 export async function recomputeUserRatings(db: Queryable, userId: string): Promise<void> {
+  // Serialize concurrent recomputes for this user. The replay is a read-then-
+  // absolute-write, so two overlapping same-user transactions (e.g. a DELETE
+  // racing a POST/verify) could otherwise lose an update under READ COMMITTED.
+  // A per-user xact advisory lock makes the second wait, then re-read full
+  // history on a fresh post-commit snapshot. (Inside a transaction it releases
+  // on commit; in the best-effort sweep — no surrounding txn — it's a no-op,
+  // which is fine since the sweep is idempotent.)
+  await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0::bigint))', [userId]);
+
   // Inline row type (a named interface here wouldn't satisfy the driver's Row
   // constraint). Structurally a ReplayMatch.
   const { rows: matches } = await db.query<{

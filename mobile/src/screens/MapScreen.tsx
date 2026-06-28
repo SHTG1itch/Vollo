@@ -186,6 +186,9 @@ export function MapScreen() {
   // Mirrors `interacting` so the per-frame onRegionChange handler can flip the
   // state exactly once per gesture instead of calling setState every frame.
   const interactingRef = useRef(false);
+  // Whether a finger is currently on the map, so the settle safety-net never
+  // fires mid-gesture during a stationary hold (it waits for touch-up).
+  const touchingRef = useRef(false);
   // Latest region seen during a gesture, so the settle safety-net loads where the
   // user actually ended up (onRegionChange fires before any load updates refs).
   const liveRegion = useRef<Region>(DEFAULT_REGION);
@@ -378,16 +381,23 @@ export function MapScreen() {
         interactingRef.current = true;
         setInteracting(true);
       }
-      // Safety net: if onRegionChangeComplete never fires (it can be dropped on
-      // Android for a flung gesture), settle off the last frame's region so
-      // overlays don't stay hidden and we still load where the user ended up.
+      // Safety net for when onRegionChangeComplete is dropped (Android can drop
+      // it for a flung gesture). Re-armed every frame, so it fires only once
+      // motion stops — and NOT while a finger is still down (a mid-drag pause),
+      // which would otherwise flash overlays back mid-gesture. Short delay since
+      // it only ever runs post-motion; the normal complete handler settles instantly.
       if (settleTimer.current) clearTimeout(settleTimer.current);
-      settleTimer.current = setTimeout(() => {
+      const settle = () => {
+        if (touchingRef.current) {
+          settleTimer.current = setTimeout(settle, 350); // finger still down — keep waiting
+          return;
+        }
         interactingRef.current = false;
         setInteracting(false);
         setZoomedIn(liveRegion.current.latitudeDelta <= MAX_COURT_DELTA);
         void load(liveRegion.current);
-      }, 900);
+      };
+      settleTimer.current = setTimeout(settle, 350);
     },
     [load],
   );
@@ -422,8 +432,10 @@ export function MapScreen() {
   // the highlighted polygon the detail card refers to is actually drawn. Empty
   // while interacting so polygons don't churn during a gesture either.
   const polygons = useMemo(() => {
-    if (interacting) return [];
-    const shown = territories.slice(0, MAX_TERRITORIES);
+    // Drop the full overlay set during a gesture to avoid native-view churn, but
+    // keep the one selected zone's polygon so its detail card always has a
+    // matching highlight (a single static polygon doesn't churn).
+    const shown = interacting ? [] : territories.slice(0, MAX_TERRITORIES);
     if (selected && !shown.some((t) => t.id === selected.id)) {
       const extra = territories.find((t) => t.id === selected.id);
       if (extra) shown.push(extra);
@@ -444,6 +456,9 @@ export function MapScreen() {
         initialRegion={DEFAULT_REGION}
         onRegionChange={onRegionChange}
         onRegionChangeComplete={onRegionChangeComplete}
+        onTouchStart={() => { touchingRef.current = true; }}
+        onTouchEnd={() => { touchingRef.current = false; }}
+        onTouchCancel={() => { touchingRef.current = false; }}
         mapType="none"
         showsUserLocation
         rotateEnabled={false}
