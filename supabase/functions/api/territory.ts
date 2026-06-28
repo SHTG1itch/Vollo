@@ -39,27 +39,45 @@ export async function getControlledCourts(userId: string): Promise<ControlledCou
 }
 
 /**
- * Run the PostGIS convex-hull computation over a set of courts:
- *   ST_AsGeoJSON(ST_ConvexHull(ST_Collect(court_geom)))
- * Collinear/degenerate hulls (a line or point) are buffered by 75m so the
- * client always receives a renderable Polygon with a real area.
+ * Compute a player's territory polygon from the courts they control.
+ *
+ * Uses ST_ConcaveHull so the polygon hugs the actual courts — its vertices land
+ * on the dominated courts rather than ballooning out to a convex blob — which
+ * makes the shape reflect where the player really wins. Falls back to the convex
+ * hull when the concave hull degenerates, and buffers a line/point (collinear or
+ * <3 courts) by 75m so the client always receives a renderable Polygon with a
+ * real area. ST_Dump + largest-part pick guarantees a single POLYGON for the
+ * geometry(Polygon) column even if ST_MakeValid splits a pathological shape.
  */
 export async function computeHullForCourts(courtIds: string[]): Promise<HullResult | null> {
   const row = await queryOne<{ geojson: string; center: string; area_sqkm: string }>(
-    `WITH hull AS (
-       SELECT ST_ConvexHull(ST_Collect(geom)) AS g
-         FROM courts WHERE id = ANY($1::uuid[])
+    `WITH pts AS (
+       SELECT ST_Collect(geom) AS g FROM courts WHERE id = ANY($1::uuid[])
      ),
-     poly AS (
-       SELECT CASE WHEN GeometryType(g) = 'POLYGON' THEN g
+     hull AS (
+       SELECT CASE
+                WHEN ST_NPoints(g) >= 3
+                  THEN COALESCE(ST_ConcaveHull(g, $2::float, false), ST_ConvexHull(g))
+                ELSE ST_ConvexHull(g)
+              END AS g
+         FROM pts
+     ),
+     shaped AS (
+       SELECT CASE WHEN GeometryType(g) = 'POLYGON' THEN ST_MakeValid(g)
                    ELSE ST_Buffer(g::geography, 75)::geometry END AS g
          FROM hull
+     ),
+     poly AS (
+       SELECT g FROM (SELECT (ST_Dump(g)).geom AS g FROM shaped) d
+        WHERE GeometryType(g) = 'POLYGON'
+        ORDER BY ST_Area(g) DESC
+        LIMIT 1
      )
      SELECT ST_AsGeoJSON(g)               AS geojson,
             ST_AsGeoJSON(ST_Centroid(g))  AS center,
             ST_Area(g::geography) / 1000000.0 AS area_sqkm
        FROM poly`,
-    [courtIds],
+    [courtIds, config.territory.concaveTargetPercent],
   );
   if (!row?.geojson) return null;
 

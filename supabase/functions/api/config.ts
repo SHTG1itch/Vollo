@@ -37,6 +37,13 @@ export const config = {
     radiusKm: num(Deno.env.get('TERRITORY_RADIUS_KM'), 10),
     minCourts: num(Deno.env.get('TERRITORY_MIN_COURTS'), 3),
     leaderboardWindowDays: num(Deno.env.get('LEADERBOARD_WINDOW_DAYS'), 30),
+    // ST_ConcaveHull "target percent": 1.0 = convex hull, lower = hugs the
+    // dominated courts more tightly so polygon vertices land on the courts the
+    // player actually controls. Kept high enough to stay a clean, valid polygon.
+    concaveTargetPercent: num(Deno.env.get('TERRITORY_CONCAVE_PCT'), 0.7),
+    // A rival is "challenging" a controlled court once their 30-day court score
+    // reaches this fraction of the controller's — triggers a Turf War alert.
+    turfWarThreshold: num(Deno.env.get('TURF_WAR_THRESHOLD'), 0.7),
   },
 
   streak: {
