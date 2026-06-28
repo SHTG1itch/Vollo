@@ -50,6 +50,9 @@ async function geocodeNominatim(q: string, limit: number): Promise<GeocodeResult
 export interface ReverseGeocodeResult {
   label: string;
   city: string | null;
+  /** Most specific named locality — neighbourhood/suburb/quarter — for naming
+   *  courts that OSM left anonymous ("Red Hawk Courts"). */
+  neighborhood: string | null;
 }
 
 /**
@@ -74,13 +77,19 @@ export async function reverseGeocode(lat: number, lng: number): Promise<ReverseG
   if (!res.ok) throw new Error(`nominatim reverse responded ${res.status}`);
   const r = (await res.json()) as {
     display_name?: string;
-    address?: { city?: string; town?: string; village?: string; municipality?: string; suburb?: string };
+    address?: {
+      city?: string; town?: string; village?: string; municipality?: string;
+      suburb?: string; neighbourhood?: string; quarter?: string; residential?: string;
+      city_district?: string; hamlet?: string;
+    };
   };
   if (!r.display_name) return null;
   const a = r.address ?? {};
   return {
     label: r.display_name,
     city: a.city ?? a.town ?? a.village ?? a.municipality ?? a.suburb ?? null,
+    neighborhood:
+      a.neighbourhood ?? a.suburb ?? a.quarter ?? a.residential ?? a.city_district ?? a.hamlet ?? a.village ?? null,
   };
 }
 

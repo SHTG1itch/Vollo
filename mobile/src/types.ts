@@ -21,6 +21,8 @@ export interface User {
   avatar_url: string | null;
   bio: string | null;
   dominant_hand: 'right' | 'left';
+  /** Signature colour (#RRGGBB) used to wash this player's territories. */
+  color: string | null;
   home_lat: number | null;
   home_lng: number | null;
   home_label: string | null;
@@ -122,6 +124,8 @@ export interface Territory {
   updated_at: string;
   owner_username?: string;
   owner_display_name?: string;
+  /** Owner's signature colour (#RRGGBB), or null when unset. */
+  owner_color?: string | null;
 }
 
 export interface LeaderboardEntry {
@@ -244,4 +248,6 @@ export interface GeocodeResult {
 export interface ReverseGeocodeResult {
   label: string;
   city: string | null;
+  /** Neighbourhood/suburb used to name anonymous courts; may be absent. */
+  neighborhood?: string | null;
 }

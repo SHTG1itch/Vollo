@@ -2,6 +2,7 @@ import { pool, query } from './db.ts';
 import { recomputeUserStreak } from './streak.ts';
 import { recomputeUserTerritories } from './territory.ts';
 import { evaluateAchievements } from './achievements.ts';
+import { reverseGeocode } from './geocoding.ts';
 
 /**
  * Rolling temporal-heat-index sweep. Recomputes every user's streak so modifiers
@@ -41,4 +42,40 @@ export async function runTerritorySweep(): Promise<number> {
   }
   console.log(`[sweep] territory sweep recomputed ${ok}/${users.length} user(s)`);
   return ok;
+}
+
+/**
+ * Court-naming backfill. Earlier OSM imports stored anonymous facilities as a
+ * bare "Tennis Court(s)"; this names a batch of them from their neighbourhood
+ * (e.g. "Red Hawk Courts"). Bounded per run and paced to respect Nominatim's
+ * ~1 req/s policy, so it's safe to re-run until it reports 0. Best-effort.
+ */
+export async function runCourtNameSweep(limit = 20): Promise<number> {
+  const courts = await query<{ id: string; lat: number; lng: number; city: string | null; court_count: number }>(
+    `SELECT id, ST_Y(geom) AS lat, ST_X(geom) AS lng, city, court_count
+       FROM courts
+      WHERE name ~ '^Tennis Courts?$'
+      ORDER BY court_count DESC, created_at DESC
+      LIMIT $1`,
+    [limit],
+  );
+  let named = 0;
+  for (let i = 0; i < courts.length; i++) {
+    const c = courts[i]!;
+    try {
+      const rg = await reverseGeocode(Number(c.lat), Number(c.lng));
+      const place = rg?.neighborhood ?? rg?.city ?? c.city;
+      if (place) {
+        const suffix = Number(c.court_count) > 1 ? 'Courts' : 'Court';
+        const name = `${place} ${suffix}`.slice(0, 118);
+        await query('UPDATE courts SET name = $1 WHERE id = $2', [name, c.id]);
+        named++;
+      }
+    } catch (err) {
+      console.error(`[sweep] court naming failed for ${c.id}`, err instanceof Error ? err.message : err);
+    }
+    if (i < courts.length - 1) await new Promise((r) => setTimeout(r, 1100));
+  }
+  console.log(`[sweep] court-name sweep named ${named}/${courts.length} court(s)`);
+  return named;
 }

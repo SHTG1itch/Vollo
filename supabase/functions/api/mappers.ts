@@ -26,6 +26,7 @@ export function mapUser(r: Record<string, unknown>): User {
     avatar_url: (r.avatar_url as string | null) ?? null,
     bio: (r.bio as string | null) ?? null,
     dominant_hand: (r.dominant_hand as 'right' | 'left') ?? 'right',
+    color: (r.color as string | null) ?? null,
     home_lat: r.home_lat != null ? Number(r.home_lat) : null,
     home_lng: r.home_lng != null ? Number(r.home_lng) : null,
     home_label: (r.home_label as string | null) ?? null,

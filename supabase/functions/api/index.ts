@@ -31,15 +31,15 @@ import { evaluateAchievements, getAchievements } from './achievements.ts';
 import { getCourtController, recomputeAfterMatch, getUserTerritories, listTerritories } from './territory.ts';
 import { notify } from './notifications.ts';
 import { geocode, reverseGeocode } from './geocoding.ts';
-import { fetchOverpassSectors } from './overpass.ts';
+import { fetchOverpassSectors, type OverpassSector } from './overpass.ts';
 import { getProfileAnalytics, getHeadToHead } from './analytics.ts';
-import { runStreakSweep, runTerritorySweep } from './sweeps.ts';
+import { runStreakSweep, runTerritorySweep, runCourtNameSweep } from './sweeps.ts';
 import type { AuthClaims, LeaderboardEntry, MatchCard, MatchStats } from './types.ts';
 
 type Env = { Variables: { user?: AuthClaims } };
 
 const USER_SELECT = `
-  id, username, email, display_name, avatar_url, bio, dominant_hand,
+  id, username, email, display_name, avatar_url, bio, dominant_hand, color,
   ST_Y(home_geom) AS home_lat, ST_X(home_geom) AS home_lng, home_label, equipment, created_at
 `;
 
@@ -573,9 +573,46 @@ function discoverCellKey(b: { min_lng: number; min_lat: number; max_lng: number;
   return [snap(b.min_lng), snap(b.min_lat), snap(b.max_lng), snap(b.max_lat)].map((n) => n.toFixed(2)).join(',');
 }
 
+// A name OSM gave us no facility for — formatName() fell back to a bare
+// "Tennis Court(s)". These are the courts we try to name by neighbourhood.
+const GENERIC_COURT_NAME = /^Tennis Courts?$/;
+
+// Cap how many anonymous sectors we reverse-geocode per import so a dense
+// viewport can't fan out dozens of Nominatim calls (its policy is ~1 req/s).
+const NEIGHBORHOOD_ENRICH_MAX = 6;
+const NOMINATIM_SPACING_MS = 1100;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Give anonymous OSM courts a human name from their neighbourhood — e.g. a bare
+ * "Tennis Courts" sitting in the Red Hawk neighbourhood becomes "Red Hawk
+ * Courts". Mutates the sectors in place; best-effort and bounded so it never
+ * blocks discovery for long. Runs BEFORE the upsert so the better name is what
+ * gets stored (and what re-imports keep, via the upsert's generic-name guard).
+ */
+async function enrichSectorNames(sectors: OverpassSector[]): Promise<void> {
+  const anon = sectors.filter((s) => GENERIC_COURT_NAME.test(s.name)).slice(0, NEIGHBORHOOD_ENRICH_MAX);
+  for (let i = 0; i < anon.length; i++) {
+    const s = anon[i]!;
+    try {
+      const rg = await reverseGeocode(s.lat, s.lng);
+      const place = rg?.neighborhood ?? rg?.city ?? s.city;
+      if (place) {
+        const suffix = s.court_count > 1 ? 'Courts' : 'Court';
+        s.name = `${place} ${suffix}`.slice(0, 118);
+      }
+    } catch {
+      /* keep the generic name */
+    }
+    if (i < anon.length - 1) await sleep(NOMINATIM_SPACING_MS); // respect Nominatim's rate policy
+  }
+}
+
 async function importOverpassCourts(b: { min_lng: number; min_lat: number; max_lng: number; max_lat: number }): Promise<number> {
   const sectors = await fetchOverpassSectors({ minLng: b.min_lng, minLat: b.min_lat, maxLng: b.max_lng, maxLat: b.max_lat });
   if (sectors.length === 0) return 0;
+  await enrichSectorNames(sectors);
   let imported = 0;
   const CHUNK = 50;
   for (let i = 0; i < sectors.length; i += CHUNK) {
@@ -595,7 +632,9 @@ async function importOverpassCourts(b: { min_lng: number; min_lat: number; max_l
       `INSERT INTO courts (name, surface, geom, city, osm_id, source, sector_key, court_count)
        VALUES ${values.join(', ')}
        ON CONFLICT (sector_key) WHERE sector_key IS NOT NULL DO UPDATE SET
-         name        = EXCLUDED.name,
+         -- Never let a later import regress a real/neighbourhood-enriched name
+         -- back to a bare "Tennis Court(s)" (Overpass/Nominatim can flap).
+         name        = CASE WHEN EXCLUDED.name ~ '^Tennis Courts?$' THEN courts.name ELSE EXCLUDED.name END,
          surface     = EXCLUDED.surface,
          geom        = EXCLUDED.geom,
          city        = COALESCE(EXCLUDED.city, courts.city),
@@ -792,6 +831,7 @@ app.patch('/api/users/me', requireAuth, async (c) => {
   if (b.bio !== undefined) { sets.push(`bio = $${i++}`); params.push(b.bio); }
   if (b.avatar_url !== undefined) { sets.push(`avatar_url = $${i++}`); params.push(b.avatar_url); }
   if (b.dominant_hand !== undefined) { sets.push(`dominant_hand = $${i++}`); params.push(b.dominant_hand); }
+  if (b.color !== undefined) { sets.push(`color = $${i++}`); params.push(b.color); }
   if (b.home !== undefined) {
     sets.push(`home_geom = ST_SetSRID(ST_MakePoint($${i++}, $${i++}), 4326)`);
     params.push(b.home.lng, b.home.lat);
@@ -979,7 +1019,8 @@ app.post('/api/internal/sweep', async (c) => {
   const type = (await jsonBody<{ type?: string }>(c)).type;
   if (type === 'streak') return c.json({ ok: true, recomputed: await runStreakSweep() });
   if (type === 'territory') return c.json({ ok: true, recomputed: await runTerritorySweep() });
-  throw ApiError.badRequest('type must be streak or territory');
+  if (type === 'court_names') return c.json({ ok: true, named: await runCourtNameSweep() });
+  throw ApiError.badRequest('type must be streak, territory or court_names');
 });
 
 // ─── Error handling ──────────────────────────────────────────────────────

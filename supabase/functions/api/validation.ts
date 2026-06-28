@@ -141,6 +141,15 @@ export const updateProfileSchema = z.object({
   bio: z.string().trim().max(280).optional(),
   avatar_url: z.string().trim().url().max(500).optional(),
   dominant_hand: z.enum(['right', 'left']).optional(),
+  // Signature colour as #RRGGBB. Empty string clears it back to "unset" so the
+  // client can reset to the default hashed hue.
+  color: z
+    .string()
+    .trim()
+    .transform((v) => (v.length ? v : null))
+    .refine((v) => v === null || /^#[0-9A-Fa-f]{6}$/.test(v), { message: 'color must be a #RRGGBB hex string' })
+    .nullable()
+    .optional(),
   home: z
     .object({
       lat: z.number().min(-90).max(90),

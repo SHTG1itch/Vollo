@@ -294,7 +294,7 @@ export async function listTerritories(bbox?: {
     `SELECT t.id, t.user_id, ST_AsGeoJSON(t.geom) AS geojson,
             ST_Y(t.center_geom) AS center_lat, ST_X(t.center_geom) AS center_lng,
             t.court_count, t.area_sqkm, t.district_name, t.court_ids, t.updated_at,
-            u.username AS owner_username, u.display_name AS owner_display_name
+            u.username AS owner_username, u.display_name AS owner_display_name, u.color AS owner_color
        FROM territories t
        JOIN users u ON u.id = t.user_id
        ${where}
@@ -310,7 +310,7 @@ export async function getUserTerritories(userId: string): Promise<Territory[]> {
     `SELECT t.id, t.user_id, ST_AsGeoJSON(t.geom) AS geojson,
             ST_Y(t.center_geom) AS center_lat, ST_X(t.center_geom) AS center_lng,
             t.court_count, t.area_sqkm, t.district_name, t.court_ids, t.updated_at,
-            u.username AS owner_username, u.display_name AS owner_display_name
+            u.username AS owner_username, u.display_name AS owner_display_name, u.color AS owner_color
        FROM territories t
        JOIN users u ON u.id = t.user_id
       WHERE t.user_id = $1
@@ -333,6 +333,7 @@ interface TerritoryRow {
   updated_at: string;
   owner_username: string;
   owner_display_name: string;
+  owner_color: string | null;
 }
 
 function mapTerritoryRow(r: TerritoryRow): Territory {
@@ -348,5 +349,6 @@ function mapTerritoryRow(r: TerritoryRow): Territory {
     updated_at: typeof r.updated_at === 'string' ? r.updated_at : new Date(r.updated_at as unknown as string).toISOString(),
     owner_username: r.owner_username,
     owner_display_name: r.owner_display_name,
+    owner_color: r.owner_color ?? null,
   };
 }
