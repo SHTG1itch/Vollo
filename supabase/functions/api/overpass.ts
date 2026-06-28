@@ -17,6 +17,7 @@
 // All of this is $0 — Overpass and OSM data are free.
 // ════════════════════════════════════════════════════════════════════════
 import type { Surface } from './types.ts';
+import { clusterByRadius } from './geo.ts';
 
 /** A grouped tennis facility ready to upsert as a single court row. */
 export interface OverpassSector {
@@ -46,10 +47,15 @@ const ENDPOINTS = [
 
 const TIMEOUT_MS = 20_000;
 const MAX_PITCHES = 600; // a metro tile rarely holds more; guards payload size
-// Pitches with no name and no containing feature fold together when they snap to
-// the same grid cell (~150m). Most multi-court facilities are named or contained,
-// so this only affects anonymous neighbourhood courts.
-const GEO_SNAP_DEG = 0.0015;
+// Unnamed, uncontained pitches within this distance fold into one facility
+// (single-linkage). Most real multi-court venues sit well inside this.
+const CLUSTER_KM = 0.14; // 140 m
+// Courts mapped just outside a named park/school still adopt that name when its
+// boundary is within this distance.
+const NEAR_M = 90;
+// The cluster centroid is snapped to this grid to form a stable dedup key that
+// survives minor membership changes between overlapping viewports.
+const GEO_SNAP_DEG = 0.003;
 
 interface OsmTags {
   name?: string;
@@ -68,6 +74,13 @@ interface OsmGeom {
   lon: number;
 }
 
+interface OsmMember {
+  type: 'node' | 'way' | 'relation';
+  ref: number;
+  role?: string;
+  geometry?: OsmGeom[];
+}
+
 interface OsmElement {
   type: 'node' | 'way' | 'relation';
   id: number;
@@ -75,6 +88,7 @@ interface OsmElement {
   lon?: number;
   center?: { lat: number; lon: number };
   geometry?: OsmGeom[];
+  members?: OsmMember[];
   tags?: OsmTags;
 }
 
@@ -158,6 +172,11 @@ function buildQuery(b: Bbox): string {
     `way["leisure"~"^(park|sports_centre|recreation_ground|garden|stadium|golf_course)$"]["name"](${bb});` +
     `way["club"="sport"]["name"](${bb});` +
     `way["landuse"~"^(recreation_ground|village_green)$"]["name"](${bb});` +
+    // Big parks/campuses are often multipolygon relations (e.g. Central Park,
+    // Woodland Park) — include them so courts inside get named too.
+    `relation["amenity"~"^(school|college|university)$"]["name"](${bb});` +
+    `relation["leisure"~"^(park|recreation_ground|garden|stadium|golf_course)$"]["name"](${bb});` +
+    `relation["landuse"~"^(recreation_ground|village_green)$"]["name"](${bb});` +
     `)->.c;` +
     `.p out center ${MAX_PITCHES} tags;` +
     `.c out geom tags;`
@@ -192,11 +211,9 @@ function pointInRing(lng: number, lat: number, ring: Array<[number, number]>): b
   return inside;
 }
 
-/** Build a Container (with bbox + area) from an OSM way that has geometry. */
-function toContainer(el: OsmElement): Container | null {
-  const name = rawName(el.tags ?? {});
-  const geom = el.geometry;
-  if (!name || !geom || geom.length < 3) return null;
+/** Build a Container (with bbox + shoelace area) from a [{lat,lon}] ring. */
+function ringToContainer(osm_id: string, name: string, geom: OsmGeom[]): Container | null {
+  if (!name || geom.length < 3) return null;
   const ring: Array<[number, number]> = geom.map((g) => [g.lon, g.lat]);
   let minLng = Infinity;
   let minLat = Infinity;
@@ -212,7 +229,30 @@ function toContainer(el: OsmElement): Container | null {
     const [xn, yn] = ring[(i + 1) % ring.length]!;
     area2 += x * yn - xn * y;
   }
-  return { osm_id: `${el.type}/${el.id}`, name, ring, minLng, minLat, maxLng, maxLat, area: Math.abs(area2) / 2 };
+  return { osm_id, name, ring, minLng, minLat, maxLng, maxLat, area: Math.abs(area2) / 2 };
+}
+
+/** Containers from one OSM element: a way is one ring; a relation contributes
+ *  one container per `outer` member ring (holes are ignored — fine for naming). */
+function containersFrom(el: OsmElement): Container[] {
+  const name = rawName(el.tags ?? {});
+  if (!name) return [];
+  const osm_id = `${el.type}/${el.id}`;
+  if (el.geometry && el.geometry.length >= 3) {
+    const c = ringToContainer(osm_id, name, el.geometry);
+    return c ? [c] : [];
+  }
+  if (el.members) {
+    const out: Container[] = [];
+    for (const m of el.members) {
+      if ((m.role === 'outer' || !m.role) && m.geometry && m.geometry.length >= 3) {
+        const c = ringToContainer(osm_id, name, m.geometry);
+        if (c) out.push(c);
+      }
+    }
+    return out;
+  }
+  return [];
 }
 
 /** Smallest (most specific) named container that encloses the point, if any. */
@@ -222,6 +262,54 @@ function findContainer(lng: number, lat: number, containers: Container[]): Conta
     if (lng < c.minLng || lng > c.maxLng || lat < c.minLat || lat > c.maxLat) continue;
     if (!pointInRing(lng, lat, c.ring)) continue;
     if (!best || c.area < best.area) best = c;
+  }
+  return best;
+}
+
+/** Distance in metres from a point to a line segment (equirectangular approx). */
+function pointToSegmentM(lng: number, lat: number, aLng: number, aLat: number, bLng: number, bLat: number): number {
+  const kx = 111320 * Math.cos((lat * Math.PI) / 180);
+  const ky = 110574;
+  const px = lng * kx;
+  const py = lat * ky;
+  const ax = aLng * kx;
+  const ay = aLat * ky;
+  const bx = bLng * kx;
+  const by = bLat * ky;
+  const dx = bx - ax;
+  const dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  let t = len2 === 0 ? 0 : ((px - ax) * dx + (py - ay) * dy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  const cx = ax + t * dx;
+  const cy = ay + t * dy;
+  return Math.hypot(px - cx, py - cy);
+}
+
+/**
+ * Closest named container whose boundary is within `maxM` metres of the point —
+ * a fallback for courts mapped just OUTSIDE their park/school polygon, so they
+ * still get the facility's name instead of a bare "Tennis Court".
+ */
+function nearestContainer(lng: number, lat: number, containers: Container[], maxM: number): Container | null {
+  const padLat = maxM / 110574;
+  const padLng = maxM / (111320 * Math.cos((lat * Math.PI) / 180) || 1);
+  let best: Container | null = null;
+  let bestDist = maxM;
+  for (const c of containers) {
+    if (lng < c.minLng - padLng || lng > c.maxLng + padLng || lat < c.minLat - padLat || lat > c.maxLat + padLat) continue;
+    let d = Infinity;
+    for (let i = 0, j = c.ring.length - 1; i < c.ring.length; j = i++) {
+      const [xj, yj] = c.ring[j]!;
+      const [xi, yi] = c.ring[i]!;
+      const seg = pointToSegmentM(lng, lat, xj, yj, xi, yi);
+      if (seg < d) d = seg;
+      if (d === 0) break;
+    }
+    if (d <= bestDist) {
+      bestDist = d;
+      best = c;
+    }
   }
   return best;
 }
@@ -241,47 +329,58 @@ function majoritySurface(pitches: Pitch[]): Surface {
   return best;
 }
 
+/** Add a pitch to a keyed group, preferring any real name/osm_id seen. */
+function addToGroup(groups: Map<string, Group>, key: string, p: Pitch, name: string | null, osmId: string | null): void {
+  const g = groups.get(key);
+  if (g) {
+    g.pitches.push(p);
+    if (!g.name && name) g.name = name;
+    if (!g.osm_id && osmId) g.osm_id = osmId;
+  } else {
+    groups.set(key, { pitches: [p], name, osm_id: osmId });
+  }
+}
+
 /** Group pitches into facilities and emit one sector per group. */
 function groupIntoSectors(pitches: Pitch[], containers: Container[]): OverpassSector[] {
   const groups = new Map<string, Group>();
+  const loose: Pitch[] = []; // unnamed + uncontained → clustered by proximity below
 
   for (const p of pitches) {
-    const container = findContainer(p.lng, p.lat, containers);
-    let key: string;
-    let name: string | null;
-    let osmId: string | null;
-
+    // Inside a named feature, else adjacent to one (courts mapped just outside
+    // their park/school boundary), else fall through to name/proximity grouping.
+    const container = findContainer(p.lng, p.lat, containers) ?? nearestContainer(p.lng, p.lat, containers, NEAR_M);
     if (container) {
-      key = `osm:${container.osm_id}`;
-      name = container.name;
-      osmId = container.osm_id;
-    } else {
-      const ownName = rawName(p.tags);
-      const nk = nameGroupKey(ownName);
-      if (nk) {
-        // Same-named pitches within ~1km fold together (handles facilities OSM
-        // names per-pitch but doesn't have a containing polygon for).
-        const cell = `${Math.round(p.lat / 0.01)},${Math.round(p.lng / 0.01)}`;
-        key = `name:${nk}@${cell}`;
-        name = ownName;
-        osmId = p.osm_id;
-      } else {
-        const snap = (x: number) => (Math.round(x / GEO_SNAP_DEG) * GEO_SNAP_DEG).toFixed(4);
-        key = `geo:${snap(p.lat)},${snap(p.lng)}`;
-        name = null;
-        osmId = null;
-      }
+      addToGroup(groups, `osm:${container.osm_id}`, p, container.name, container.osm_id);
+      continue;
     }
+    const ownName = rawName(p.tags);
+    const nk = nameGroupKey(ownName);
+    if (nk) {
+      // Same-named pitches within ~1km fold together (facilities OSM names
+      // per-pitch but has no containing polygon for).
+      const cell = `${Math.round(p.lat / 0.01)},${Math.round(p.lng / 0.01)}`;
+      addToGroup(groups, `name:${nk}@${cell}`, p, ownName, p.osm_id);
+      continue;
+    }
+    loose.push(p);
+  }
 
-    const g = groups.get(key);
-    if (g) {
-      g.pitches.push(p);
-      // Prefer a real name / container id if a later pitch in the group has one.
-      if (!g.name && name) g.name = name;
-      if (!g.osm_id && osmId) g.osm_id = osmId;
-    } else {
-      groups.set(key, { pitches: [p], name, osm_id: osmId });
+  // Fold anonymous neighbouring courts into one facility by single-linkage
+  // proximity, then key on the cluster centroid (snapped for cross-call stability)
+  // so a venue split by a grid line can't become two sectors.
+  for (const idx of clusterByRadius(loose, CLUSTER_KM)) {
+    let cLat = 0;
+    let cLng = 0;
+    for (const i of idx) {
+      cLat += loose[i]!.lat;
+      cLng += loose[i]!.lng;
     }
+    cLat /= idx.length;
+    cLng /= idx.length;
+    const snap = (x: number) => (Math.round(x / GEO_SNAP_DEG) * GEO_SNAP_DEG).toFixed(4);
+    const key = `geo:${snap(cLat)},${snap(cLng)}`;
+    for (const i of idx) addToGroup(groups, key, loose[i]!, null, null);
   }
 
   const sectors: OverpassSector[] = [];
@@ -316,10 +415,12 @@ function parseElements(elements: OsmElement[]): { pitches: Pitch[]; containers: 
 
   for (const el of elements) {
     const tags = el.tags ?? {};
-    if (el.geometry && el.geometry.length >= 3 && (tags.amenity || tags.leisure || tags.landuse || tags.club)) {
+    const isContainer =
+      (tags.amenity || tags.leisure || tags.landuse || tags.club) &&
+      ((el.geometry && el.geometry.length >= 3) || (el.type === 'relation' && el.members));
+    if (isContainer) {
       // A container candidate (came back via `.c out geom`).
-      const c = toContainer(el);
-      if (c) containers.push(c);
+      for (const c of containersFrom(el)) containers.push(c);
       continue;
     }
     const lat = el.lat ?? el.center?.lat;
