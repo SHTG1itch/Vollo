@@ -10,3 +10,28 @@ project_id = "pfophuqopwfupxjonsty"
 # courts/territories reads), which would be 401'd by the platform gate before
 # reaching us — so the platform JWT gate stays disabled.
 verify_jwt = false
+
+# ── Social sign-in (Google / Apple) ──────────────────────────────────────────
+# The mobile app uses the NATIVE id-token flow (supabase.auth.signInWithIdToken),
+# so the provider must trust the platform OAuth client ids whose tokens the app
+# sends. These blocks document intent and drive a CLI-based config push; the LIVE
+# project is configured in the Supabase dashboard (Authentication → Providers).
+# Full walk-through: supabase/OAUTH_SETUP.md. Secrets resolve from the
+# environment so nothing sensitive is committed.
+[auth.external.google]
+enabled = true
+# OAuth *web* client id/secret (the audience Supabase mints sessions for).
+client_id = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID)"
+secret    = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET)"
+# Native sign-in: the iOS/Android OAuth client ids must ALSO be trusted as token
+# audiences. In the dashboard these go in Google → "Authorized Client IDs".
+# (CLI: list them on the dashboard; this key documents the requirement.)
+skip_nonce_check = false
+
+[auth.external.apple]
+enabled = true
+# For NATIVE iOS sign-in, the id token's audience is the app bundle id
+# (app.vollo.mobile) — add it to Apple → "Authorized Client IDs" in the
+# dashboard. A Services ID + signing key is only needed for the web/Android leg.
+client_id = "env(SUPABASE_AUTH_EXTERNAL_APPLE_CLIENT_ID)"
+secret    = "env(SUPABASE_AUTH_EXTERNAL_APPLE_SECRET)"

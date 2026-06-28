@@ -39,6 +39,7 @@ supabase/
                            # + 011 (court sectors: one facility = one court)
                            # + 012 (Supabase Auth: auth_id + signup trigger)
                            # + 013 (player colour) + 014 (scheduled matches)
+                           # + 015 (OAuth-aware profile provisioning: Google/Apple)
   functions/api/           # the entire API, ported to Deno + Hono
     index.ts               # Hono app: every /api/* route, auth, error handling, sweep endpoint
     db.ts                  # postgres.js adapter (query/queryOne/withTransaction/pool)
@@ -85,6 +86,15 @@ row from the sign-up metadata (`username`, `display_name`) **once the email is
 confirmed** — so unconfirmed bot sign-ups never create rows or squat usernames.
 **Keep email confirmation enabled** in the project's Auth settings (the default)
 to make that protection effective.
+
+**Google / Apple sign-in** (native ID-token flow) is wired through the same
+machinery: the app calls `supabase.auth.signInWithIdToken`, the resulting session
+validates through the same `adminClient.auth.getUser` path, and migration `015`
+extends the provisioning trigger to derive a clean handle, display name and avatar
+from the provider's metadata (OAuth identities carry no sign-up form). It's
+additive — email sign-up is unchanged, and the providers are dormant until you
+configure them. **Setup walk-through: [`OAUTH_SETUP.md`](./OAUTH_SETUP.md)** (and
+the `[auth.external.*]` blocks in `config.toml`).
 
 ## Status: LIVE
 
