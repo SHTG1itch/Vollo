@@ -151,13 +151,20 @@ compass district naming) lives in `backend/src/utils/geo.ts` and is fully unit-t
 ## Beyond the spec (added features)
 
 - **Real-world courts on the map** — the map and court pickers pull tennis courts
-  straight from OpenStreetMap (Overpass API) for the current viewport, import
-  them once (deduped by `osm_id`), and serve them to every user — all at $0.
+  straight from OpenStreetMap (Overpass API) for the current viewport and serve
+  them to every user — all at $0. Each court is **named** from the OSM feature
+  that contains it (`North Creek High School Tennis Courts`, not `Tennis Court`).
+- **Court sectors** — a facility's courts (a school with 6, a park with 12) are
+  grouped into **one** court row (`court_count`), so the whole venue is a single
+  unit for domination and a single marker on the map.
 - **Drop-a-pin court adding** — can't find a court? Pan the map so the 🎾 sits on
-  it, name it, pick a surface, and it's saved as a shared court everyone sees
-  (no flaky address lookup required; reverse-geocoding fills the city best-effort).
-- **Match → location → domination** — every match can be tied to a court, which
-  feeds the 30-day court leaderboard and the convex-hull territory engine.
+  it, name it, pick a surface, set how many courts the venue has, and it's saved
+  as a shared court everyone sees (reverse-geocoding fills the city best-effort).
+- **Match → location → domination** — every match can be tied to a court/sector,
+  which feeds the 30-day court leaderboard and the convex-hull territory engine.
+- **Fast, crash-free map** — courts paint instantly from the DB while new ones
+  import from OSM in the background; markers don't re-render their native views
+  (`tracksViewChanges={false}`), are capped, and hide when zoomed far out.
 - **Public equipment loadout** — racquet, strings, tension and shoes on every
   profile, so you can see what gear strong players use.
 - **Per-surface Vollo Rating** — Elo with a game-margin multiplier. Only the
@@ -182,7 +189,7 @@ compass district naming) lives in `backend/src/utils/geo.ts` and is fully unit-t
 | `POST /api/matches` | Log a match (+ optional stat matrix) |
 | `POST /api/matches/:id/kudos` · `DELETE …` | Kudos (idempotent) |
 | `GET /api/courts?lat=&lng=&radius_km=` | Nearby courts (PostGIS `ST_DWithin`) |
-| `GET /api/courts/discover?min_lng=&min_lat=&max_lng=&max_lat=` | Import real-world OSM tennis courts in a viewport + list them |
+| `GET /api/courts/discover?min_lng=&min_lat=&max_lng=&max_lat=` | Import + name + group OSM courts into facility sectors, list them (`import=0` = DB-only fast paint) |
 | `POST /api/courts` | Add a court — a shared pin every user then sees |
 | `GET /api/courts/:id/leaderboard` | 30-day court leaderboard |
 | `GET /api/courts/geocode?q=` | Free Nominatim/Geoapify geocoding |

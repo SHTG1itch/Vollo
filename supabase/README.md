@@ -32,12 +32,13 @@ supabase/
   migrations/              # 001-005 (app) + 006 (secrets) + 007 (cron)
                            # + 008/009 (RLS seal + security-invoker views)
                            # + 010 (court source/osm dedup + user equipment)
+                           # + 011 (court sectors: one facility = one court)
   functions/api/           # the entire API, ported to Deno + Hono
     index.ts               # Hono app: every /api/* route, auth, error handling, sweep endpoint
     db.ts                  # postgres.js adapter (query/queryOne/withTransaction/pool)
     auth.ts                # HS256 sign/verify (jose) + bcrypt
     config.ts types.ts validation.ts errors.ts mappers.ts geo.ts
-    overpass.ts            # free OpenStreetMap tennis-court discovery (Overpass API)
+    overpass.ts            # OpenStreetMap discovery: names + groups pitches into sectors
     scoring.ts rating.ts streak.ts territory.ts analytics.ts
     achievements.ts notifications.ts geocoding.ts sweeps.ts
     deno.json              # import map (hono, postgres, jose, bcryptjs, zod)
@@ -67,6 +68,32 @@ kudos/comments/follows, search, and the pg_cron sweep path all pass):
 ```
 https://pfophuqopwfupxjonsty.supabase.co/functions/v1/api/health  ->  {"status":"ok"}
 ```
+
+## Court discovery, naming & sectors
+
+`GET /api/courts/discover?min_lng&min_lat&max_lng&max_lat` populates the map at
+$0 from OpenStreetMap (Overpass API, no key). `overpass.ts`:
+
+1. **Names** each court from the named OSM feature that contains it (school,
+   park, club, sports-centre — ways *and* multipolygon relations, via
+   point-in-polygon, plus a ~90 m nearest-feature fallback). So a bare pitch
+   becomes e.g. `North Creek High School Tennis Courts` instead of `Tennis Court`.
+2. **Groups** co-located pitches into one facility ("sector"): a school's 6
+   courts collapse to a single `courts` row with `court_count = 6`, keyed by
+   `sector_key` (the container's OSM id, or the cluster's smallest member id for
+   anonymous courts). Because matches reference that one row, the existing
+   court-level leaderboard and PostGIS territory engine treat the **whole
+   facility as one court for domination** — no engine changes needed.
+
+Flags: `import=0` returns DB courts only (the client's instant first paint, no
+Overpass call); `force=1` bypasses the per-viewport import cache (used by the
+backfill). Overpass is only queried for viewports ≤ 0.35° per axis.
+
+**Backfill** (re-import a region with one row per facility): delete the
+regenerable rows (`DELETE FROM courts WHERE source='osm'` — they carry no
+matches that can't be re-linked by location) and call `/courts/discover?…&import=1&force=1`
+over a grid of ≤0.35° tiles. This drives the exact production path; ~3.4k real
+pitches in Puget Sound + NYC fold into ~1.2k named facility rows.
 
 ## Deploy / update the function (canonical)
 
