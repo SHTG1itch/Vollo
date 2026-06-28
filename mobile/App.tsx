@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -13,7 +13,8 @@ import { useAuth } from './src/store/auth';
 import { useNotifications } from './src/store/notifications';
 import { registerForPush } from './src/services/push';
 import { FONT_ASSETS } from './src/fonts';
-import { TennisBall, VolloWordmark } from './src/components/VolloLogo';
+import { BallSpinner } from './src/components/BallSpinner';
+import { VolloWordmark } from './src/components/VolloLogo';
 import { colors } from './src/theme';
 
 const navTheme: Theme = {
@@ -61,8 +62,8 @@ export default function App() {
   if (!hydrated || !fontsReady) {
     return (
       <View style={styles.splash}>
-        {fontsLoaded ? <VolloWordmark size={56} /> : <TennisBall size={72} />}
-        <ActivityIndicator color={colors.primary} />
+        <BallSpinner size={84} mode="loop" />
+        {fontsLoaded ? <VolloWordmark size={34} /> : null}
       </View>
     );
   }

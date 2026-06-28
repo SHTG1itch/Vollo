@@ -7,6 +7,7 @@ import type { RootStackParamList } from '../navigation/types';
 import { api } from '../api/client';
 import { useAuth } from '../store/auth';
 import { Avatar, Button, Card, ErrorState, Loading, Muted, Stat } from '../components/ui';
+import { CountUp } from '../components/CountUp';
 import { FormDots, ProgressBar, RallyDistribution, SplitBar } from '../components/charts';
 import { SurfaceBadge } from '../components/SurfaceBadge';
 import { colors, font, fonts, radius, spacing, surfaceColors } from '../theme';
@@ -208,7 +209,11 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
       <View style={{ flexDirection: 'row', gap: spacing.md }}>
         <Card style={styles.miniCard}>
           <Text style={styles.miniLabel}>VOLLO RATING</Text>
-          <Text style={styles.miniValue}>{avgRating ?? '—'}</Text>
+          {avgRating != null ? (
+            <CountUp value={avgRating} style={styles.miniValue} />
+          ) : (
+            <Text style={styles.miniValue}>—</Text>
+          )}
           {analytics && avgRating != null ? <Text style={styles.miniSub}>{analytics.playstyle}</Text> : null}
         </Card>
         <Card style={styles.miniCard}>

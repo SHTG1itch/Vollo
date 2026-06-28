@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Alert, Image, KeyboardAvoidingView, Platform, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
@@ -10,6 +10,7 @@ import { Avatar, Button, Card, ErrorState, Field, Loading, Muted } from '../comp
 import { SurfaceBadge } from '../components/SurfaceBadge';
 import { ProgressBar, RallyDistribution, SplitBar } from '../components/charts';
 import { KudosButton } from '../components/KudosButton';
+import { ConfettiBurst } from '../components/ConfettiBurst';
 import { colors, font, fonts, radius, spacing } from '../theme';
 import type { MatchCard, MatchStats } from '../types';
 import { formatScoreLine, timeAgo } from '../utils/format';
@@ -29,6 +30,16 @@ export function MatchDetailScreen({ route, navigation }: Props) {
   const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  // Celebrate your own win once when the match opens (not on every refresh).
+  const [celebrate, setCelebrate] = useState(false);
+  const celebratedRef = useRef(false);
+
+  useEffect(() => {
+    if (!celebratedRef.current && match && match.result === 'win' && match.user_id === user?.id) {
+      celebratedRef.current = true;
+      setCelebrate(true);
+    }
+  }, [match, user?.id]);
 
   useEffect(() => {
     let active = true;
@@ -266,6 +277,7 @@ export function MatchDetailScreen({ route, navigation }: Props) {
         ) : null}
         <View style={{ height: spacing.xxl }} />
       </ScrollView>
+      <ConfettiBurst play={celebrate} onDone={() => setCelebrate(false)} />
     </KeyboardAvoidingView>
   );
 }

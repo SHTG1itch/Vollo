@@ -8,7 +8,8 @@ import type { RootStackParamList } from '../navigation/types';
 import { useFeed } from '../store/feed';
 import { useAuth } from '../store/auth';
 import { MatchCard } from '../components/MatchCard';
-import { EmptyState, ErrorState, Loading, SegmentedControl } from '../components/ui';
+import { EmptyState, ErrorState, SegmentedControl } from '../components/ui';
+import { FeedSkeleton } from '../components/Skeleton';
 import { VolloWordmark } from '../components/VolloLogo';
 import { colors, radius, spacing } from '../theme';
 
@@ -53,7 +54,7 @@ export function FeedScreen() {
       </View>
 
       {loading && matches.length === 0 ? (
-        <Loading label="Loading matches…" />
+        <FeedSkeleton />
       ) : error && matches.length === 0 ? (
         <ErrorState message={error} onRetry={() => fetch()} />
       ) : (
