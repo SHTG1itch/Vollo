@@ -29,12 +29,15 @@ Project ref: `pfophuqopwfupxjonsty` · region `us-east-1`.
 ```
 supabase/
   config.toml              # project id + functions.api.verify_jwt = false
-  migrations/              # full schema: 001-005 (app) + 006 (secrets) + 007 (cron)
+  migrations/              # 001-005 (app) + 006 (secrets) + 007 (cron)
+                           # + 008/009 (RLS seal + security-invoker views)
+                           # + 010 (court source/osm dedup + user equipment)
   functions/api/           # the entire API, ported to Deno + Hono
     index.ts               # Hono app: every /api/* route, auth, error handling, sweep endpoint
     db.ts                  # postgres.js adapter (query/queryOne/withTransaction/pool)
     auth.ts                # HS256 sign/verify (jose) + bcrypt
     config.ts types.ts validation.ts errors.ts mappers.ts geo.ts
+    overpass.ts            # free OpenStreetMap tennis-court discovery (Overpass API)
     scoring.ts rating.ts streak.ts territory.ts analytics.ts
     achievements.ts notifications.ts geocoding.ts sweeps.ts
     deno.json              # import map (hono, postgres, jose, bcryptjs, zod)
@@ -81,15 +84,22 @@ supabase functions deploy api --project-ref pfophuqopwfupxjonsty
 
 `verify_jwt = false` is taken from `config.toml`; no `--no-verify-jwt` needed.
 
-### How the current live version was bootstrapped
+### How the current live version was bootstrapped (and re-deployed without a token)
 
-The very first deploy was done without a CLI token: the 19 source files were
-bundled into one file (esbuild, external deps kept as `npm:` specifiers), pushed
-to a public gist, and imported by a one-line loader `index.ts`. The Supabase
-deploy bundler fetches that URL and inlines it at build time, so the deployed
-function is fully self-contained (it does NOT fetch the gist at runtime). Running
-the canonical CLI deploy above replaces this with a direct-from-source build and
-makes the gist irrelevant — delete the gist afterward if you like.
+Deploys done without a CLI token use a bundle-and-load trick: the `functions/api/`
+source is bundled into one ESM file (esbuild, deps kept as `npm:` specifiers),
+hosted on a public gist, and imported by a one-line loader `index.ts`. The
+Supabase deploy bundler fetches that URL and **inlines it at build time**, so the
+deployed function is fully self-contained (it does NOT fetch the gist at runtime —
+and the build sandbox only allows fetches from allowlisted hosts like
+`gist.githubusercontent.com`, not arbitrary file hosts). The bundle contains no
+secrets (the DB URL and JWT/sweep secrets load from env / the `app_secrets` table
+at runtime), so the gist is safe to be public.
+
+To reproduce the bundle: esbuild `index.ts` with `bundle:true, format:'esm'`,
+mapping the six bare deps to their `npm:` specifiers as `external`. Running the
+canonical CLI deploy above instead builds direct-from-source and makes the gist
+irrelevant.
 
 ## Migrations
 

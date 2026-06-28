@@ -35,6 +35,7 @@ stream). Each match feeds three systems:
 | Mobile | **Expo (React Native) + TypeScript** | One codebase → iOS & Android; EAS free cloud builds |
 | State | **Zustand** | Tiny, minimal re-renders, AsyncStorage persistence |
 | Maps | **react-native-maps + OpenStreetMap raster tiles** | Bypasses commercial vector-map licensing |
+| Courts | **OpenStreetMap Overpass API** | Imports real-world tennis courts into the map at $0 (no key) |
 | Lists | **@shopify/flash-list** | High-performance feed rendering |
 | API | **Node.js + Express + TypeScript** | Shared language with the app |
 | Database | **PostgreSQL + PostGIS** | Native spatial geometry + `ST_ConvexHull` |
@@ -149,6 +150,16 @@ compass district naming) lives in `backend/src/utils/geo.ts` and is fully unit-t
 
 ## Beyond the spec (added features)
 
+- **Real-world courts on the map** — the map and court pickers pull tennis courts
+  straight from OpenStreetMap (Overpass API) for the current viewport, import
+  them once (deduped by `osm_id`), and serve them to every user — all at $0.
+- **Drop-a-pin court adding** — can't find a court? Pan the map so the 🎾 sits on
+  it, name it, pick a surface, and it's saved as a shared court everyone sees
+  (no flaky address lookup required; reverse-geocoding fills the city best-effort).
+- **Match → location → domination** — every match can be tied to a court, which
+  feeds the 30-day court leaderboard and the convex-hull territory engine.
+- **Public equipment loadout** — racquet, strings, tension and shoes on every
+  profile, so you can see what gear strong players use.
 - **Per-surface Vollo Rating** — Elo with a game-margin multiplier. Only the
   logging player's rating moves: a unilateral log never mutates a tagged
   opponent's rating (that would let anyone tank another player's record). The
@@ -171,8 +182,12 @@ compass district naming) lives in `backend/src/utils/geo.ts` and is fully unit-t
 | `POST /api/matches` | Log a match (+ optional stat matrix) |
 | `POST /api/matches/:id/kudos` · `DELETE …` | Kudos (idempotent) |
 | `GET /api/courts?lat=&lng=&radius_km=` | Nearby courts (PostGIS `ST_DWithin`) |
+| `GET /api/courts/discover?min_lng=&min_lat=&max_lng=&max_lat=` | Import real-world OSM tennis courts in a viewport + list them |
+| `POST /api/courts` | Add a court — a shared pin every user then sees |
 | `GET /api/courts/:id/leaderboard` | 30-day court leaderboard |
 | `GET /api/courts/geocode?q=` | Free Nominatim/Geoapify geocoding |
+| `GET /api/courts/reverse-geocode?lat=&lng=` | Reverse geocode a dropped pin → city/address |
+| `PATCH /api/users/me` | Update profile + public equipment loadout |
 | `GET /api/territories?min_lng=&min_lat=&max_lng=&max_lat=` | Territory polygons (GeoJSON) |
 | `GET /api/users/search?q=` | Find players by name/username (to follow / tag) |
 | `GET /api/users/:username/analytics` | Full performance profile |
