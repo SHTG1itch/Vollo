@@ -168,7 +168,7 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
               <Button label="Edit profile" variant="secondary" onPress={() => navigation.navigate('EditProfile')} style={{ flex: 1, height: 42 }} />
               <Button label="Settings" variant="ghost" onPress={() => navigation.navigate('Settings')} style={{ flex: 1, height: 42 }} />
             </View>
-            <Button label="📅 Scheduled matches" variant="ghost" onPress={() => navigation.navigate('ScheduledMatches')} style={{ height: 42 }} />
+            <Button label="⚔️ Matches & challenges" variant="ghost" onPress={() => navigation.navigate('ScheduledMatches')} style={{ height: 42 }} />
           </View>
         ) : (
           <View style={{ gap: spacing.sm }}>
@@ -195,18 +195,6 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
                 style={{ flex: 1, height: 42 }}
               />
             </View>
-            <Button
-              label="📅 Schedule a match"
-              variant="ghost"
-              onPress={() =>
-                navigation.navigate('ScheduleMatch', {
-                  opponentId: profile.user.id,
-                  opponentName: profile.user.display_name,
-                  opponentUsername: profile.user.username,
-                })
-              }
-              style={{ height: 42 }}
-            />
           </View>
         )}
       </Card>

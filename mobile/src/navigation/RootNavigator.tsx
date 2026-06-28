@@ -45,8 +45,8 @@ export function RootNavigator() {
           <Stack.Screen name="EditProfile" component={EditProfileScreen} options={{ title: 'Edit profile' }} />
           <Stack.Screen name="UserSearch" component={UserSearchScreen} options={{ headerShown: false }} />
           <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings' }} />
-          <Stack.Screen name="ScheduledMatches" component={ScheduledMatchesScreen} options={{ title: 'Scheduled matches' }} />
-          <Stack.Screen name="ScheduleMatch" component={ScheduleMatchScreen} options={{ title: 'Schedule a match' }} />
+          <Stack.Screen name="ScheduledMatches" component={ScheduledMatchesScreen} options={{ title: 'Matches & challenges' }} />
+          <Stack.Screen name="ScheduleMatch" component={ScheduleMatchScreen} options={{ title: 'Challenge' }} />
         </Stack.Group>
       ) : (
         <Stack.Group screenOptions={{ headerShown: false }}>

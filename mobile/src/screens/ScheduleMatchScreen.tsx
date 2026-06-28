@@ -40,8 +40,9 @@ export function ScheduleMatchScreen({ navigation, route }: Props) {
   const presetOpponentId = route.params?.opponentId;
   const presetOpponentName = route.params?.opponentName ?? '';
   const presetUsername = route.params?.opponentUsername;
-  // A challenge only makes sense against a registered Vollo player.
-  const isChallenge = !!route.params?.challenge && !!presetOpponentId;
+  // Challenge replaced plain scheduling — this screen is only ever reached to
+  // challenge a registered player, so any preset opponent is a challenge.
+  const isChallenge = !!presetOpponentId;
 
   const [opponentName, setOpponentName] = useState(presetOpponentName);
   const [dayOffset, setDayOffset] = useState(0);

@@ -93,9 +93,9 @@ export function ScheduledMatchesScreen() {
   if (items.length === 0) {
     return (
       <EmptyState
-        icon="📅"
-        title="No scheduled matches"
-        subtitle="Open a player's profile and tap “Schedule a match” to propose a time."
+        icon="⚔️"
+        title="No matches yet"
+        subtitle="Open a player's profile and tap “Challenge” to line one up."
       />
     );
   }
