@@ -47,6 +47,43 @@ async function geocodeNominatim(q: string, limit: number): Promise<GeocodeResult
   }));
 }
 
+export interface ReverseGeocodeResult {
+  label: string;
+  city: string | null;
+}
+
+/**
+ * Reverse geocode coordinates to a human label + city using Nominatim. Used to
+ * auto-fill a court's address/city when a user drops a pin on the map, so they
+ * never have to type one. Best-effort — callers must tolerate a null result.
+ */
+export async function reverseGeocode(lat: number, lng: number): Promise<ReverseGeocodeResult | null> {
+  // Geoapify and Nominatim both expose /reverse; we use Nominatim (no key).
+  const base = config.geocoder.nominatimBaseUrl;
+  const url = new URL('/reverse', base);
+  url.searchParams.set('lat', String(lat));
+  url.searchParams.set('lon', String(lng));
+  url.searchParams.set('format', 'jsonv2');
+  url.searchParams.set('addressdetails', '1');
+  url.searchParams.set('zoom', '16');
+
+  const res = await fetch(url, {
+    headers: { 'User-Agent': config.geocoder.nominatimUserAgent, Accept: 'application/json' },
+    signal: AbortSignal.timeout(GEOCODE_TIMEOUT_MS),
+  });
+  if (!res.ok) throw new Error(`nominatim reverse responded ${res.status}`);
+  const r = (await res.json()) as {
+    display_name?: string;
+    address?: { city?: string; town?: string; village?: string; municipality?: string; suburb?: string };
+  };
+  if (!r.display_name) return null;
+  const a = r.address ?? {};
+  return {
+    label: r.display_name,
+    city: a.city ?? a.town ?? a.village ?? a.municipality ?? a.suburb ?? null,
+  };
+}
+
 async function geocodeGeoapify(q: string, limit: number): Promise<GeocodeResult[]> {
   if (!config.geocoder.geoapifyApiKey) throw new Error('GEOAPIFY_API_KEY not configured');
   const url = new URL('https://api.geoapify.com/v1/geocode/search');

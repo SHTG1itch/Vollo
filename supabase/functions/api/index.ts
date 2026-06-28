@@ -19,9 +19,9 @@ import { hashPassword, signToken, verifyPassword, verifyToken } from './auth.ts'
 import { mapCourt, mapMatchCard, mapPublicUser, mapUser, toIso } from './mappers.ts';
 import {
   bboxQuerySchema, commentSchema, commentsQuerySchema, courtsQuerySchema,
-  createCourtSchema, createMatchSchema, feedQuerySchema, geocodeQuerySchema,
-  loginSchema, notificationIdsSchema, pushTokenSchema, registerSchema,
-  updateProfileSchema, userSearchQuerySchema,
+  createCourtSchema, createMatchSchema, discoverQuerySchema, feedQuerySchema,
+  geocodeQuerySchema, loginSchema, notificationIdsSchema, pushTokenSchema,
+  registerSchema, reverseGeocodeQuerySchema, updateProfileSchema, userSearchQuerySchema,
 } from './validation.ts';
 import type { CreateMatchInput } from './validation.ts';
 import { analyzeScore, matchScore } from './scoring.ts';
@@ -30,7 +30,8 @@ import { applyMatchToRatings, reverseMatchFromRatings, getRatings } from './rati
 import { evaluateAchievements, getAchievements } from './achievements.ts';
 import { getCourtController, recomputeAfterMatch, getUserTerritories, listTerritories } from './territory.ts';
 import { notify } from './notifications.ts';
-import { geocode } from './geocoding.ts';
+import { geocode, reverseGeocode } from './geocoding.ts';
+import { fetchOverpassCourts } from './overpass.ts';
 import { getProfileAnalytics, getHeadToHead } from './analytics.ts';
 import { runStreakSweep, runTerritorySweep } from './sweeps.ts';
 import type { AuthClaims, LeaderboardEntry, MatchCard, MatchStats } from './types.ts';
@@ -39,7 +40,7 @@ type Env = { Variables: { user?: AuthClaims } };
 
 const USER_SELECT = `
   id, username, email, display_name, avatar_url, bio, dominant_hand,
-  ST_Y(home_geom) AS home_lat, ST_X(home_geom) AS home_lng, home_label, created_at
+  ST_Y(home_geom) AS home_lat, ST_X(home_geom) AS home_lng, home_label, equipment, created_at
 `;
 
 // A valid bcrypt hash to compare against when the identifier is unknown, so login
@@ -544,7 +545,7 @@ app.post('/api/matches/:id/comments', requireAuth, async (c) => {
 
 // ─── Courts ────────────────────────────────────────────────────────────────
 const COURT_COLS = `id, name, description, surface, ST_Y(geom) AS lat, ST_X(geom) AS lng,
-                    address, city, osm_id, created_by, created_at`;
+                    address, city, osm_id, source, created_by, created_at`;
 
 app.get('/api/courts/geocode', requireAuth, async (c) => {
   if (!geocodeLimiterFn(clientIp(c))) throw ApiError.tooManyRequests();
@@ -555,6 +556,87 @@ app.get('/api/courts/geocode', requireAuth, async (c) => {
   } catch (err) {
     console.warn('[geocode] provider error', err instanceof Error ? err.message : err);
     throw new ApiError(502, 'geocode_failed', 'Address lookup is temporarily unavailable');
+  }
+});
+
+// ─── Court discovery: import real-world courts from OpenStreetMap ───────────
+// Cache of recently-imported viewport cells (per isolate) so panning the map
+// doesn't hammer the free Overpass API; the DB upsert is idempotent regardless.
+const DISCOVER_TTL_MS = 15 * 60_000;
+const discoveredCells = new Map<string, number>();
+function discoverCellKey(b: { min_lng: number; min_lat: number; max_lng: number; max_lat: number }): string {
+  const snap = (x: number) => Math.round(x / 0.05) * 0.05;
+  return [snap(b.min_lng), snap(b.min_lat), snap(b.max_lng), snap(b.max_lat)].map((n) => n.toFixed(2)).join(',');
+}
+
+async function importOverpassCourts(b: { min_lng: number; min_lat: number; max_lng: number; max_lat: number }): Promise<number> {
+  const candidates = await fetchOverpassCourts({ minLng: b.min_lng, minLat: b.min_lat, maxLng: b.max_lng, maxLat: b.max_lat });
+  if (candidates.length === 0) return 0;
+  let imported = 0;
+  const CHUNK = 50;
+  for (let i = 0; i < candidates.length; i += CHUNK) {
+    const chunk = candidates.slice(i, i + CHUNK);
+    const values: string[] = [];
+    const params: unknown[] = [];
+    let p = 0;
+    for (const court of chunk) {
+      values.push(`($${++p}, $${++p}, ST_SetSRID(ST_MakePoint($${++p}, $${++p}), 4326), $${++p}, $${++p}, 'osm')`);
+      params.push(court.name, court.surface, court.lng, court.lat, court.city, court.osm_id);
+    }
+    // Dedup on the partial unique index over osm_id: re-imports cost nothing.
+    const rows = await query<{ id: string }>(
+      `INSERT INTO courts (name, surface, geom, city, osm_id, source)
+       VALUES ${values.join(', ')}
+       ON CONFLICT (osm_id) WHERE osm_id IS NOT NULL DO NOTHING
+       RETURNING id`,
+      params,
+    );
+    imported += rows.length;
+  }
+  return imported;
+}
+
+app.get('/api/courts/discover', async (c) => {
+  const b = discoverQuerySchema.parse(c.req.query());
+  if (b.min_lng >= b.max_lng || b.min_lat >= b.max_lat) throw ApiError.badRequest('min must be < max for both axes');
+
+  // Only reach out to Overpass when the viewport is reasonably zoomed in;
+  // importing a whole region on every pan would be wasteful. Wider viewports
+  // still return whatever courts already live in the DB.
+  const spanLng = b.max_lng - b.min_lng;
+  const spanLat = b.max_lat - b.min_lat;
+  if (spanLng <= 1.0 && spanLat <= 1.0) {
+    const key = discoverCellKey(b);
+    const now = Date.now();
+    const fresh = discoveredCells.get(key);
+    if (!fresh || fresh <= now) {
+      try {
+        await importOverpassCourts(b);
+        discoveredCells.set(key, now + DISCOVER_TTL_MS);
+      } catch (err) {
+        console.warn('[discover] overpass import failed', err instanceof Error ? err.message : err);
+      }
+    }
+  }
+
+  const rows = await query<Record<string, unknown>>(
+    `SELECT ${COURT_COLS} FROM courts
+      WHERE geom && ST_MakeEnvelope($1, $2, $3, $4, 4326)
+      ORDER BY created_at DESC
+      LIMIT 300`,
+    [b.min_lng, b.min_lat, b.max_lng, b.max_lat],
+  );
+  return c.json({ courts: rows.map(mapCourt) });
+});
+
+app.get('/api/courts/reverse-geocode', requireAuth, async (c) => {
+  if (!geocodeLimiterFn(clientIp(c))) throw ApiError.tooManyRequests();
+  const { lat, lng } = reverseGeocodeQuerySchema.parse(c.req.query());
+  try {
+    return c.json({ result: await reverseGeocode(lat, lng) });
+  } catch (err) {
+    console.warn('[reverse-geocode] provider error', err instanceof Error ? err.message : err);
+    return c.json({ result: null });
   }
 });
 
@@ -689,6 +771,12 @@ app.patch('/api/users/me', requireAuth, async (c) => {
     params.push(b.home.lng, b.home.lat);
     sets.push(`home_label = $${i++}`);
     params.push(b.home.label ?? null);
+  }
+  if (b.equipment !== undefined) {
+    // Pass the raw object: postgres.js serializes a jsonb param itself (same
+    // convention as score_array), so a manual JSON.stringify would double-encode.
+    sets.push(`equipment = $${i++}::jsonb`);
+    params.push(b.equipment);
   }
 
   if (sets.length === 0) {

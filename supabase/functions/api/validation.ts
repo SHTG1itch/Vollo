@@ -115,6 +115,24 @@ export const createCourtSchema = z.object({
   osm_id: z.string().trim().max(60).optional(),
 });
 
+// Public gear loadout. A blank string in any field is normalised to "unset" so
+// clients can clear a field by sending '' without persisting an empty string.
+const gearField = z
+  .string()
+  .trim()
+  .max(80)
+  .transform((v) => (v.length ? v : undefined))
+  .optional();
+
+export const equipmentSchema = z
+  .object({
+    racquet: gearField,
+    strings: gearField,
+    string_tension: z.string().trim().max(40).transform((v) => (v.length ? v : undefined)).optional(),
+    shoes: gearField,
+  })
+  .strict();
+
 export const updateProfileSchema = z.object({
   display_name: z.string().trim().min(1).max(60).optional(),
   bio: z.string().trim().max(280).optional(),
@@ -127,6 +145,21 @@ export const updateProfileSchema = z.object({
       label: z.string().trim().max(160).optional(),
     })
     .optional(),
+  equipment: equipmentSchema.optional(),
+});
+
+// Discovery imports real-world courts within a map viewport. Reuses the bbox
+// shape but requires all four corners (a viewport is never partial).
+export const discoverQuerySchema = z.object({
+  min_lng: z.coerce.number().min(-180).max(180),
+  min_lat: z.coerce.number().min(-90).max(90),
+  max_lng: z.coerce.number().min(-180).max(180),
+  max_lat: z.coerce.number().min(-90).max(90),
+});
+
+export const reverseGeocodeQuerySchema = z.object({
+  lat: z.coerce.number().min(-90).max(90),
+  lng: z.coerce.number().min(-180).max(180),
 });
 
 export const commentSchema = z.object({

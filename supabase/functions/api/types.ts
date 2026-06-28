@@ -24,6 +24,14 @@ export type SetScore = [number, number];
 /** A full match score: list of sets, e.g. [[6,4],[2,6],[7,6]]. */
 export type ScoreArray = SetScore[];
 
+/** Public gear loadout shown on every profile. All fields optional. */
+export interface Equipment {
+  racquet?: string;
+  strings?: string;
+  string_tension?: string;
+  shoes?: string;
+}
+
 export interface User {
   id: string;
   username: string;
@@ -35,6 +43,7 @@ export interface User {
   home_lat: number | null;
   home_lng: number | null;
   home_label: string | null;
+  equipment: Equipment;
   created_at: string;
 }
 
@@ -48,6 +57,8 @@ export interface Court {
   address: string | null;
   city: string | null;
   osm_id: string | null;
+  /** 'user' for in-app additions, 'osm' for OpenStreetMap imports. */
+  source: string;
   created_by: string | null;
   created_at: string;
 }

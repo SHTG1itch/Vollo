@@ -1,7 +1,7 @@
 // Helpers that convert raw Postgres rows into the API DTOs declared in types.ts.
 // NUMERIC columns arrive as strings from the driver; we coerce the specific
 // fields the client expects to be numbers.
-import type { Court, Match, MatchCard, User } from './types.ts';
+import type { Court, Equipment, Match, MatchCard, User } from './types.ts';
 
 /**
  * timestamptz columns arrive as JS `Date` objects. `String(date)` yields a
@@ -29,8 +29,21 @@ export function mapUser(r: Record<string, unknown>): User {
     home_lat: r.home_lat != null ? Number(r.home_lat) : null,
     home_lng: r.home_lng != null ? Number(r.home_lng) : null,
     home_label: (r.home_label as string | null) ?? null,
+    equipment: normalizeEquipment(r.equipment),
     created_at: toIso(r.created_at),
   };
+}
+
+/** jsonb arrives parsed (object) from postgres.js; coerce to a clean Equipment. */
+function normalizeEquipment(v: unknown): Equipment {
+  if (!v || typeof v !== 'object') return {};
+  const e = v as Record<string, unknown>;
+  const out: Equipment = {};
+  if (typeof e.racquet === 'string' && e.racquet) out.racquet = e.racquet;
+  if (typeof e.strings === 'string' && e.strings) out.strings = e.strings;
+  if (typeof e.string_tension === 'string' && e.string_tension) out.string_tension = e.string_tension;
+  if (typeof e.shoes === 'string' && e.shoes) out.shoes = e.shoes;
+  return out;
 }
 
 /**
@@ -55,6 +68,7 @@ export function mapCourt(r: Record<string, unknown>): Court {
     address: (r.address as string | null) ?? null,
     city: (r.city as string | null) ?? null,
     osm_id: (r.osm_id as string | null) ?? null,
+    source: (r.source as string | null) ?? 'user',
     created_by: (r.created_by as string | null) ?? null,
     created_at: toIso(r.created_at),
   };
