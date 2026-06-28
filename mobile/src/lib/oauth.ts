@@ -19,7 +19,7 @@
 // Everything is also capability-gated: Google is inert unless enabled + a
 // webClientId is configured, and Apple is gated on the iOS availability check.
 import { Platform } from 'react-native';
-import Constants from 'expo-constants';
+import Constants, { ExecutionEnvironment } from 'expo-constants';
 
 type GoogleModule = typeof import('@react-native-google-signin/google-signin');
 type AppleModule = typeof import('expo-apple-authentication');
@@ -60,11 +60,38 @@ export class OAuthCancelled extends Error {
 
 // ─── Google ────────────────────────────────────────────────────────────────
 
-/** True only when Google auth is enabled AND a real web client id is configured —
- *  drives whether the "Continue with Google" button is shown at all. Touches no
- *  native module, so it's safe to call at render time on any binary. */
+// Whether the native Google module can actually run in this binary. The native
+// SDK exists ONLY in a custom dev/standalone build — never in Expo Go, which is
+// a fixed prebuilt client. Without this gate the button would show in Expo Go and
+// then throw "Cannot read property 'GoogleSignin' of undefined" when tapped
+// (the require resolves but the native module is absent). Probed once and cached.
+let nativeGoogleAvailable: boolean | null = null;
+function isGoogleNativeAvailable(): boolean {
+  if (nativeGoogleAvailable !== null) return nativeGoogleAvailable;
+  // Expo Go can never bundle the native module — decide without touching require()
+  // so we never run the package's native bootstrap on a binary that lacks it.
+  if (Constants.executionEnvironment === ExecutionEnvironment.StoreClient) {
+    nativeGoogleAvailable = false;
+    return false;
+  }
+  // Any other binary (dev client / standalone): confirm the module is really
+  // linked. The require is wrapped so an old dev client built before the module
+  // was added degrades to "hidden" instead of crashing.
+  try {
+    const mod = loadGoogle();
+    nativeGoogleAvailable = !!mod?.GoogleSignin;
+  } catch {
+    nativeGoogleAvailable = false;
+  }
+  return nativeGoogleAvailable;
+}
+
+/** True only when Google auth is enabled, a real web client id is configured, AND
+ *  the native module is actually available in this binary — drives whether the
+ *  "Continue with Google" button is shown at all. In Expo Go this is false (the
+ *  native SDK isn't present), so the button is hidden rather than failing on tap. */
 export function isGoogleConfigured(): boolean {
-  return GOOGLE_AUTH_ENABLED && GOOGLE_WEB_CLIENT_ID.length > 0;
+  return GOOGLE_AUTH_ENABLED && GOOGLE_WEB_CLIENT_ID.length > 0 && isGoogleNativeAvailable();
 }
 
 let googleConfigured = false;
@@ -83,7 +110,14 @@ function ensureGoogleConfigured(GoogleSignin: GoogleModule['GoogleSignin']): voi
 /** Run the native Google sign-in sheet and return its ID token. Throws
  *  OAuthCancelled if the user backs out. Loads the native SDK on first call. */
 export async function getGoogleIdToken(): Promise<string> {
-  const { GoogleSignin, isSuccessResponse, isErrorWithCode, statusCodes } = loadGoogle();
+  const mod = loadGoogle();
+  if (!mod?.GoogleSignin) {
+    // Backstop: the gate above should already hide the button when the native
+    // module is absent, but never surface the raw "Cannot read property
+    // 'GoogleSignin' of undefined" if we somehow get here (e.g. Expo Go).
+    throw new Error('Google sign-in needs a development or production build — it is not available in Expo Go.');
+  }
+  const { GoogleSignin, isSuccessResponse, isErrorWithCode, statusCodes } = mod;
   ensureGoogleConfigured(GoogleSignin);
   try {
     await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
