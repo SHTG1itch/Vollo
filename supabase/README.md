@@ -96,9 +96,11 @@ machinery: the app calls `supabase.auth.signInWithIdToken`, the resulting sessio
 validates through the same `adminClient.auth.getUser` path, and migration `015`
 extends the provisioning trigger to derive a clean handle, display name and avatar
 from the provider's metadata (OAuth identities carry no sign-up form). It's
-additive — email sign-up is unchanged, and the providers are dormant until you
-configure them. **Setup walk-through: [`OAUTH_SETUP.md`](./OAUTH_SETUP.md)** (and
-the `[auth.external.*]` blocks in `config.toml`).
+additive — email sign-up is unchanged. **Google is configured and live** (provider
+enabled, button on via `googleAuthEnabled: true`; provisioning verified end-to-end
+against the project); Apple stays dormant until its paid program is set up.
+**Setup walk-through: [`OAUTH_SETUP.md`](./OAUTH_SETUP.md)** (and the
+`[auth.external.*]` blocks in `config.toml`).
 
 ## Status: LIVE
 

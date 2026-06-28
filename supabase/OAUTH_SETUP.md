@@ -22,9 +22,9 @@ enable the providers in Supabase, and paste the client ids back into the app.
 
 ---
 
-## Live status (Google: fully set up 2026-06-27)
+## Live status (Google: fully set up 2026-06-27, button enabled 2026-06-28)
 
-**Google sign-in is configured, published, and Android-ready. Nothing left in the consoles — just build & install a dev client.**
+**Google sign-in is configured, published, Android-ready, and the button is now ON. Nothing left in the consoles — just build & install a dev client.**
 
 | Done | Detail |
 | --- | --- |
@@ -32,8 +32,9 @@ enable the providers in Supabase, and paste the client ids back into the app.
 | OAuth consent screen | App "Vollo", External, **published to Production** (basic scopes → no verification needed) |
 | Web OAuth client | **Vollo Web** — `958415288431-fol1pk22asmc748feuvbo1gkntcegis2.apps.googleusercontent.com`; redirect URI = the Supabase callback |
 | Android OAuth client | **Vollo Android** — `958415288431-ui589sqprbac8v4e87h1f143m5qq5gtu.apps.googleusercontent.com`; package `app.vollo.mobile`, SHA-1 `9B:1A:88:97:8F:1B:29:D4:0E:CA:8A:75:EC:F8:65:27:8C:2D:CF:D9` (EAS `development` keystore) |
-| Supabase Google provider | **Enabled** with the Web client id + secret |
-| App config | `expo.extra.googleWebClientId` set in `mobile/app.json`; EAS project linked (`eas.json` + `extra.eas.projectId`) |
+| Supabase Google provider | **Enabled** with the Web client id + secret (verified live: `GET /auth/v1/settings` → `external.google: true`) |
+| App config | `expo.extra.googleWebClientId` set in `mobile/app.json`; **`googleAuthEnabled: true`** (master switch ON → button shown); EAS project linked (`eas.json` + `extra.eas.projectId`) |
+| DB provisioning | Migration `015`'s `handle_new_auth_user()` confirmed live and proven end-to-end against the project (simulated Google identity → `public.users` row with derived handle/display/avatar + `user_streaks`, collisions suffixed; email sign-up's explicit username/display\_name still win) |
 
 **To use it:** build & install the Android dev client signed with that same
 keystore, then tap "Continue with Google":
@@ -100,7 +101,11 @@ In <https://console.cloud.google.com> → APIs & Services:
 (Or inject `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` / `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID`
 at build time instead of editing `app.json`.)
 
-The Google button appears as soon as `googleWebClientId` is non-empty.
+The Google button appears once `googleWebClientId` is non-empty **and** the
+`expo.extra.googleAuthEnabled` master switch is `true` (its default). Set that
+switch to `false` — or build with `EXPO_PUBLIC_GOOGLE_AUTH=0` — to hide the
+button for email-only testing without dropping the configured client id; the
+Google Cloud / Supabase setup stays untouched either way.
 
 ### 2d. Android OAuth client (the remaining step) — needs your SHA-1
 Android sign-in only works if the Vollo project has an **Android** OAuth client
@@ -188,6 +193,17 @@ Smoke test:
    from public.users order by created_at desc limit 5;
    ```
 4. Existing username/password login and sign-up still work unchanged.
+
+> **Already verified against the live project (2026-06-28):** the Supabase
+> Google provider is enabled (`external.google: true`) and the migration-`015`
+> provisioning trigger was exercised end-to-end by inserting simulated Google
+> identities into `auth.users` (auto-confirmed, provider metadata only). Each
+> produced a `public.users` row with a sensible handle/display/avatar and a
+> `user_streaks` row; a colliding handle was suffixed; and an email sign-up's
+> explicit `username`/`display_name` still won. All runs were rolled back, so
+> nothing persisted. The remaining device-only leg — native account picker →
+> ID token → Supabase session — needs an EAS dev build (the native module isn't
+> in Expo Go), so smoke-test steps 1–3 on a real build.
 
 ---
 
