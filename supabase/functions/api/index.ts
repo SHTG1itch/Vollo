@@ -1,27 +1,26 @@
 // ════════════════════════════════════════════════════════════════════════
 // Vollo API — Supabase Edge Function (Deno + Hono).
 //
-// A faithful port of the original Express API. The HTTP contract is unchanged
-// (same /api/* paths, custom HS256 bearer auth, JSON shapes and error envelope),
-// so the mobile client only needs its base URL repointed. DB access goes through
-// the direct Postgres connection (service role, bypassing RLS); all auth is
-// enforced here, so the public PostgREST API stays sealed by RLS.
+// Auth is Supabase Auth: clients send a Supabase access token as the bearer,
+// which this function validates (adminClient.auth.getUser) and resolves to the
+// app profile (users.auth_id → users.id, kept as the claim subject so every FK
+// and ownership check is unchanged). DB access goes through the direct Postgres
+// connection (service role, bypassing RLS); all authorization is enforced here,
+// so the public PostgREST API stays sealed by RLS.
 // ════════════════════════════════════════════════════════════════════════
 import { Hono, type Context, type MiddlewareHandler } from 'hono';
 import { cors } from 'hono/cors';
-import bcrypt from 'bcryptjs';
 import { ZodError } from 'zod';
 
-import { config } from './config.ts';
 import { query, queryOne, withTransaction, getSecret } from './db.ts';
+import { adminClient } from './supabaseAdmin.ts';
 import { ApiError } from './errors.ts';
-import { hashPassword, signToken, verifyPassword, verifyToken } from './auth.ts';
 import { mapCourt, mapMatchCard, mapPublicUser, mapScheduledMatch, mapUser, toIso } from './mappers.ts';
 import {
   bboxQuerySchema, commentSchema, commentsQuerySchema, courtsQuerySchema,
   createCourtSchema, createMatchSchema, createScheduledMatchSchema, discoverQuerySchema, feedQuerySchema,
-  geocodeQuerySchema, loginSchema, notificationIdsSchema, pushTokenSchema,
-  registerSchema, reverseGeocodeQuerySchema, updateProfileSchema, updateScheduledMatchSchema, userSearchQuerySchema,
+  geocodeQuerySchema, notificationIdsSchema, pushTokenSchema,
+  reverseGeocodeQuerySchema, updateProfileSchema, updateScheduledMatchSchema, userSearchQuerySchema,
 } from './validation.ts';
 import type { CreateMatchInput } from './validation.ts';
 import { analyzeScore, matchScore } from './scoring.ts';
@@ -42,12 +41,6 @@ const USER_SELECT = `
   id, username, email, display_name, avatar_url, bio, dominant_hand, color,
   ST_Y(home_geom) AS home_lat, ST_X(home_geom) AS home_lng, home_label, equipment, created_at
 `;
-
-// A valid bcrypt hash to compare against when the identifier is unknown, so login
-// takes the same time whether or not the account exists (defeats the timing
-// user-enumeration oracle), at the *configured* cost so it always matches a real
-// account's work factor.
-const DUMMY_PASSWORD_HASH = bcrypt.hashSync('vollo-timing-equalizer', config.auth.bcryptRounds);
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 async function jsonBody<T = Record<string, unknown>>(c: Context): Promise<T> {
@@ -72,7 +65,17 @@ async function authFromHeader(c: Context): Promise<{ claims: AuthClaims | null; 
   const token = parts.slice(1).join(' ').trim();
   if (!token) return { claims: null, hadToken: false };
   try {
-    return { claims: await verifyToken(token), hadToken: true };
+    // Validate the Supabase Auth access token, then resolve it to our profile.
+    // We keep claims.sub = users.id (NOT the auth id) so every existing FK
+    // reference and ownership check stays intact.
+    const { data, error } = await adminClient.auth.getUser(token);
+    if (error || !data.user) return { claims: null, hadToken: true };
+    const row = await queryOne<{ id: string; username: string }>(
+      'SELECT id, username FROM users WHERE auth_id = $1',
+      [data.user.id],
+    );
+    if (!row) return { claims: null, hadToken: true };
+    return { claims: { sub: row.id, username: row.username }, hadToken: true };
   } catch {
     return { claims: null, hadToken: true };
   }
@@ -106,7 +109,8 @@ function makeLimiter(windowMs: number, max: number) {
     return b.count <= max;
   };
 }
-const credentialLimiter = makeLimiter(15 * 60_000, 20);
+// Light limit on username→email resolution (an enumeration surface), keyed per IP.
+const resolveLimiter = makeLimiter(60_000, 30);
 const geocodeLimiterFn = makeLimiter(60_000, 30);
 // Discovery fans out to the free Overpass API + writes courts, so it gets its
 // own limiter (in addition to requiring auth) to protect the shared egress IP
@@ -195,42 +199,17 @@ app.get('/api', (c) => c.json({ name: 'Vollo API', status: 'ok', runtime: 'supab
 app.get('/api/health', (c) => c.json({ status: 'ok' }));
 
 // ─── Auth ────────────────────────────────────────────────────────────────
-app.post('/api/auth/register', async (c) => {
-  if (!credentialLimiter(clientIp(c))) throw ApiError.tooManyRequests('Too many authentication attempts, please try again later');
-  const { username, email, password, display_name } = registerSchema.parse(await jsonBody(c));
-
-  const existing = await queryOne('SELECT 1 FROM users WHERE username = $1 OR email = $2', [username, email]);
-  if (existing) throw ApiError.conflict('Username or email already taken');
-
-  const password_hash = await hashPassword(password);
-  const row = await queryOne<Record<string, unknown>>(
-    `INSERT INTO users (username, email, password_hash, display_name)
-     VALUES ($1, $2, $3, $4)
-     RETURNING ${USER_SELECT}`,
-    [username, email, password_hash, display_name],
-  );
-  const user = mapUser(row!);
-  await query('INSERT INTO user_streaks (user_id) VALUES ($1) ON CONFLICT DO NOTHING', [user.id]);
-  const token = await signToken({ sub: user.id, username: user.username });
-  return c.json({ user, token }, 201);
-});
-
-app.post('/api/auth/login', async (c) => {
-  if (!credentialLimiter(clientIp(c))) throw ApiError.tooManyRequests('Too many authentication attempts, please try again later');
-  const { identifier, password } = loginSchema.parse(await jsonBody(c));
-  const row = await queryOne<Record<string, unknown> & { password_hash: string }>(
-    `SELECT ${USER_SELECT}, password_hash FROM users WHERE username = $1 OR email = $1`,
-    [identifier],
-  );
-  if (!row) {
-    await verifyPassword(password, DUMMY_PASSWORD_HASH);
-    throw ApiError.unauthorized('Invalid credentials');
-  }
-  const ok = await verifyPassword(password, row.password_hash);
-  if (!ok) throw ApiError.unauthorized('Invalid credentials');
-  const user = mapUser(row);
-  const token = await signToken({ sub: user.id, username: user.username });
-  return c.json({ user, token });
+// Registration and login now happen client-side against Supabase Auth (the
+// mobile app calls supabase.auth.signUp / signInWithPassword directly). This
+// route only lets the client turn a typed username into the email Supabase Auth
+// needs to sign in. Rate-limited; returns 404 for unknown usernames.
+app.get('/api/auth/resolve-email', async (c) => {
+  if (!resolveLimiter(clientIp(c))) throw ApiError.tooManyRequests('Too many lookups, please try again shortly');
+  const username = (c.req.query('username') ?? '').trim();
+  if (!username || username.length > 60) throw ApiError.badRequest('username is required');
+  const row = await queryOne<{ email: string }>('SELECT email FROM users WHERE username = $1', [username]);
+  if (!row) throw ApiError.notFound('No account with that username');
+  return c.json({ email: row.email });
 });
 
 app.get('/api/auth/me', requireAuth, async (c) => {
@@ -1011,7 +990,16 @@ app.delete('/api/users/me/push-token', requireAuth, async (c) => {
 });
 
 app.delete('/api/users/me', requireAuth, async (c) => {
-  await query('DELETE FROM users WHERE id = $1', [uid(c)]);
+  const userId = uid(c);
+  const row = await queryOne<{ auth_id: string | null }>('SELECT auth_id FROM users WHERE id = $1', [userId]);
+  // Remove the application profile (cascades all the user's data) now…
+  await query('DELETE FROM users WHERE id = $1', [userId]);
+  // …then best-effort remove the Supabase Auth identity so the login is gone too.
+  if (row?.auth_id) {
+    await adminClient.auth.admin.deleteUser(row.auth_id).catch((err) =>
+      console.error('[users] auth identity delete failed', err instanceof Error ? err.message : err),
+    );
+  }
   return c.body(null, 204);
 });
 

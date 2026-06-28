@@ -146,10 +146,9 @@ export interface CreateScheduledMatchPayload {
 
 export const api = {
   // ── Auth ──
-  register: (body: { username: string; email: string; password: string; display_name: string }) =>
-    request<AuthResponse>('/auth/register', { method: 'POST', body: JSON.stringify(body) }),
-  login: (body: { identifier: string; password: string }) =>
-    request<AuthResponse>('/auth/login', { method: 'POST', body: JSON.stringify(body) }),
+  // Registration/login happen client-side via Supabase Auth (see store/auth.ts).
+  // This only turns a typed username into the email Supabase Auth signs in with.
+  resolveEmail: (username: string) => request<{ email: string }>(`/auth/resolve-email${qs({ username })}`),
   me: () => request<{ user: AuthResponse['user'] }>('/auth/me'),
 
   // ── Feed ──

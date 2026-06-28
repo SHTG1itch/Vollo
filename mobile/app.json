@@ -39,7 +39,9 @@
       "expo-font"
     ],
     "extra": {
-      "apiUrl": "https://pfophuqopwfupxjonsty.supabase.co/functions/v1"
+      "apiUrl": "https://pfophuqopwfupxjonsty.supabase.co/functions/v1",
+      "supabaseUrl": "https://pfophuqopwfupxjonsty.supabase.co",
+      "supabaseAnonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBmb3BodXFvcHdmdXB4am9uc3R5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI1MTE1NTksImV4cCI6MjA5ODA4NzU1OX0.xl6PXZC1iUasQZ5RsTgnIuQmoN2RzzsmWdDGtHssnP4"
     }
   }
 }

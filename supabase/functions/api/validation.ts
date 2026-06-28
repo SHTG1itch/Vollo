@@ -5,31 +5,6 @@ export const surfaceSchema = z.enum(['hard', 'clay', 'grass', 'indoor']);
 const setSchema = z.tuple([z.number().int().min(0).max(99), z.number().int().min(0).max(99)]);
 export const scoreArraySchema = z.array(setSchema).min(1).max(5);
 
-export const registerSchema = z.object({
-  username: z
-    .string()
-    .trim()
-    .min(3)
-    .max(20)
-    .regex(/^[a-zA-Z0-9_]+$/, 'username may only contain letters, numbers and underscores'),
-  email: z.string().trim().email().max(254),
-  // bcrypt only hashes the first 72 bytes; reject longer so two passwords that
-  // share a 72-byte prefix can't silently collide.
-  password: z
-    .string()
-    .min(8)
-    .max(72)
-    .refine((p) => new TextEncoder().encode(p).length <= 72, {
-      message: 'password must be at most 72 bytes',
-    }),
-  display_name: z.string().trim().min(1).max(60),
-});
-
-export const loginSchema = z.object({
-  identifier: z.string().trim().min(1), // username or email
-  password: z.string().min(1),
-});
-
 // A single match can't realistically exceed a few hundred of any one event;
 // cap each counter so bad input can't store absurd values that skew analytics.
 const statCount = z.number().int().min(0).max(1000).default(0);
@@ -289,5 +264,4 @@ export const commentsQuerySchema = z.object({
 
 export type CreateMatchInput = z.infer<typeof createMatchSchema>;
 export type CreateCourtInput = z.infer<typeof createCourtSchema>;
-export type RegisterInput = z.infer<typeof registerSchema>;
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;

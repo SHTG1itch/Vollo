@@ -1,7 +1,8 @@
 // Runtime configuration for the Vollo API running as a Supabase Edge Function
-// (Deno). Mirrors the original Express `config` but reads from `Deno.env`. The
-// JWT signing secret and internal sweep token are NOT here — they live in the
-// private `app_secrets` table and are loaded lazily via db.ts/getSecret().
+// (Deno). Mirrors the original Express `config` but reads from `Deno.env`.
+// Authentication is handled by Supabase Auth (validated via the service-role
+// client in supabaseAdmin.ts); the internal sweep token still lives in the
+// private `app_secrets` table and is loaded lazily via db.ts/getSecret().
 
 function num(value: string | undefined, fallback: number): number {
   const n = Number(value);
@@ -23,14 +24,6 @@ export const config = {
     // connection string (service role), which bypasses RLS. All data access is
     // funnelled through this function, so the public REST API stays sealed.
     url: Deno.env.get('SUPABASE_DB_URL') ?? '',
-  },
-
-  auth: {
-    jwtExpiresIn: Deno.env.get('JWT_EXPIRES_IN') ?? '30d',
-    // bcryptjs is pure-JS (≈10× slower than native), so cost 12 would burn too
-    // much CPU per login in the edge runtime. 10 keeps logins snappy and is still
-    // a sound work factor. Override with BCRYPT_ROUNDS if desired.
-    bcryptRounds: num(Deno.env.get('BCRYPT_ROUNDS'), 10),
   },
 
   geocoder: {

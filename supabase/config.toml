@@ -5,6 +5,8 @@
 project_id = "pfophuqopwfupxjonsty"
 
 [functions.api]
-# Custom HS256 bearer auth is enforced inside the function, and several routes
-# are public (login/register/feed), so the platform JWT gate is disabled.
+# The function validates Supabase Auth bearer tokens itself (adminClient.auth
+# .getUser) and serves several genuinely public routes (feed, resolve-email,
+# courts/territories reads), which would be 401'd by the platform gate before
+# reaching us — so the platform JWT gate stays disabled.
 verify_jwt = false
