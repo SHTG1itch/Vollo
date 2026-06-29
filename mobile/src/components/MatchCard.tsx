@@ -1,6 +1,6 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { colors, font, radius, shadow, spacing } from '../theme';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { colors, font, fonts, radius, shadow, spacing } from '../theme';
 import type { MatchCard as MatchCardType } from '../types';
 import { formatCount, formatScoreLine, timeAgo } from '../utils/format';
 import { Avatar } from './ui';
@@ -38,6 +38,9 @@ export function MatchCard({
         <SurfaceBadge surface={match.surface} small />
       </View>
 
+      {/* Headline */}
+      {match.title ? <Text style={styles.title}>{match.title}</Text> : null}
+
       {/* Result + score */}
       <View style={styles.scoreRow}>
         <View style={[styles.resultTag, { backgroundColor: win ? colors.primarySoft : colors.lossSoft }]}>
@@ -70,6 +73,11 @@ export function MatchCard({
       </View>
 
       {match.notes ? <Text style={styles.notes}>{match.notes}</Text> : null}
+
+      {/* Proof-of-play photo */}
+      {match.photo_url ? (
+        <Image source={{ uri: match.photo_url }} style={styles.photo} resizeMode="cover" />
+      ) : null}
 
       {/* Footer */}
       <View style={styles.footer}>
@@ -104,8 +112,10 @@ const styles = StyleSheet.create({
   tb: { color: colors.warning, fontSize: font.tiny, fontWeight: '800' },
   pending: { color: colors.warning, fontSize: font.tiny, fontWeight: '800', letterSpacing: 0.5 },
   disputed: { color: colors.loss, fontSize: font.tiny, fontWeight: '800', letterSpacing: 0.5 },
+  title: { color: colors.text, fontFamily: fonts.heading, fontSize: font.h3, letterSpacing: 0.2 },
   vs: { color: colors.textDim, fontSize: font.small },
   vsName: { color: colors.text, fontWeight: '600' },
+  photo: { width: '100%', aspectRatio: 16 / 9, borderRadius: radius.md, backgroundColor: colors.surfaceAlt, marginTop: 2 },
   metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, marginTop: 2 },
   meta: { color: colors.textDim, fontSize: font.small },
   notes: { color: colors.textDim, fontSize: font.small, fontStyle: 'italic' },

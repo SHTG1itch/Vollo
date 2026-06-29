@@ -12,6 +12,8 @@ import {
 } from 'react-native';
 import { SafeAreaView, type Edge } from 'react-native-safe-area-context';
 import { colors, font, fonts, radius, shadow, spacing } from '../theme';
+import { CountUp } from './CountUp';
+import { PressableBounce } from './PressableBounce';
 
 export function Screen({
   children,
@@ -51,17 +53,16 @@ export function Button({
   const isPrimary = variant === 'primary';
   const isDanger = variant === 'danger';
   return (
-    <Pressable
+    <PressableBounce
       onPress={onPress}
       disabled={disabled || loading}
-      style={({ pressed }) => [
+      style={[
         styles.btn,
         isPrimary && styles.btnPrimary,
         variant === 'secondary' && styles.btnSecondary,
         variant === 'ghost' && styles.btnGhost,
         isDanger && styles.btnDanger,
         (disabled || loading) && styles.btnDisabled,
-        pressed && { opacity: 0.85 },
         style,
       ]}
     >
@@ -79,7 +80,7 @@ export function Button({
           {label}
         </Text>
       )}
-    </Pressable>
+    </PressableBounce>
   );
 }
 
@@ -229,7 +230,11 @@ export function ErrorState({
 export function Stat({ label, value, color = colors.text }: { label: string; value: string | number; color?: string }) {
   return (
     <View style={{ alignItems: 'center', flex: 1 }}>
-      <Text style={[styles.statValue, { color }]}>{value}</Text>
+      {typeof value === 'number' ? (
+        <CountUp value={value} style={[styles.statValue, { color, textAlign: 'center', width: '100%' }]} />
+      ) : (
+        <Text style={[styles.statValue, { color }]}>{value}</Text>
+      )}
       <Text style={styles.statLabel}>{label}</Text>
     </View>
   );

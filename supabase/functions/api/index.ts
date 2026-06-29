@@ -39,7 +39,7 @@ import type { AuthClaims, LeaderboardEntry, MatchCard, MatchResult, MatchStats, 
 type Env = { Variables: { user?: AuthClaims } };
 
 const USER_SELECT = `
-  id, username, email, display_name, avatar_url, bio, dominant_hand, color,
+  id, username, email, display_name, avatar_url, cover_url, bio, dominant_hand, color,
   ST_Y(home_geom) AS home_lat, ST_X(home_geom) AS home_lng, home_label, equipment, created_at
 `;
 
@@ -417,8 +417,9 @@ app.post('/api/matches', requireAuth, async (c) => {
       `INSERT INTO matches
          (user_id, opponent_id, opponent_name, court_id, surface, score_array, result,
           sets_won, sets_lost, games_won, games_lost, match_score, streak_modifier,
-          rpe_index, duration_minutes, notes, is_tiebreak, played_at, verification_status)
-       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,0,1,$12,$13,$14,$15,$16,$17)
+          rpe_index, duration_minutes, notes, is_tiebreak, played_at, verification_status,
+          title, photo_url)
+       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,0,1,$12,$13,$14,$15,$16,$17,$18,$19)
        RETURNING id`,
       [
         userId,
@@ -440,6 +441,8 @@ app.post('/api/matches', requireAuth, async (c) => {
         isTiebreak,
         playedAt,
         verificationStatus,
+        body.title ?? null,
+        body.photo_url ?? null,
       ],
     );
     const id = inserted.rows[0]!.id;
@@ -1138,6 +1141,7 @@ app.patch('/api/users/me', requireAuth, async (c) => {
   if (b.display_name !== undefined) { sets.push(`display_name = $${i++}`); params.push(b.display_name); }
   if (b.bio !== undefined) { sets.push(`bio = $${i++}`); params.push(b.bio); }
   if (b.avatar_url !== undefined) { sets.push(`avatar_url = $${i++}`); params.push(b.avatar_url); }
+  if (b.cover_url !== undefined) { sets.push(`cover_url = $${i++}`); params.push(b.cover_url); }
   if (b.dominant_hand !== undefined) { sets.push(`dominant_hand = $${i++}`); params.push(b.dominant_hand); }
   if (b.color !== undefined) { sets.push(`color = $${i++}`); params.push(b.color); }
   if (b.home !== undefined) {

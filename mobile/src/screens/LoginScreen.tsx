@@ -3,8 +3,9 @@ import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } fr
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { useAuth } from '../store/auth';
-import { Button, Field, H1, Muted, Screen } from '../components/ui';
+import { Button, Field, Muted, Screen } from '../components/ui';
 import { SocialAuth } from '../components/SocialAuth';
+import { VolloWordmark } from '../components/VolloLogo';
 import { colors, font, radius, shadow, spacing } from '../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Login'>;
@@ -33,8 +34,7 @@ export function LoginScreen({ navigation }: Props) {
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
           <View style={styles.brand}>
-            <Text style={styles.logo}>🎾</Text>
-            <H1>Vollo</H1>
+            <VolloWordmark size={64} />
             <Muted>Track matches. Claim courts. Rule the map.</Muted>
           </View>
 
@@ -69,8 +69,7 @@ export function LoginScreen({ navigation }: Props) {
 
 const styles = StyleSheet.create({
   container: { flexGrow: 1, justifyContent: 'center', padding: spacing.xl, gap: spacing.xxl },
-  brand: { alignItems: 'center', gap: spacing.xs },
-  logo: { fontSize: 56 },
+  brand: { alignItems: 'center', gap: spacing.sm },
   form: {
     gap: spacing.md,
     backgroundColor: colors.surface,

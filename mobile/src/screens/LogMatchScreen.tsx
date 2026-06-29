@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
@@ -7,6 +7,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList, TabParamList } from '../navigation/types';
 import { api, ApiError, type CreateMatchPayload, type UserSearchResult } from '../api/client';
 import { useFeed } from '../store/feed';
+import { pickAndUploadMatchPhoto } from '../lib/uploadImage';
 import { Avatar, Button, Card, Field, H2, Muted } from '../components/ui';
 import { ScoreInput } from '../components/ScoreInput';
 import { Stepper } from '../components/Stepper';
@@ -50,7 +51,10 @@ export function LogMatchScreen() {
   const [daysAgo, setDaysAgo] = useState(0);
   const [rpe, setRpe] = useState<number | null>(null);
   const [duration, setDuration] = useState(0);
+  const [title, setTitle] = useState('');
   const [notes, setNotes] = useState('');
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [showStats, setShowStats] = useState(false);
   const [stats, setStats] = useState<MatchStats>(emptyStats);
   const [courts, setCourts] = useState<Court[]>([]);
@@ -218,6 +222,19 @@ export function LogMatchScreen() {
   const setStat = (k: keyof MatchStats, v: number) => setStats((s) => ({ ...s, [k]: v }));
   const statsTouched = showStats && Object.values(stats).some((v) => v > 0);
 
+  const onAddPhoto = async () => {
+    if (uploadingPhoto) return;
+    setUploadingPhoto(true);
+    try {
+      const url = await pickAndUploadMatchPhoto();
+      if (url) setPhotoUrl(url);
+    } catch (e) {
+      Alert.alert('Upload failed', e instanceof Error ? e.message : 'Please try again.');
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
+
   const submit = async () => {
     if (!scoreValid) {
       Alert.alert('Check the score', 'Each set needs a winner and the match cannot end in a tie.');
@@ -229,6 +246,8 @@ export function LogMatchScreen() {
         surface,
         score_array: score,
         is_tiebreak: tiebreakFinal,
+        ...(title.trim() ? { title: title.trim() } : {}),
+        ...(photoUrl ? { photo_url: photoUrl } : {}),
         ...(courtId ? { court_id: courtId } : {}),
         ...(scheduledMatchId ? { scheduled_match_id: scheduledMatchId } : {}),
         // A tagged registered player takes precedence over a free-text name.
@@ -258,7 +277,9 @@ export function LogMatchScreen() {
       setScheduledMatchId(null);
       setRpe(null);
       setDuration(0);
+      setTitle('');
       setNotes('');
+      setPhotoUrl(null);
       setShowStats(false);
       setStats(emptyStats());
     } catch (e) {
@@ -450,9 +471,46 @@ export function LogMatchScreen() {
         <Stepper label="Minutes" value={duration} onChange={setDuration} step={5} max={600} />
       </Section>
 
+      {/* Headline */}
+      <Section title="Headline (optional)">
+        <Field value={title} onChangeText={setTitle} placeholder="e.g. Sunday clay battle" maxLength={80} />
+      </Section>
+
       {/* Notes */}
       <Section title="Notes">
         <Field value={notes} onChangeText={setNotes} placeholder="How did it go?" multiline style={{ height: 80, paddingTop: spacing.sm }} />
+      </Section>
+
+      {/* Photo — a proof-of-play shot shown on the feed card */}
+      <Section title="Photo (optional)">
+        {photoUrl ? (
+          <View style={styles.photoWrap}>
+            <Image source={{ uri: photoUrl }} style={styles.photo} resizeMode="cover" />
+            <Pressable
+              onPress={() => setPhotoUrl(null)}
+              style={styles.photoRemove}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Remove photo"
+            >
+              <Text style={styles.photoRemoveText}>✕</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <Pressable
+            onPress={onAddPhoto}
+            disabled={uploadingPhoto}
+            style={styles.addPhoto}
+            accessibilityRole="button"
+            accessibilityLabel="Add a match photo"
+          >
+            {uploadingPhoto ? (
+              <ActivityIndicator color={colors.primary} />
+            ) : (
+              <Text style={styles.addPhotoText}>📷  Add a photo</Text>
+            )}
+          </Pressable>
+        )}
       </Section>
 
       {/* Detailed stats */}
@@ -542,6 +600,31 @@ const styles = StyleSheet.create({
   rpeTextActive: { color: colors.onPrimary, fontWeight: '800' },
   statsToggle: { paddingVertical: spacing.sm },
   statsToggleText: { color: colors.primary, fontWeight: '700', fontSize: font.body },
+  addPhoto: {
+    height: 96,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    borderStyle: 'dashed',
+    backgroundColor: colors.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addPhotoText: { color: colors.primary, fontWeight: '800', fontSize: font.body },
+  photoWrap: { position: 'relative' },
+  photo: { width: '100%', aspectRatio: 4 / 3, borderRadius: radius.md, backgroundColor: colors.surfaceAlt },
+  photoRemove: {
+    position: 'absolute',
+    top: spacing.sm,
+    right: spacing.sm,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: 'rgba(11,19,13,0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  photoRemoveText: { color: colors.white, fontWeight: '800', fontSize: 14 },
   courtChip: {
     backgroundColor: colors.surfaceAlt, borderRadius: radius.md, paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm, borderWidth: 1, borderColor: colors.border, maxWidth: 180,

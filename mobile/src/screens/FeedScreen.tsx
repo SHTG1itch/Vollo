@@ -8,8 +8,10 @@ import type { RootStackParamList } from '../navigation/types';
 import { useFeed } from '../store/feed';
 import { useAuth } from '../store/auth';
 import { MatchCard } from '../components/MatchCard';
-import { EmptyState, ErrorState, Loading, SegmentedControl } from '../components/ui';
-import { colors, font, radius, spacing } from '../theme';
+import { EmptyState, ErrorState, SegmentedControl } from '../components/ui';
+import { FeedSkeleton } from '../components/Skeleton';
+import { VolloWordmark } from '../components/VolloLogo';
+import { colors, radius, spacing } from '../theme';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -29,18 +31,8 @@ export function FeedScreen() {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <Text style={styles.title}>Feed</Text>
-        <View style={styles.headerActions}>
-          <View style={{ width: 168 }}>
-            <SegmentedControl
-              options={[
-                { label: 'Global', value: 'global' },
-                { label: 'Following', value: 'following' },
-              ]}
-              value={scope}
-              onChange={(v) => setScope(v)}
-            />
-          </View>
+        <View style={styles.headerTop}>
+          <VolloWordmark size={28} />
           <Pressable
             onPress={() => navigation.navigate('UserSearch')}
             hitSlop={8}
@@ -51,10 +43,18 @@ export function FeedScreen() {
             <Text style={styles.searchIcon}>🔍</Text>
           </Pressable>
         </View>
+        <SegmentedControl
+          options={[
+            { label: 'Global', value: 'global' },
+            { label: 'Following', value: 'following' },
+          ]}
+          value={scope}
+          onChange={(v) => setScope(v)}
+        />
       </View>
 
       {loading && matches.length === 0 ? (
-        <Loading label="Loading matches…" />
+        <FeedSkeleton />
       ) : error && matches.length === 0 ? (
         <ErrorState message={error} onRetry={() => fetch()} />
       ) : (
@@ -108,16 +108,13 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   header: {
     paddingHorizontal: spacing.lg,
+    paddingTop: spacing.xs,
     paddingBottom: spacing.md,
     gap: spacing.md,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  title: { color: colors.text, fontSize: font.h1, fontWeight: '800', letterSpacing: -0.5 },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  headerTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   searchBtn: {
     width: 38,
     height: 38,

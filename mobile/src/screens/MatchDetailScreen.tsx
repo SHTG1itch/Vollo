@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { Alert, KeyboardAvoidingView, Platform, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { Alert, Image, KeyboardAvoidingView, Platform, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { api, ApiError } from '../api/client';
@@ -10,7 +10,8 @@ import { Avatar, Button, Card, ErrorState, Field, Loading, Muted } from '../comp
 import { SurfaceBadge } from '../components/SurfaceBadge';
 import { ProgressBar, RallyDistribution, SplitBar } from '../components/charts';
 import { KudosButton } from '../components/KudosButton';
-import { colors, font, spacing } from '../theme';
+import { ConfettiBurst } from '../components/ConfettiBurst';
+import { colors, font, fonts, radius, spacing } from '../theme';
 import type { MatchCard, MatchStats } from '../types';
 import { formatScoreLine, timeAgo } from '../utils/format';
 
@@ -29,6 +30,25 @@ export function MatchDetailScreen({ route, navigation }: Props) {
   const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  // Celebrate your own win once when the match opens (not on every refresh).
+  const [celebrate, setCelebrate] = useState(false);
+  const celebratedRef = useRef(false);
+
+  // Reset the one-shot gate when the screen is reused for a DIFFERENT match
+  // (new route params on the same component instance — e.g. a deep link or
+  // navigating between matches without unmounting). Keyed on matchId only, so a
+  // pull-to-refresh of the SAME match still won't re-fire the confetti.
+  useEffect(() => {
+    celebratedRef.current = false;
+    setCelebrate(false);
+  }, [matchId]);
+
+  useEffect(() => {
+    if (!celebratedRef.current && match && match.result === 'win' && match.user_id === user?.id) {
+      celebratedRef.current = true;
+      setCelebrate(true);
+    }
+  }, [match, user?.id]);
 
   useEffect(() => {
     let active = true;
@@ -173,6 +193,8 @@ export function MatchDetailScreen({ route, navigation }: Props) {
             <SurfaceBadge surface={match.surface} />
           </View>
 
+          {match.title ? <Text style={styles.title}>{match.title}</Text> : null}
+
           <View style={styles.resultRow}>
             <Text style={[styles.result, { color: win ? colors.win : colors.loss }]}>{win ? 'WIN' : 'LOSS'}</Text>
             <Text style={styles.score}>{formatScoreLine(match.score_array)}</Text>
@@ -203,6 +225,10 @@ export function MatchDetailScreen({ route, navigation }: Props) {
             <Text style={styles.metaScore}>⚡ {match.match_score > 0 ? '+' : ''}{match.match_score} pts</Text>
           </View>
           {match.notes ? <Text style={styles.notes}>“{match.notes}”</Text> : null}
+
+          {match.photo_url ? (
+            <Image source={{ uri: match.photo_url }} style={styles.photo} resizeMode="cover" />
+          ) : null}
 
           <View style={styles.actions}>
             <KudosButton active={match.viewer_has_kudos ?? false} count={match.kudos_count} onPress={toggleKudos} />
@@ -260,6 +286,7 @@ export function MatchDetailScreen({ route, navigation }: Props) {
         ) : null}
         <View style={{ height: spacing.xxl }} />
       </ScrollView>
+      <ConfettiBurst play={celebrate} onDone={() => setCelebrate(false)} />
     </KeyboardAvoidingView>
   );
 }
@@ -299,8 +326,10 @@ const styles = StyleSheet.create({
   author: { color: colors.text, fontWeight: '700', fontSize: font.body },
   sub: { color: colors.textFaint, fontSize: font.tiny },
   resultRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginTop: spacing.sm },
+  title: { color: colors.text, fontFamily: fonts.heading, fontSize: font.h2, letterSpacing: 0.2, marginTop: spacing.xs },
   result: { fontSize: font.h2, fontWeight: '900', letterSpacing: 1 },
   score: { color: colors.text, fontSize: font.h2, fontWeight: '800', letterSpacing: 1 },
+  photo: { width: '100%', aspectRatio: 16 / 9, borderRadius: radius.md, backgroundColor: colors.surfaceAlt, marginTop: spacing.sm },
   setsTag: { color: colors.textFaint, fontSize: font.small, fontWeight: '700' },
   vs: { color: colors.textDim, fontSize: font.body },
   vsLink: { color: colors.primary, fontWeight: '700' },

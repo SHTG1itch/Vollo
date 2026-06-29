@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -7,6 +7,7 @@ import type { RootStackParamList } from '../navigation/types';
 import { api } from '../api/client';
 import { useAuth } from '../store/auth';
 import { Avatar, Button, Card, ErrorState, Loading, Muted, Stat } from '../components/ui';
+import { CountUp } from '../components/CountUp';
 import { FormDots, ProgressBar, RallyDistribution, SplitBar } from '../components/charts';
 import { SurfaceBadge } from '../components/SurfaceBadge';
 import { colors, font, fonts, radius, spacing, surfaceColors } from '../theme';
@@ -144,9 +145,14 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
     >
       {/* Header */}
-      <Card style={{ gap: spacing.md }}>
+      <Card style={styles.headerCard}>
+        <View style={[styles.cover, { backgroundColor: profile.user.color ?? colors.primarySoft }]}>
+          {profile.user.cover_url ? (
+            <Image source={{ uri: profile.user.cover_url }} style={styles.coverImg} resizeMode="cover" />
+          ) : null}
+        </View>
         <View style={styles.headerRow}>
-          <Avatar name={profile.user.display_name} uri={profile.user.avatar_url} size={64} />
+          <Avatar name={profile.user.display_name} uri={profile.user.avatar_url} size={72} />
           <View style={{ flex: 1 }}>
             <Text style={styles.name}>{profile.user.display_name}</Text>
             <Text style={styles.handle}>@{profile.user.username}</Text>
@@ -203,7 +209,11 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
       <View style={{ flexDirection: 'row', gap: spacing.md }}>
         <Card style={styles.miniCard}>
           <Text style={styles.miniLabel}>VOLLO RATING</Text>
-          <Text style={styles.miniValue}>{avgRating ?? '—'}</Text>
+          {avgRating != null ? (
+            <CountUp value={avgRating} style={styles.miniValue} />
+          ) : (
+            <Text style={styles.miniValue}>—</Text>
+          )}
           {analytics && avgRating != null ? <Text style={styles.miniSub}>{analytics.playstyle}</Text> : null}
         </Card>
         <Card style={styles.miniCard}>
@@ -403,6 +413,9 @@ export function UserProfileScreen({ route }: NativeStackScreenProps<RootStackPar
 
 const styles = StyleSheet.create({
   content: { padding: spacing.lg, gap: spacing.md },
+  headerCard: { gap: spacing.md, paddingTop: 0, overflow: 'hidden' },
+  cover: { height: 104, marginHorizontal: -spacing.lg, marginBottom: spacing.xs },
+  coverImg: { width: '100%', height: '100%' },
   headerRow: { flexDirection: 'row', gap: spacing.md, alignItems: 'center' },
   name: { color: colors.text, fontSize: font.h2 + 2, fontFamily: fonts.display, letterSpacing: 0.2 },
   handle: { color: colors.textDim, fontSize: font.small },

@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -13,7 +13,9 @@ import { useAuth } from './src/store/auth';
 import { useNotifications } from './src/store/notifications';
 import { registerForPush } from './src/services/push';
 import { FONT_ASSETS } from './src/fonts';
-import { colors, fonts } from './src/theme';
+import { BallSpinner } from './src/components/BallSpinner';
+import { VolloWordmark } from './src/components/VolloLogo';
+import { colors } from './src/theme';
 
 const navTheme: Theme = {
   ...DefaultTheme,
@@ -60,9 +62,8 @@ export default function App() {
   if (!hydrated || !fontsReady) {
     return (
       <View style={styles.splash}>
-        <Text style={styles.logo}>🎾</Text>
-        {fontsLoaded ? <Text style={styles.brand}>Vollo</Text> : null}
-        <ActivityIndicator color={colors.primary} />
+        <BallSpinner size={84} mode="loop" />
+        {fontsLoaded ? <VolloWordmark size={34} /> : null}
       </View>
     );
   }
@@ -82,7 +83,5 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  splash: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center', gap: 12 },
-  logo: { fontSize: 64 },
-  brand: { color: colors.text, fontSize: 36, fontFamily: fonts.display, letterSpacing: 0.5 },
+  splash: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center', gap: 16 },
 });

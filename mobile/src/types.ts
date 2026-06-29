@@ -23,6 +23,8 @@ export interface User {
   email: string;
   display_name: string;
   avatar_url: string | null;
+  /** Wide banner image shown behind the profile header. */
+  cover_url: string | null;
   bio: string | null;
   dominant_hand: 'right' | 'left';
   /** Signature colour (#RRGGBB) used to wash this player's territories. */
@@ -82,6 +84,10 @@ export interface MatchCard {
   opponent_name: string | null;
   court_id: string | null;
   surface: Surface;
+  /** Optional short headline for the match, shown on the feed card. */
+  title: string | null;
+  /** Optional proof-of-play photo (public Storage URL). */
+  photo_url: string | null;
   score_array: ScoreArray;
   result: MatchResult;
   sets_won: number;

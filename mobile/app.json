@@ -8,7 +8,9 @@
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "backgroundColor": "#F4F6F3",
+    "icon": "./assets/icon.png",
     "splash": {
+      "image": "./assets/splash-icon.png",
       "backgroundColor": "#F4F6F3",
       "resizeMode": "contain"
     },
@@ -25,6 +27,10 @@
     },
     "android": {
       "package": "app.vollo.mobile",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0F7A3D"
+      },
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
@@ -33,7 +39,8 @@
       ]
     },
     "web": {
-      "bundler": "metro"
+      "bundler": "metro",
+      "favicon": "./assets/favicon.png"
     },
     "plugins": [
       "expo-location",
@@ -44,6 +51,13 @@
         "@react-native-google-signin/google-signin",
         {
           "iosUrlScheme": "com.googleusercontent.apps.REPLACE_WITH_REVERSED_IOS_CLIENT_ID"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Vollo needs access to your photos so you can set a profile or cover photo and add photos to a match.",
+          "cameraPermission": "Vollo needs camera access so you can take a photo for your profile or a match."
         }
       ]
     ],
