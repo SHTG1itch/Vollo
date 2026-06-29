@@ -5,7 +5,11 @@
 // Messages, Save, etc. A secondary action copies the image to the clipboard
 // (expo-clipboard) so it can be pasted anywhere. No native code, works in a dev
 // build / Expo Go: the capture is a plain view-to-PNG/JPEG rasterisation.
-import React, { useRef, useState } from 'react';
+//
+// The on-screen preview is sized to fit the sheet, but the capture targets a
+// SEPARATE, off-screen card rendered at story resolution so the exported image
+// is crisp at 1080-wide stories regardless of how small the preview is.
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -25,6 +29,10 @@ import { Button } from './ui';
 import { colors, fonts, radius, spacing } from '../theme';
 import type { MatchCard } from '../types';
 
+// Off-screen capture width (logical px). At a 2x–3x device scale this rasterises
+// to ~1080–1620px wide — crisp for a 1080-wide Instagram/Snapchat story.
+const CAPTURE_W = 540;
+
 export function ShareStorySheet({
   match,
   visible,
@@ -41,6 +49,21 @@ export function ShareStorySheet({
   const [variant, setVariant] = useState<ShareVariant>(hasPhoto ? 'photo' : 'court');
   const [busy, setBusy] = useState<null | 'share' | 'copy'>(null);
   const [note, setNote] = useState<string | null>(null);
+
+  const needsPhoto = variant === 'photo' && hasPhoto;
+  // Capture must wait for the background photo to decode, else view-shot snapshots
+  // an empty photo region. Non-photo variants are ready immediately.
+  const [photoReady, setPhotoReady] = useState(!needsPhoto);
+  const canCapture = photoReady;
+
+  // Reset readiness whenever the photo target changes or the sheet (re)opens, and
+  // clear any stale "copied" note on open.
+  useEffect(() => {
+    setPhotoReady(!(variant === 'photo' && hasPhoto));
+  }, [visible, variant, hasPhoto]);
+  useEffect(() => {
+    if (visible) setNote(null);
+  }, [visible]);
 
   // Size the preview to fit between the header and the controls, keeping 9:16.
   const chromeH = 320 + insets.top + insets.bottom; // header + toggle + buttons
@@ -63,7 +86,7 @@ export function ShareStorySheet({
   }
 
   async function onShare() {
-    if (busy) return;
+    if (busy || !canCapture) return;
     setBusy('share');
     setNote(null);
     try {
@@ -85,7 +108,7 @@ export function ShareStorySheet({
   }
 
   async function onCopy() {
-    if (busy) return;
+    if (busy || !canCapture) return;
     setBusy('copy');
     setNote(null);
     try {
@@ -99,24 +122,50 @@ export function ShareStorySheet({
     }
   }
 
+  // Don't tear the sheet down (and unmount the capture view) mid-capture.
+  const handleClose = () => {
+    if (busy) return;
+    onClose();
+  };
+
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose} statusBarTranslucent>
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={handleClose} statusBarTranslucent>
       <View style={[styles.backdrop, { paddingTop: insets.top + spacing.sm, paddingBottom: insets.bottom + spacing.lg }]}>
         <View style={styles.header}>
           <Text style={styles.title}>Share to story</Text>
-          <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close" style={styles.close}>
+          <Pressable
+            onPress={handleClose}
+            disabled={!!busy}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Close"
+            style={[styles.close, !!busy && { opacity: 0.4 }]}
+          >
             <Text style={styles.closeText}>✕</Text>
           </Pressable>
         </View>
 
         <View style={styles.previewArea}>
           <View style={[styles.previewFrame, { width: previewW, height: previewW * SHARE_ASPECT, borderRadius: radius.lg }]}>
-            {/* The capture target — the card at preview resolution. collapsable=false
-                keeps it a real native view so view-shot can rasterise it on Android. */}
-            <View ref={cardRef} collapsable={false}>
-              <MatchShareCard match={match} width={previewW} variant={variant} />
-            </View>
+            <MatchShareCard match={match} width={previewW} variant={variant} />
           </View>
+        </View>
+
+        {/* Off-screen, story-resolution capture target. Rendered (not display:none)
+            so it's laid out and view-shot can rasterise it; collapsable=false keeps
+            it a real native view on Android. */}
+        <View
+          ref={cardRef}
+          collapsable={false}
+          pointerEvents="none"
+          style={styles.captureHost}
+        >
+          <MatchShareCard
+            match={match}
+            width={CAPTURE_W}
+            variant={variant}
+            onPhotoLoad={() => setPhotoReady(true)}
+          />
         </View>
 
         {options.length > 1 ? (
@@ -137,11 +186,17 @@ export function ShareStorySheet({
         ) : null}
 
         <View style={styles.actions}>
-          <Button label="Share to story" onPress={onShare} loading={busy === 'share'} disabled={!!busy} style={styles.shareBtn} />
+          <Button
+            label="Share to story"
+            onPress={onShare}
+            loading={busy === 'share'}
+            disabled={!!busy || !canCapture}
+            style={styles.shareBtn}
+          />
           <Pressable
             onPress={onCopy}
-            disabled={!!busy}
-            style={({ pressed }) => [styles.copyBtn, pressed && { opacity: 0.7 }, !!busy && { opacity: 0.5 }]}
+            disabled={!!busy || !canCapture}
+            style={({ pressed }) => [styles.copyBtn, pressed && { opacity: 0.7 }, (!!busy || !canCapture) && { opacity: 0.5 }]}
           >
             {busy === 'copy' ? (
               <ActivityIndicator color={colors.white} />
@@ -152,7 +207,10 @@ export function ShareStorySheet({
         </View>
 
         <Text style={styles.hint} numberOfLines={2}>
-          {note ?? 'Opens your share sheet — pick Instagram, Snapchat, Messages or Save.'}
+          {note ??
+            (!canCapture
+              ? 'Preparing your photo…'
+              : 'Opens your share sheet — pick Instagram, Snapchat, Messages or Save.')}
         </Text>
       </View>
     </Modal>
@@ -175,6 +233,9 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 12 },
     elevation: 12,
   },
+  // Parked far off-screen so the user never sees it, but kept fully opaque and
+  // laid out — view-shot rasterises the layer, and opacity:0 would blank it.
+  captureHost: { position: 'absolute', left: -100000, top: 0 },
   toggle: { flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: radius.md, padding: 3, alignSelf: 'center', marginBottom: spacing.md },
   toggleItem: { paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, borderRadius: radius.sm },
   toggleItemActive: { backgroundColor: colors.primary },

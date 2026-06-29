@@ -56,10 +56,14 @@ export function MatchShareCard({
   match,
   width,
   variant = 'photo',
+  onPhotoLoad,
 }: {
   match: MatchCard;
   width: number;
   variant?: ShareVariant;
+  /** Fired when the background photo finishes (or fails) loading — used to gate
+   *  the capture so we never rasterise a half-loaded photo. */
+  onPhotoLoad?: () => void;
 }) {
   const uid = useId().replace(/:/g, '');
   const height = Math.round(width * SHARE_ASPECT);
@@ -94,94 +98,95 @@ export function MatchShareCard({
     match.title?.trim() ||
     (opponent ? `${win ? 'Win' : 'Loss'} vs ${opponent}` : win ? 'Match win' : 'Match');
 
-  // The body content is shared across variants; only the framing changes.
-  const body = (
-    <>
-      <View style={styles.topBar}>
-        <VolloWordmark size={s.wordmark} color={colors.white} />
-        <View
-          style={[
-            styles.pill,
-            {
-              backgroundColor: resultColor,
-              borderRadius: width,
-              paddingHorizontal: width * 0.04,
-              paddingVertical: width * 0.014,
-            },
-          ]}
-        >
-          <Text style={[styles.pillText, { fontSize: s.pill, fontFamily: fonts.display }]}>
-            {win ? 'WIN' : 'LOSS'}
-          </Text>
-        </View>
+  // Header (brand + result) and content (the stats) are composed differently per
+  // variant — bottom-anchored in the full-bleed card, stacked in the sticker.
+  const header = (
+    <View style={styles.topBar}>
+      <VolloWordmark size={s.wordmark} color={colors.white} />
+      <View
+        style={[
+          styles.pill,
+          {
+            backgroundColor: resultColor,
+            borderRadius: width,
+            paddingHorizontal: width * 0.04,
+            paddingVertical: width * 0.014,
+          },
+        ]}
+      >
+        <Text allowFontScaling={false} style={[styles.pillText, { fontSize: s.pill, fontFamily: fonts.display }]}>
+          {win ? 'WIN' : 'LOSS'}
+        </Text>
       </View>
+    </View>
+  );
 
-      <View style={{ flex: 1 }} />
-
-      <View style={{ gap: s.gap }}>
-        <View style={{ gap: width * 0.012 }}>
-          <Text style={[styles.title, { fontSize: s.title, fontFamily: fonts.display }, shadow]} numberOfLines={2}>
-            {headline}
+  const content = (
+    <View style={{ gap: s.gap }}>
+      <View style={{ gap: width * 0.012 }}>
+        <Text allowFontScaling={false} style={[styles.title, { fontSize: s.title, fontFamily: fonts.display }, shadow]} numberOfLines={2}>
+          {headline}
+        </Text>
+        {opponent && match.title ? (
+          <Text allowFontScaling={false} style={[styles.vs, { fontSize: s.vs, fontFamily: fonts.medium }, shadow]} numberOfLines={1}>
+            vs {opponent}
           </Text>
-          {opponent && match.title ? (
-            <Text style={[styles.vs, { fontSize: s.vs, fontFamily: fonts.medium }, shadow]} numberOfLines={1}>
-              vs {opponent}
-            </Text>
-          ) : null}
-        </View>
-
-        {/* Hero: the score line */}
-        <View>
-          <Text style={[styles.label, { fontSize: s.heroLabel }]}>SCORE</Text>
-          <Text
-            style={[styles.heroValue, { fontSize: s.heroValue, fontFamily: fonts.display }, shadow]}
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            minimumFontScale={0.5}
-          >
-            {formatScoreLine(match.score_array)}
-          </Text>
-        </View>
-
-        {/* Supporting stats, two per row */}
-        <View style={[styles.grid, { columnGap: s.gap, rowGap: s.gap * 0.8 }]}>
-          {stats.map((st) => (
-            <View key={st.label} style={styles.statBlock}>
-              <Text style={[styles.label, { fontSize: s.label }]}>{st.label.toUpperCase()}</Text>
-              <Text
-                style={[styles.value, { fontSize: s.value, fontFamily: fonts.display }, shadow]}
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.6}
-              >
-                {st.value}
-              </Text>
-            </View>
-          ))}
-        </View>
-
-        {match.stats && match.stats.rally_short + match.stats.rally_medium + match.stats.rally_long > 0 ? (
-          <RallyBar
-            short={match.stats.rally_short}
-            medium={match.stats.rally_medium}
-            long={match.stats.rally_long}
-            width={width}
-          />
         ) : null}
-
-        <View style={[styles.footer, { gap: width * 0.02, marginTop: width * 0.01 }]}>
-          <TennisBall size={s.ball} />
-          <Text style={[styles.footerText, { fontSize: s.footer }]} numberOfLines={1}>
-            {match.court_name ? `${match.court_name} · ` : ''}
-            {formatPlayedAt(match.played_at)}
-          </Text>
-          <View style={{ flex: 1, minWidth: width * 0.02 }} />
-          <Text style={[styles.footerBrand, { fontSize: s.footer }]} numberOfLines={1}>
-            tracked on Vollo
-          </Text>
-        </View>
       </View>
-    </>
+
+      {/* Hero: the score line */}
+      <View>
+        <Text allowFontScaling={false} style={[styles.label, { fontSize: s.heroLabel }]}>SCORE</Text>
+        <Text
+          allowFontScaling={false}
+          style={[styles.heroValue, { fontSize: s.heroValue, fontFamily: fonts.display }, shadow]}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.5}
+        >
+          {formatScoreLine(match.score_array)}
+        </Text>
+      </View>
+
+      {/* Supporting stats, two per row */}
+      <View style={[styles.grid, { columnGap: s.gap, rowGap: s.gap * 0.8 }]}>
+        {stats.map((st) => (
+          <View key={st.label} style={styles.statBlock}>
+            <Text allowFontScaling={false} style={[styles.label, { fontSize: s.label }]}>{st.label.toUpperCase()}</Text>
+            <Text
+              allowFontScaling={false}
+              style={[styles.value, { fontSize: s.value, fontFamily: fonts.display }, shadow]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.6}
+            >
+              {st.value}
+            </Text>
+          </View>
+        ))}
+      </View>
+
+      {match.stats && match.stats.rally_short + match.stats.rally_medium + match.stats.rally_long > 0 ? (
+        <RallyBar
+          short={match.stats.rally_short}
+          medium={match.stats.rally_medium}
+          long={match.stats.rally_long}
+          width={width}
+        />
+      ) : null}
+
+      <View style={[styles.footer, { gap: width * 0.02, marginTop: width * 0.01 }]}>
+        <TennisBall size={s.ball} />
+        <Text allowFontScaling={false} style={[styles.footerText, { fontSize: s.footer }]} numberOfLines={1}>
+          {match.court_name ? `${match.court_name} · ` : ''}
+          {formatPlayedAt(match.played_at)}
+        </Text>
+        <View style={{ flex: 1, minWidth: width * 0.02 }} />
+        <Text allowFontScaling={false} style={[styles.footerBrand, { fontSize: s.footer }]} numberOfLines={1}>
+          tracked on Vollo
+        </Text>
+      </View>
+    </View>
   );
 
   if (sticker) {
@@ -189,13 +194,9 @@ export function MatchShareCard({
     // stays legible dropped onto any story background.
     return (
       <View style={{ width, height, justifyContent: 'center', backgroundColor: 'transparent' }}>
-        <View
-          style={[
-            styles.stickerPanel,
-            { padding: pad, borderRadius: width * 0.08, gap: width * 0.02 },
-          ]}
-        >
-          {body}
+        <View style={[styles.stickerPanel, { padding: pad, borderRadius: width * 0.08, gap: s.gap }]}>
+          {header}
+          {content}
         </View>
       </View>
     );
@@ -204,7 +205,7 @@ export function MatchShareCard({
   return (
     <View style={{ width, height, backgroundColor: colors.black, overflow: 'hidden' }}>
       {usePhoto ? (
-        <Image source={{ uri: match.photo_url! }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+        <Image source={{ uri: match.photo_url! }} style={StyleSheet.absoluteFill} resizeMode="cover" onLoadEnd={onPhotoLoad} />
       ) : (
         <Svg width={width} height={height} style={StyleSheet.absoluteFill}>
           <Defs>
@@ -232,7 +233,11 @@ export function MatchShareCard({
         <Rect x="0" y="0" width={width} height={height} fill={`url(#scrim${uid})`} />
       </Svg>
 
-      <View style={{ flex: 1, padding: pad }}>{body}</View>
+      <View style={{ flex: 1, padding: pad }}>
+        {header}
+        <View style={{ flex: 1 }} />
+        {content}
+      </View>
     </View>
   );
 }
@@ -255,7 +260,7 @@ function RallyBar({
     n > 0 ? <View key={color} style={{ flex: n / total, backgroundColor: color }} /> : null;
   return (
     <View style={{ gap: width * 0.012 }}>
-      <Text style={[styles.label, { fontSize: width * 0.03 }]}>RALLY LENGTH</Text>
+      <Text allowFontScaling={false} style={[styles.label, { fontSize: width * 0.03 }]}>RALLY LENGTH</Text>
       <View style={{ flexDirection: 'row', height: h, borderRadius: h, overflow: 'hidden' }}>
         {seg(short, colors.primary)}
         {seg(medium, colors.accent)}
