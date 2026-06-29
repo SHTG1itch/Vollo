@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Alert, Image, KeyboardAvoidingView, Platform, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { Alert, Image, KeyboardAvoidingView, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { api, ApiError } from '../api/client';
@@ -11,6 +11,7 @@ import { SurfaceBadge } from '../components/SurfaceBadge';
 import { ProgressBar, RallyDistribution, SplitBar } from '../components/charts';
 import { KudosButton } from '../components/KudosButton';
 import { ConfettiBurst } from '../components/ConfettiBurst';
+import { ShareStorySheet } from '../components/ShareStorySheet';
 import { colors, font, fonts, radius, spacing } from '../theme';
 import type { MatchCard, MatchStats } from '../types';
 import { formatScoreLine, timeAgo } from '../utils/format';
@@ -33,6 +34,8 @@ export function MatchDetailScreen({ route, navigation }: Props) {
   // Celebrate your own win once when the match opens (not on every refresh).
   const [celebrate, setCelebrate] = useState(false);
   const celebratedRef = useRef(false);
+  // Strava-style "share to story" overlay.
+  const [shareOpen, setShareOpen] = useState(false);
 
   // Reset the one-shot gate when the screen is reused for a DIFFERENT match
   // (new route params on the same component instance — e.g. a deep link or
@@ -83,20 +86,6 @@ export function MatchDetailScreen({ route, navigation }: Props) {
     if (!username) return;
     if (username === user?.username) navigation.navigate('Tabs', { screen: 'Me' });
     else navigation.navigate('UserProfile', { username });
-  };
-
-  const share = async () => {
-    if (!match) return;
-    const opp = match.opponent_display_name ?? match.opponent_name ?? 'an opponent';
-    try {
-      await Share.share({
-        message: `${match.author_display_name} ${match.result === 'win' ? 'won' : 'lost'} ${formatScoreLine(
-          match.score_array,
-        )} vs ${opp} — tracked on Vollo 🎾`,
-      });
-    } catch {
-      /* user dismissed the share sheet */
-    }
   };
 
   const toggleKudos = async () => {
@@ -233,7 +222,7 @@ export function MatchDetailScreen({ route, navigation }: Props) {
           <View style={styles.actions}>
             <KudosButton active={match.viewer_has_kudos ?? false} count={match.kudos_count} onPress={toggleKudos} />
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-              <Button label="Share" variant="secondary" onPress={share} style={{ height: 38, paddingHorizontal: spacing.md }} />
+              <Button label="Share" variant="secondary" onPress={() => setShareOpen(true)} style={{ height: 38, paddingHorizontal: spacing.md }} />
               {isOwner ? <Button label="Delete" variant="danger" onPress={remove} style={{ height: 38, paddingHorizontal: spacing.md }} /> : null}
             </View>
           </View>
@@ -287,6 +276,7 @@ export function MatchDetailScreen({ route, navigation }: Props) {
         <View style={{ height: spacing.xxl }} />
       </ScrollView>
       <ConfettiBurst play={celebrate} onDone={() => setCelebrate(false)} />
+      <ShareStorySheet match={match} visible={shareOpen} onClose={() => setShareOpen(false)} />
     </KeyboardAvoidingView>
   );
 }
