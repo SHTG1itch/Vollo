@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { InteractionManager, Pressable, StyleSheet, Text, View } from 'react-native';
+import { InteractionManager, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import MapView, { Marker, Polygon, UrlTile, type Region } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
@@ -8,8 +8,14 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList, TabParamList } from '../navigation/types';
 import { api } from '../api/client';
 import { useAuth } from '../store/auth';
+import { OsmMap, type LatLng, type OsmMapHandle, type OsmMarker, type OsmPolygon } from '../components/OsmMap';
 import { colors, font, fonts, radius, shadow, spacing, surfaceColors, TERRITORY_STROKE } from '../theme';
 import type { Court, Territory } from '../types';
+
+// Android can't run react-native-maps without a Google Maps API key (it would
+// crash), so there it renders the same OSM map via a keyless Leaflet WebView.
+// iOS keeps using react-native-maps (Apple Maps engine, no key needed).
+const USE_WEB_MAP = Platform.OS === 'android';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -170,11 +176,16 @@ export function MapScreen() {
   const route = useRoute<RouteProp<TabParamList, 'Map'>>();
   const insets = useSafeAreaInsets();
   const user = useAuth((s) => s.user);
-  const mapRef = useRef<MapView>(null);
+  // Typed as the shared handle so the same ref drives the native MapView (iOS) and
+  // the WebView map (Android) — both expose animateToRegion.
+  const mapRef = useRef<OsmMapHandle>(null);
   const [territories, setTerritories] = useState<Territory[]>([]);
   const [courts, setCourts] = useState<Court[]>([]);
   const [selected, setSelected] = useState<Territory | null>(null);
   const [locationOff, setLocationOff] = useState(false);
+  // Last known position for the Android WebView map's "you are here" dot (iOS uses
+  // react-native-maps' built-in showsUserLocation instead).
+  const [userLoc, setUserLoc] = useState<LatLng | null>(null);
   // Drives the zoom gate: true only when zoomed in enough to render court pins.
   const [zoomedIn, setZoomedIn] = useState(true);
   // While the user is actively panning/zooming we unmount ALL native overlays
@@ -285,6 +296,7 @@ export function MapScreen() {
         if (status === 'granted') {
           const pos = await Location.getCurrentPositionAsync({});
           start = { ...DEFAULT_REGION, latitude: pos.coords.latitude, longitude: pos.coords.longitude };
+          setUserLoc({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
           // Programmatic move via the ref — don't drive the map from state.
           mapRef.current?.animateToRegion(start, 600);
         } else {
@@ -345,6 +357,7 @@ export function MapScreen() {
       setLocationOff(false);
       const pos = await Location.getCurrentPositionAsync({});
       const region = { ...DEFAULT_REGION, latitude: pos.coords.latitude, longitude: pos.coords.longitude };
+      setUserLoc({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
       mapRef.current?.animateToRegion(region, 600);
       void load(region, { force: true });
     } catch {
@@ -448,51 +461,114 @@ export function MapScreen() {
 
   const selectedColors = selected ? zoneColors(selected, selected.user_id === user?.id) : null;
 
+  // Android (WebView) overlay sets. Unlike the native MapView these don't churn
+  // native views, so they're NOT dropped during a gesture (the `interacting` gate)
+  // — Leaflet redraws cheaply and the overlays stay put while panning. Still zoom-
+  // gated + capped like iOS so a dense metro can't overload the page.
+  const androidMarkers = useMemo<OsmMarker[]>(() => {
+    if (!USE_WEB_MAP || !zoomedIn) return [];
+    return courts.slice(0, MAX_MARKERS).map((c) => ({
+      id: c.id,
+      latitude: c.lat,
+      longitude: c.lng,
+      color: surfaceColors[c.surface],
+      title: c.name,
+      description:
+        c.court_count > 1
+          ? `${c.court_count} courts${c.city ? ` · ${c.city}` : ''}`
+          : c.city ?? undefined,
+    }));
+  }, [courts, zoomedIn]);
+
+  const androidPolygons = useMemo<OsmPolygon[]>(() => {
+    if (!USE_WEB_MAP) return [];
+    const shown = territories.slice(0, MAX_TERRITORIES);
+    if (selected && !shown.some((t) => t.id === selected.id)) {
+      const extra = territories.find((t) => t.id === selected.id);
+      if (extra) shown.push(extra);
+    }
+    return shown.map((t) => {
+      const { stroke } = zoneColors(t, t.user_id === user?.id);
+      return {
+        id: t.id,
+        coordinates: polygonCoords(t),
+        strokeColor: stroke,
+        fillColor: stroke,
+        fillOpacity: 0.4,
+        strokeWidth: 2,
+      };
+    });
+  }, [territories, selected, user?.id]);
+
   return (
     <View style={styles.container}>
-      <MapView
-        ref={mapRef}
-        style={StyleSheet.absoluteFill}
-        initialRegion={DEFAULT_REGION}
-        onRegionChange={onRegionChange}
-        onRegionChangeComplete={onRegionChangeComplete}
-        onTouchStart={() => { touchingRef.current = true; }}
-        onTouchEnd={() => { touchingRef.current = false; }}
-        onTouchCancel={() => { touchingRef.current = false; }}
-        mapType="none"
-        showsUserLocation
-        rotateEnabled={false}
-        pitchEnabled={false}
-        moveOnMarkerPress={false}
-        toolbarEnabled={false}
-        // Bound the zoom range: zooming far out would request a huge bbox (and a
-        // world of raster tiles + every territory) — a memory/crash risk — and
-        // the deep zoom past tile coverage just wastes work.
-        minZoomLevel={3}
-        maxZoomLevel={19}
-        // Don't animate to the user dot on first fix; we drive the camera ourselves.
-        followsUserLocation={false}
-      >
-        <UrlTile urlTemplate={OSM_TILE_URL} maximumZ={19} minimumZ={1} flipY={false} zIndex={-1} />
+      {USE_WEB_MAP ? (
+        // Android: keyless OSM map (Leaflet in a WebView). Same overlays, no Google
+        // Maps API key, no cost. The native-view-churn mitigations the iOS path
+        // needs (interacting gate, tracksViewChanges) don't apply here.
+        <OsmMap
+          ref={mapRef}
+          style={StyleSheet.absoluteFill}
+          initialRegion={DEFAULT_REGION}
+          minZoom={3}
+          maxZoom={19}
+          tileUrl={OSM_TILE_URL}
+          markers={androidMarkers}
+          polygons={androidPolygons}
+          userLocation={userLoc}
+          onRegionChange={onRegionChange}
+          onRegionChangeComplete={onRegionChangeComplete}
+          onMarkerPress={openCourt}
+          onPolygonPress={(id) => {
+            const t = territories.find((x) => x.id === id);
+            if (t) setSelected(t);
+          }}
+        />
+      ) : (
+        <MapView
+          ref={mapRef as unknown as React.RefObject<MapView>}
+          style={StyleSheet.absoluteFill}
+          initialRegion={DEFAULT_REGION}
+          onRegionChange={onRegionChange}
+          onRegionChangeComplete={onRegionChangeComplete}
+          onTouchStart={() => { touchingRef.current = true; }}
+          onTouchEnd={() => { touchingRef.current = false; }}
+          onTouchCancel={() => { touchingRef.current = false; }}
+          mapType="none"
+          showsUserLocation
+          rotateEnabled={false}
+          pitchEnabled={false}
+          moveOnMarkerPress={false}
+          toolbarEnabled={false}
+          // Bound the zoom range: zooming far out would request a huge bbox (and a
+          // world of raster tiles + every territory) — a memory/crash risk — and
+          // the deep zoom past tile coverage just wastes work.
+          minZoomLevel={3}
+          maxZoomLevel={19}
+          // Don't animate to the user dot on first fix; we drive the camera ourselves.
+          followsUserLocation={false}
+        >
+          <UrlTile urlTemplate={OSM_TILE_URL} maximumZ={19} minimumZ={1} flipY={false} zIndex={-1} />
 
-        {polygons.map(({ t, coords, fill, stroke }) => (
-          <Polygon
-            key={t.id}
-            coordinates={coords}
-            fillColor={fill}
-            strokeColor={stroke}
-            strokeWidth={2}
-            tappable
-            onPress={() => setSelected(t)}
-          />
-        ))}
+          {polygons.map(({ t, coords, fill, stroke }) => (
+            <Polygon
+              key={t.id}
+              coordinates={coords}
+              fillColor={fill}
+              strokeColor={stroke}
+              strokeWidth={2}
+              tappable
+              onPress={() => setSelected(t)}
+            />
+          ))}
 
-        {visibleCourts.map((court) => (
-          // Key includes surface so a pin recolours on a surface change despite
-          // tracksViewChanges={false} (which otherwise freezes the native pin).
-          <CourtMarker key={`${court.id}:${court.surface}`} court={court} onPress={openCourt} />
-        ))}
-      </MapView>
+          {visibleCourts.map((court) => (
+            // Key includes surface so a pin recolours on a surface change despite
+            // tracksViewChanges={false} (which otherwise freezes the native pin).
+            <CourtMarker key={`${court.id}:${court.surface}`} court={court} onPress={openCourt} />
+          ))}
+        </MapView>
+      )}
 
       {/* Zoomed too far out to show pins without choking the map */}
       {!zoomedIn && !locationOff ? (

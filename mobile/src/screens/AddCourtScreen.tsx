@@ -10,12 +10,17 @@ import type { RootStackParamList } from '../navigation/types';
 import { api, ApiError } from '../api/client';
 import { Button, Card, Field } from '../components/ui';
 import { SurfaceBadge } from '../components/SurfaceBadge';
+import { OsmMap, type LatLng, type OsmMapHandle } from '../components/OsmMap';
 import { colors, font, radius, shadow, spacing, surfaceColors, surfaceColorsSoft } from '../theme';
 import type { Surface } from '../types';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AddCourt'>;
 const SURFACES: Surface[] = ['hard', 'clay', 'grass', 'indoor'];
 const OSM_TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+
+// Android can't run react-native-maps without a Google Maps API key (it crashes),
+// so there the map is a keyless Leaflet WebView. iOS keeps using react-native-maps.
+const USE_WEB_MAP = Platform.OS === 'android';
 
 const DEFAULT_REGION: Region = {
   latitude: 40.78,
@@ -27,7 +32,9 @@ const DEFAULT_REGION: Region = {
 export function AddCourtScreen({ route, navigation }: Props) {
   const insets = useSafeAreaInsets();
   const origin = route.params?.origin ?? 'courts';
-  const mapRef = useRef<MapView>(null);
+  // Shared handle type so one ref drives both the native MapView (iOS) and the
+  // WebView map (Android).
+  const mapRef = useRef<OsmMapHandle>(null);
   // The court's coordinates are wherever the centre pin sits — tracked off-render
   // so panning the map never re-renders the form.
   const center = useRef<{ lat: number; lng: number }>({
@@ -44,6 +51,9 @@ export function AddCourtScreen({ route, navigation }: Props) {
   const [searching, setSearching] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [locating, setLocating] = useState(false);
+  // Last known position for the Android WebView map's location dot (iOS uses
+  // react-native-maps' built-in showsUserLocation).
+  const [userLoc, setUserLoc] = useState<LatLng | null>(null);
 
   // Render the map at the seeded coordinate immediately (initialRegion is only
   // honored on first mount), so the centre pin marks the right place even if the
@@ -68,6 +78,7 @@ export function AddCourtScreen({ route, navigation }: Props) {
         const pos = await Location.getCurrentPositionAsync({});
         const r = { ...DEFAULT_REGION, latitude: pos.coords.latitude, longitude: pos.coords.longitude };
         center.current = { lat: r.latitude, lng: r.longitude };
+        setUserLoc({ latitude: r.latitude, longitude: r.longitude });
         mapRef.current?.animateToRegion(r, 350);
       } catch {
         /* keep default region */
@@ -87,6 +98,7 @@ export function AddCourtScreen({ route, navigation }: Props) {
       const pos = await Location.getCurrentPositionAsync({});
       const r = { ...DEFAULT_REGION, latitude: pos.coords.latitude, longitude: pos.coords.longitude };
       center.current = { lat: r.latitude, lng: r.longitude };
+      setUserLoc({ latitude: r.latitude, longitude: r.longitude });
       mapRef.current?.animateToRegion(r, 350);
     } catch {
       /* ignore */
@@ -170,17 +182,31 @@ export function AddCourtScreen({ route, navigation }: Props) {
   return (
     <View style={styles.container}>
       <View style={styles.mapWrap}>
-        <MapView
-          ref={mapRef}
-          style={StyleSheet.absoluteFill}
-          initialRegion={initialRegion}
-          onRegionChangeComplete={onRegionChangeComplete}
-          mapType="none"
-          showsUserLocation
-          rotateEnabled={false}
-        >
-          <UrlTile urlTemplate={OSM_TILE_URL} maximumZ={19} flipY={false} zIndex={-1} />
-        </MapView>
+        {USE_WEB_MAP ? (
+          // Android: keyless OSM map (Leaflet in a WebView). The fixed centre pin
+          // below is a plain RN overlay, so the court still goes wherever the map
+          // is centred — onRegionChangeComplete tracks that centre identically.
+          <OsmMap
+            ref={mapRef}
+            style={StyleSheet.absoluteFill}
+            initialRegion={initialRegion}
+            tileUrl={OSM_TILE_URL}
+            userLocation={userLoc}
+            onRegionChangeComplete={onRegionChangeComplete}
+          />
+        ) : (
+          <MapView
+            ref={mapRef as unknown as React.RefObject<MapView>}
+            style={StyleSheet.absoluteFill}
+            initialRegion={initialRegion}
+            onRegionChangeComplete={onRegionChangeComplete}
+            mapType="none"
+            showsUserLocation
+            rotateEnabled={false}
+          >
+            <UrlTile urlTemplate={OSM_TILE_URL} maximumZ={19} flipY={false} zIndex={-1} />
+          </MapView>
+        )}
 
         {/* Fixed centre pin — the court goes wherever this sits. */}
         <View pointerEvents="none" style={styles.pinWrap}>
