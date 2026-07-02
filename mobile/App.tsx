@@ -9,6 +9,7 @@ import { DefaultTheme, NavigationContainer, type Theme } from '@react-navigation
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { navigationRef, navigateFromPush, flushPendingPush } from './src/navigation/ref';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
+import { ToastHost } from './src/components/Toast';
 import { useAuth } from './src/store/auth';
 import { useNotifications } from './src/store/notifications';
 import { registerForPush } from './src/services/push';
@@ -89,6 +90,7 @@ export default function App() {
           <NavigationContainer ref={navigationRef} theme={navTheme} onReady={flushPendingPush}>
             <RootNavigator />
           </NavigationContainer>
+          <ToastHost />
         </ErrorBoundary>
       </SafeAreaProvider>
     </GestureHandlerRootView>

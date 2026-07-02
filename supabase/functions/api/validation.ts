@@ -2,6 +2,30 @@ import { z } from 'zod';
 
 export const surfaceSchema = z.enum(['hard', 'clay', 'grass', 'indoor']);
 
+// Media URLs must point at our own Storage (or a Google-hosted avatar carried
+// over from OAuth sign-up, which EditProfile re-sends verbatim on save) —
+// persisting arbitrary origins would let a client embed tracking pixels or
+// later-swappable third-party content into every viewer's feed and profile.
+const SUPABASE_URL = (Deno.env.get('SUPABASE_URL') ?? '').replace(/\/$/, '');
+function isAllowedMediaUrl(v: string): boolean {
+  const isStorage = SUPABASE_URL
+    ? v.startsWith(`${SUPABASE_URL}/storage/v1/object/`)
+    : /^https:\/\/[a-z0-9-]+\.supabase\.co\/storage\/v1\/object\//.test(v);
+  if (isStorage) return true;
+  try {
+    const host = new URL(v).hostname;
+    return host === 'googleusercontent.com' || host.endsWith('.googleusercontent.com');
+  } catch {
+    return false;
+  }
+}
+const mediaUrlSchema = z
+  .string()
+  .trim()
+  .url()
+  .max(500)
+  .refine(isAllowedMediaUrl, { message: 'URL must point to Vollo media storage' });
+
 // Server-side sign-in proxy: the client posts a username (or email) + password and
 // we resolve the email internally, so the email never travels back to the client.
 // Kept lenient on the identifier (could be either) and matched to Supabase Auth's
@@ -57,7 +81,7 @@ export const createMatchSchema = z
     title: z.string().trim().max(80).optional(),
     // A single proof-of-play photo (the scoreboard, the court). Public URL the
     // client uploaded to Storage; the edge function only persists the string.
-    photo_url: z.string().trim().url().max(500).optional(),
+    photo_url: mediaUrlSchema.optional(),
     rpe_index: z.number().int().min(1).max(10).optional(),
     duration_minutes: z.number().int().min(1).max(600).optional(),
     notes: z.string().trim().max(500).optional(),
@@ -172,8 +196,8 @@ export const equipmentSchema = z
 export const updateProfileSchema = z.object({
   display_name: z.string().trim().min(1).max(60).optional(),
   bio: z.string().trim().max(280).optional(),
-  avatar_url: z.string().trim().url().max(500).optional(),
-  cover_url: z.string().trim().url().max(500).optional(),
+  avatar_url: mediaUrlSchema.optional(),
+  cover_url: mediaUrlSchema.optional(),
   dominant_hand: z.enum(['right', 'left']).optional(),
   // Signature colour as #RRGGBB. Empty string clears it back to "unset" so the
   // client can reset to the default hashed hue.
@@ -282,7 +306,8 @@ export const userSearchQuerySchema = z.object({
 
 export const commentsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
-  before: z.string().datetime().optional(),
+  // Composite "<ISO>~<uuid>" keyset cursor (bare ISO accepted); parsed in-route.
+  before: z.string().max(100).optional(),
 });
 
 export type CreateMatchInput = z.infer<typeof createMatchSchema>;

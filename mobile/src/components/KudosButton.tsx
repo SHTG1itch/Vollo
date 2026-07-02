@@ -8,6 +8,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { colors, font, fonts, radius, spacing } from '../theme';
 import { formatCount } from '../utils/format';
+import { tapLight } from '../lib/haptics';
 
 /**
  * The tennis-ball "Kudos" button. A tap fires the bounce animation immediately
@@ -28,11 +29,18 @@ export function KudosButton({
 
   const handle = () => {
     scale.value = withSequence(withSpring(1.5, { damping: 4, stiffness: 220 }), withSpring(1));
+    tapLight();
     onPress();
   };
 
   return (
-    <Pressable onPress={handle} style={[styles.btn, active && styles.btnActive]} hitSlop={8}>
+    <Pressable
+      onPress={handle}
+      style={[styles.btn, active && styles.btnActive]}
+      hitSlop={8}
+      accessibilityRole="button"
+      accessibilityLabel={active ? 'Remove kudos' : 'Give kudos'}
+    >
       <Animated.Text style={[styles.ball, animStyle, !active && styles.ballInactive]}>🎾</Animated.Text>
       <Text style={[styles.count, active && styles.countActive]}>{formatCount(count)}</Text>
     </Pressable>

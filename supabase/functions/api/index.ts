@@ -145,6 +145,31 @@ function clientIp(c: Context): string {
   return (c.req.header('x-forwarded-for')?.split(',')[0]?.trim()) || 'unknown';
 }
 
+// Durable brute-force throttle for sign-in: failed attempts are counted in
+// Postgres (per client IP and per target identifier) so the limit holds across
+// the whole edge fleet — the in-memory limiter above is only per-isolate.
+const LOGIN_FAILURE_WINDOW = "15 minutes";
+const LOGIN_MAX_FAILURES = 10;
+
+async function assertLoginNotThrottled(keys: string[]): Promise<void> {
+  const row = await queryOne<{ c: string }>(
+    `SELECT COUNT(*) AS c FROM login_attempts
+      WHERE key = ANY($1) AND attempted_at > now() - $2::interval`,
+    [keys, LOGIN_FAILURE_WINDOW],
+  );
+  if (Number(row?.c ?? 0) >= LOGIN_MAX_FAILURES) {
+    throw ApiError.tooManyRequests('Too many sign-in attempts, please try again later');
+  }
+}
+
+async function recordLoginFailure(keys: string[]): Promise<void> {
+  await query('INSERT INTO login_attempts (key) SELECT unnest($1::text[])', [keys]).catch(() => {});
+  // Opportunistic prune so the table never grows unbounded.
+  if (Math.random() < 0.02) {
+    await query(`DELETE FROM login_attempts WHERE attempted_at < now() - interval '1 hour'`).catch(() => {});
+  }
+}
+
 // Opaque keyset cursor (last seen played_at + id). Content is ASCII (ISO + uuid).
 interface Cursor { t: string; id: string }
 function encodeCursor(c: Cursor): string {
@@ -278,26 +303,34 @@ app.post('/api/auth/login', async (c) => {
   if (!loginLimiter(clientIp(c))) throw ApiError.tooManyRequests('Too many sign-in attempts, please try again shortly');
   const { identifier, password } = loginSchema.parse(await jsonBody(c));
 
+  // Throttle on both the source IP and the targeted account, so neither a
+  // single-IP spray nor a distributed attack on one identifier gets free tries.
+  const throttleKeys = [`ip:${clientIp(c)}`, `id:${identifier.toLowerCase()}`];
+  await assertLoginNotThrottled(throttleKeys);
+
   let email: string | null = identifier.includes('@') ? identifier : null;
   if (!email) {
     const row = await queryOne<{ email: string }>('SELECT email FROM users WHERE lower(username) = lower($1)', [identifier]);
     email = row?.email ?? null;
   }
-  const invalid = () => new ApiError(401, 'invalid_credentials', 'Invalid username or password');
-  if (!email) throw invalid();
+  const invalid = async () => {
+    await recordLoginFailure(throttleKeys);
+    return new ApiError(401, 'invalid_credentials', 'Invalid username or password');
+  };
+  if (!email) throw await invalid();
 
   const { data, error } = await authClient.auth.signInWithPassword({ email, password });
   if (error) {
     // Unconfirmed email is a distinct, actionable state — surface it so the app
-    // can tell the user to check their inbox. Everything else collapses to the
-    // generic invalid-credentials message.
+    // can tell the user to check their inbox (and don't count it as a guess).
+    // Everything else collapses to the generic invalid-credentials message.
     const code = (error as { code?: string }).code;
     if (code === 'email_not_confirmed') {
       throw new ApiError(403, 'email_not_confirmed', 'Please confirm your email before signing in — check your inbox.');
     }
-    throw invalid();
+    throw await invalid();
   }
-  if (!data.session) throw invalid();
+  if (!data.session) throw await invalid();
 
   const s = data.session;
   return c.json({
@@ -661,7 +694,14 @@ app.delete('/api/matches/:id', requireAuth, async (c) => {
   });
 
   if (counted && match.court_id) {
-    await recomputeAfterMatch({ courtId: match.court_id, loggerUserId: userId, previousControllerId });
+    // Post-commit side effect: the row is already gone, so a recompute failure
+    // must not turn a successful delete into a 500 (the 6-hourly sweep is the
+    // backstop) — same isolation as create/verify.
+    try {
+      await recomputeAfterMatch({ courtId: match.court_id, loggerUserId: userId, previousControllerId });
+    } catch (err) {
+      console.error('post-delete territory recompute failed', err);
+    }
   }
   return c.body(null, 204);
 });
@@ -705,20 +745,33 @@ app.get('/api/matches/:id/comments', optionalAuth, async (c) => {
   const params: unknown[] = [id];
   let extra = '';
   if (before) {
-    params.push(before);
-    extra = `AND c.created_at < $${params.length}`;
+    // Composite "<ISO>~<uuid>" keyset cursor (a bare timestamp is still
+    // accepted) — a timestamp alone drops/duplicates rows on created_at ties.
+    const [ts, cid] = before.split('~');
+    if (Number.isNaN(Date.parse(ts))) throw ApiError.badRequest('Invalid cursor');
+    params.push(ts);
+    if (cid) {
+      params.push(cid);
+      extra = `AND (c.created_at, c.id) < ($2::timestamptz, $3::uuid)`;
+    } else {
+      extra = `AND c.created_at < $2::timestamptz`;
+    }
   }
   params.push(limit);
-  const rows = await query(
+  const rows = await query<{ id: string; created_at: string }>(
     `SELECT c.id, c.body, c.created_at, c.user_id,
             u.username, u.display_name, u.avatar_url
        FROM comments c JOIN users u ON u.id = c.user_id
       WHERE c.match_id = $1 ${extra}
-      ORDER BY c.created_at DESC
+      ORDER BY c.created_at DESC, c.id DESC
       LIMIT $${params.length}`,
     params,
   );
-  return c.json({ comments: rows.reverse() });
+  const last = rows.length === limit ? rows[rows.length - 1] : null;
+  return c.json({
+    comments: rows.slice().reverse(),
+    next_cursor: last ? `${new Date(last.created_at).toISOString()}~${last.id}` : null,
+  });
 });
 
 app.post('/api/matches/:id/comments', requireAuth, async (c) => {
@@ -1197,13 +1250,6 @@ app.post('/api/users/me/push-token', requireAuth, async (c) => {
   return c.json({ ok: true }, 201);
 });
 
-app.delete('/api/users/me/push-token', requireAuth, async (c) => {
-  const userId = uid(c);
-  const token = (await jsonBody<{ token?: string }>(c)).token;
-  if (token) await query('DELETE FROM push_tokens WHERE user_id = $1 AND token = $2', [userId, token]);
-  return c.body(null, 204);
-});
-
 app.delete('/api/users/me', requireAuth, async (c) => {
   const userId = uid(c);
   const row = await queryOne<{ auth_id: string | null }>('SELECT auth_id FROM users WHERE id = $1', [userId]);
@@ -1298,11 +1344,6 @@ app.get('/api/users/:username/head-to-head', async (c) => {
   const id = await resolveUserId(c.req.param('username'));
   return c.json({ head_to_head: await getHeadToHead(id) });
 });
-app.get('/api/users/:username/territories', async (c) => {
-  const id = await resolveUserId(c.req.param('username'));
-  return c.json({ territories: await getUserTerritories(id) });
-});
-
 // ─── Notifications ─────────────────────────────────────────────────────────
 app.get('/api/notifications', requireAuth, async (c) => {
   const userId = uid(c);

@@ -14,6 +14,7 @@ import { SafeAreaView, type Edge } from 'react-native-safe-area-context';
 import { colors, font, fonts, radius, shadow, spacing } from '../theme';
 import { CountUp } from './CountUp';
 import { PressableBounce } from './PressableBounce';
+import { tapLight } from '../lib/haptics';
 
 export function Screen({
   children,
@@ -163,7 +164,12 @@ export function SegmentedControl<T extends string>({
         return (
           <Pressable
             key={opt.value}
-            onPress={() => onChange(opt.value)}
+            onPress={() => {
+              if (!active) tapLight();
+              onChange(opt.value);
+            }}
+            accessibilityRole="button"
+            accessibilityState={{ selected: active }}
             style={[styles.segmentItem, active && styles.segmentItemActive]}
           >
             <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{opt.label}</Text>
