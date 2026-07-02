@@ -89,8 +89,12 @@ function isGoogleNativeAvailable(): boolean {
 /** True only when Google auth is enabled, a real web client id is configured, AND
  *  the native module is actually available in this binary — drives whether the
  *  "Continue with Google" button is shown at all. In Expo Go this is false (the
- *  native SDK isn't present), so the button is hidden rather than failing on tap. */
+ *  native SDK isn't present), so the button is hidden rather than failing on tap.
+ *  On iOS the native sheet additionally needs its own iOS client id (the app.json
+ *  iosUrlScheme is still a placeholder), so the button stays hidden there until
+ *  one is provisioned rather than failing at sign-in time. */
 export function isGoogleConfigured(): boolean {
+  if (Platform.OS === 'ios' && GOOGLE_IOS_CLIENT_ID.length === 0) return false;
   return GOOGLE_AUTH_ENABLED && GOOGLE_WEB_CLIENT_ID.length > 0 && isGoogleNativeAvailable();
 }
 
