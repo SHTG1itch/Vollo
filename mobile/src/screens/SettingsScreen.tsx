@@ -7,7 +7,6 @@ import { api, ApiError } from '../api/client';
 import { useAuth } from '../store/auth';
 import { Button, Card, Muted } from '../components/ui';
 import { showToast } from '../components/Toast';
-import { notifyError } from '../lib/haptics';
 import { colors, font, fonts, spacing } from '../theme';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -39,7 +38,6 @@ export function SettingsScreen() {
               await api.deleteAccount();
               await logout();
             } catch (e) {
-              notifyError();
               showToast(e instanceof ApiError ? e.message : 'Could not delete account — please try again.', 'error');
             } finally {
               setDeleting(false);

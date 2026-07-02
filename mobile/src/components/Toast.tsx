@@ -7,6 +7,7 @@ import { Pressable, StyleSheet, Text } from 'react-native';
 import Animated, { FadeOutUp, SlideInUp } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { create } from 'zustand';
+import { notifyError, notifySuccess } from '../lib/haptics';
 import { colors, font, fonts, radius, shadow, spacing } from '../theme';
 
 export type ToastType = 'success' | 'error' | 'info';
@@ -28,8 +29,12 @@ const useToast = create<ToastState>()((set) => ({
   hide: () => set({ message: null }),
 }));
 
-/** Show a transient, non-blocking toast. Safe to call from anywhere. */
+/** Show a transient, non-blocking toast. Safe to call from anywhere. Fires the
+ *  matching notification haptic itself so call sites never have to pair the
+ *  two (and can't forget to). */
 export function showToast(message: string, type: ToastType = 'info'): void {
+  if (type === 'success') notifySuccess();
+  else if (type === 'error') notifyError();
   useToast.getState().show(message, type);
 }
 

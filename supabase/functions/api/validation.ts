@@ -13,8 +13,9 @@ function isAllowedMediaUrl(v: string): boolean {
     : /^https:\/\/[a-z0-9-]+\.supabase\.co\/storage\/v1\/object\//.test(v);
   if (isStorage) return true;
   try {
-    const host = new URL(v).hostname;
-    return host === 'googleusercontent.com' || host.endsWith('.googleusercontent.com');
+    const u = new URL(v);
+    if (u.protocol !== 'https:') return false;
+    return u.hostname === 'googleusercontent.com' || u.hostname.endsWith('.googleusercontent.com');
   } catch {
     return false;
   }
@@ -306,7 +307,7 @@ export const userSearchQuerySchema = z.object({
 
 export const commentsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
-  // Composite "<ISO>~<uuid>" keyset cursor (bare ISO accepted); parsed in-route.
+  // Composite "<ISO>~<uuid>" keyset cursor; both halves validated in-route.
   before: z.string().max(100).optional(),
 });
 

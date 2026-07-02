@@ -7,7 +7,7 @@ import { useAuth } from '../store/auth';
 import { Avatar, Button, Card, Field, Muted } from '../components/ui';
 import { pickAndUploadProfileImage } from '../lib/uploadImage';
 import { showToast } from '../components/Toast';
-import { notifyError, notifySuccess, tapLight } from '../lib/haptics';
+import { tapLight } from '../lib/haptics';
 import { colors, font, fonts, radius, spacing } from '../theme';
 import type { GeocodeResult } from '../types';
 
@@ -82,7 +82,6 @@ export function EditProfileScreen({ navigation }: Props) {
       const url = await pickAndUploadProfileImage('avatar');
       if (url) setAvatarUrl(url); // save() persists it via api.updateProfile
     } catch (e) {
-      notifyError();
       showToast(e instanceof Error ? e.message : 'Upload failed — please try again.', 'error');
     } finally {
       setUploadingAvatar(false);
@@ -96,7 +95,6 @@ export function EditProfileScreen({ navigation }: Props) {
       const url = await pickAndUploadProfileImage('cover');
       if (url) setCoverUrl(url);
     } catch (e) {
-      notifyError();
       showToast(e instanceof Error ? e.message : 'Upload failed — please try again.', 'error');
     } finally {
       setUploadingCover(false);
@@ -137,10 +135,13 @@ export function EditProfileScreen({ navigation }: Props) {
       const body: Record<string, unknown> = { display_name: displayName.trim(), bio: bio.trim(), dominant_hand: hand };
       // Send '' to clear back to the default hashed hue; a hex sets the signature.
       body.color = color ?? '';
+      // Only send media URLs the user actually changed this session. Re-sending
+      // the stored value verbatim would subject an old (pre-validation) URL to
+      // the server's storage-origin check and block the whole save.
       const trimmedAvatar = avatarUrl.trim();
-      if (trimmedAvatar) body.avatar_url = trimmedAvatar;
+      if (trimmedAvatar && trimmedAvatar !== (user?.avatar_url ?? '')) body.avatar_url = trimmedAvatar;
       const trimmedCover = coverUrl.trim();
-      if (trimmedCover) body.cover_url = trimmedCover;
+      if (trimmedCover && trimmedCover !== (user?.cover_url ?? '')) body.cover_url = trimmedCover;
       if (resolvedHome) body.home = { lat: resolvedHome.lat, lng: resolvedHome.lng, label: resolvedHome.label };
       // Public gear loadout — send the full object so clearing a field persists.
       body.equipment = {
@@ -151,11 +152,9 @@ export function EditProfileScreen({ navigation }: Props) {
       };
       const { user: updated } = await api.updateProfile(body);
       setUser(updated);
-      notifySuccess();
       showToast('Profile saved', 'success');
       navigation.goBack();
     } catch (e) {
-      notifyError();
       showToast(e instanceof ApiError ? e.message : 'Save failed — try again', 'error');
     } finally {
       setSaving(false);

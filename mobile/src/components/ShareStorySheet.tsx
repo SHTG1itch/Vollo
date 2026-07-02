@@ -26,7 +26,6 @@ import * as Sharing from 'expo-sharing';
 import * as Clipboard from 'expo-clipboard';
 import { MatchShareCard, SHARE_ASPECT, type ShareVariant } from './MatchShareCard';
 import { Button } from './ui';
-import { showToast } from './Toast';
 import { colors, fonts, radius, spacing } from '../theme';
 import type { MatchCard } from '../types';
 
@@ -93,7 +92,9 @@ export function ShareStorySheet({
     try {
       const uri = await rasterize('tmpfile');
       if (!(await Sharing.isAvailableAsync())) {
-        showToast('This device can’t open the share sheet.', 'error');
+        // In-sheet note, NOT a toast: ToastHost renders under this native
+        // Modal, so a toast would be invisible while the sheet is open.
+        setNote('This device can’t open the share sheet.');
         return;
       }
       await Sharing.shareAsync(uri, {
@@ -102,7 +103,7 @@ export function ShareStorySheet({
         dialogTitle: 'Share your match to a story',
       });
     } catch (e) {
-      showToast(e instanceof Error ? e.message : 'Could not create the image — please try again.', 'error');
+      setNote(e instanceof Error ? e.message : 'Could not create the image — please try again.');
     } finally {
       setBusy(null);
     }
@@ -117,7 +118,7 @@ export function ShareStorySheet({
       await Clipboard.setImageAsync(b64);
       setNote('Copied to clipboard — paste it into any story or chat.');
     } catch (e) {
-      showToast(e instanceof Error ? e.message : 'Could not copy the image — please try again.', 'error');
+      setNote(e instanceof Error ? e.message : 'Could not copy the image — please try again.');
     } finally {
       setBusy(null);
     }

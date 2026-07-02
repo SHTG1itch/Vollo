@@ -13,7 +13,7 @@ import { Icon } from '../components/icons';
 import { SurfaceBadge } from '../components/SurfaceBadge';
 import { OsmMap, type LatLng, type OsmMapHandle } from '../components/OsmMap';
 import { showToast } from '../components/Toast';
-import { notifyError, notifySuccess, tapLight } from '../lib/haptics';
+import { tapLight } from '../lib/haptics';
 import { colors, font, fonts, radius, shadow, spacing, surfaceColors, surfaceColorsSoft } from '../theme';
 import type { Surface } from '../types';
 
@@ -169,7 +169,6 @@ export function AddCourtScreen({ route, navigation }: Props) {
         ...(address ? { address } : {}),
       });
 
-      notifySuccess();
       showToast('Court added 🎾', 'success');
       if (origin === 'log') {
         navigation.navigate('Tabs', { screen: 'Log', params: { newCourtId: court.id } });
@@ -178,7 +177,6 @@ export function AddCourtScreen({ route, navigation }: Props) {
         navigation.replace('Court', { courtId: court.id });
       }
     } catch (e) {
-      notifyError();
       showToast(e instanceof ApiError ? e.message : 'Could not add court — try again', 'error');
     } finally {
       setSubmitting(false);

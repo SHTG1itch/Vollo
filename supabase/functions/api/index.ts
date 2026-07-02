@@ -152,9 +152,14 @@ const LOGIN_FAILURE_WINDOW = "15 minutes";
 const LOGIN_MAX_FAILURES = 10;
 
 async function assertLoginNotThrottled(keys: string[]): Promise<void> {
+  // Per-key max, NOT a combined count — every failure inserts one row per key
+  // (ip + identifier), so summing across keys would halve the effective limit.
   const row = await queryOne<{ c: string }>(
-    `SELECT COUNT(*) AS c FROM login_attempts
-      WHERE key = ANY($1) AND attempted_at > now() - $2::interval`,
+    `SELECT COALESCE(MAX(per_key), 0) AS c FROM (
+       SELECT COUNT(*) AS per_key FROM login_attempts
+        WHERE key = ANY($1) AND attempted_at > now() - $2::interval
+        GROUP BY key
+     ) t`,
     [keys, LOGIN_FAILURE_WINDOW],
   );
   if (Number(row?.c ?? 0) >= LOGIN_MAX_FAILURES) {
@@ -164,10 +169,17 @@ async function assertLoginNotThrottled(keys: string[]): Promise<void> {
 
 async function recordLoginFailure(keys: string[]): Promise<void> {
   await query('INSERT INTO login_attempts (key) SELECT unnest($1::text[])', [keys]).catch(() => {});
-  // Opportunistic prune so the table never grows unbounded.
+  // Opportunistic prune so the table never grows unbounded — fire-and-forget:
+  // never make the (attacker-controlled) failure path wait on housekeeping.
   if (Math.random() < 0.02) {
-    await query(`DELETE FROM login_attempts WHERE attempted_at < now() - interval '1 hour'`).catch(() => {});
+    void query(`DELETE FROM login_attempts WHERE attempted_at < now() - interval '1 hour'`).catch(() => {});
   }
+}
+
+/** A successful sign-in proves the actor owns the account — clear their
+ *  counters so an honest user's earlier typos don't linger toward a lockout. */
+function clearLoginFailures(keys: string[]): void {
+  void query('DELETE FROM login_attempts WHERE key = ANY($1)', [keys]).catch(() => {});
 }
 
 // Opaque keyset cursor (last seen played_at + id). Content is ASCII (ISO + uuid).
@@ -332,6 +344,7 @@ app.post('/api/auth/login', async (c) => {
   }
   if (!data.session) throw await invalid();
 
+  clearLoginFailures(throttleKeys);
   const s = data.session;
   return c.json({
     session: {
@@ -745,17 +758,16 @@ app.get('/api/matches/:id/comments', optionalAuth, async (c) => {
   const params: unknown[] = [id];
   let extra = '';
   if (before) {
-    // Composite "<ISO>~<uuid>" keyset cursor (a bare timestamp is still
-    // accepted) — a timestamp alone drops/duplicates rows on created_at ties.
+    // Composite "<ISO>~<uuid>" keyset cursor — a timestamp alone would
+    // drop/duplicate rows on created_at ties. Both halves are validated here:
+    // a malformed uuid must be a 400, not a Postgres 22P02 surfacing as a 500.
     const [ts, cid] = before.split('~');
-    if (Number.isNaN(Date.parse(ts))) throw ApiError.badRequest('Invalid cursor');
-    params.push(ts);
-    if (cid) {
-      params.push(cid);
-      extra = `AND (c.created_at, c.id) < ($2::timestamptz, $3::uuid)`;
-    } else {
-      extra = `AND c.created_at < $2::timestamptz`;
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (Number.isNaN(Date.parse(ts)) || !cid || !UUID_RE.test(cid)) {
+      throw ApiError.badRequest('Invalid pagination cursor');
     }
+    params.push(ts, cid);
+    extra = `AND (c.created_at, c.id) < ($2::timestamptz, $3::uuid)`;
   }
   params.push(limit);
   const rows = await query<{ id: string; created_at: string }>(

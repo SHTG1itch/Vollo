@@ -13,7 +13,7 @@ import { KudosButton } from '../components/KudosButton';
 import { ConfettiBurst } from '../components/ConfettiBurst';
 import { ShareStorySheet } from '../components/ShareStorySheet';
 import { showToast } from '../components/Toast';
-import { notifySuccess, tapMedium } from '../lib/haptics';
+import { tapMedium } from '../lib/haptics';
 import { colors, font, fonts, radius, spacing } from '../theme';
 import type { MatchCard, MatchStats } from '../types';
 import { formatScoreLine, timeAgo } from '../utils/format';
@@ -110,7 +110,7 @@ export function MatchDetailScreen({ route, navigation }: Props) {
       setMatch((cur) => (cur ? { ...cur, kudos_count: res.kudos_count, viewer_has_kudos: res.viewer_has_kudos } : cur));
       syncFeedKudos(res.kudos_count, res.viewer_has_kudos);
     } catch {
-      setMatch((cur) => (cur ? { ...cur, viewer_has_kudos: was, kudos_count: cur.kudos_count + (was ? 1 : -1) } : cur));
+      setMatch((cur) => (cur ? { ...cur, viewer_has_kudos: was, kudos_count: Math.max(0, cur.kudos_count + (was ? 1 : -1)) } : cur));
     } finally {
       kudosInFlight.current = false;
     }
@@ -141,7 +141,6 @@ export function MatchDetailScreen({ route, navigation }: Props) {
       setMatch(updated);
       // Reflect the new status in any feed card already on screen.
       useFeed.setState((s) => ({ matches: s.matches.map((m) => (m.id === matchId ? updated : m)) }));
-      notifySuccess();
       showToast(action === 'confirm' ? 'Match confirmed — it now counts.' : 'Match disputed — it won’t count.', 'success');
     } catch (e) {
       showToast(e instanceof ApiError ? e.message : 'Could not update the match — try again.', 'error');

@@ -9,7 +9,7 @@ import { api, ApiError, type CreateMatchPayload, type UserSearchResult } from '.
 import { useFeed } from '../store/feed';
 import { pickAndUploadMatchPhoto } from '../lib/uploadImage';
 import { showToast } from '../components/Toast';
-import { notifyError, notifySuccess, tapLight } from '../lib/haptics';
+import { tapLight } from '../lib/haptics';
 import { Avatar, Button, Card, Field, H2, Muted } from '../components/ui';
 import { ScoreInput } from '../components/ScoreInput';
 import { Stepper } from '../components/Stepper';
@@ -231,7 +231,6 @@ export function LogMatchScreen() {
       const url = await pickAndUploadMatchPhoto();
       if (url) setPhotoUrl(url);
     } catch (e) {
-      notifyError();
       showToast(e instanceof Error ? e.message : 'Upload failed — please try again.', 'error');
     } finally {
       setUploadingPhoto(false);
@@ -268,7 +267,6 @@ export function LogMatchScreen() {
       };
       const { match } = await api.createMatch(payload);
       prepend(match);
-      notifySuccess();
       showToast('Match logged 🎾', 'success');
       navigation.navigate('Tabs', { screen: 'Feed' });
       // Reset the match-specific fields for the next log; deliberately keep
@@ -288,7 +286,6 @@ export function LogMatchScreen() {
       setShowStats(false);
       setStats(emptyStats());
     } catch (e) {
-      notifyError();
       showToast(e instanceof ApiError ? e.message : 'Could not log match — something went wrong', 'error');
     } finally {
       setSubmitting(false);

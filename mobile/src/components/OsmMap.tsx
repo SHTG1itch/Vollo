@@ -255,11 +255,18 @@ export const OsmMap = forwardRef<OsmMapHandle, Props>(function OsmMap(
     webRef.current?.injectJavaScript(`${js};true;`);
   }, []);
 
+  // A camera move requested before Leaflet has loaded would hit an undefined
+  // window.__animate and be silently dropped (screens animate as soon as a GPS
+  // fix arrives, often before the WebView is ready) — park it and flush on ready.
+  const pendingAnimateRef = useRef<string | null>(null);
+
   useImperativeHandle(
     ref,
     () => ({
       animateToRegion(region: Region, duration = 350) {
-        inject(`window.__animate(${JSON.stringify(region)}, ${duration});`);
+        const js = `window.__animate(${JSON.stringify(region)}, ${duration});`;
+        if (readyRef.current) inject(js);
+        else pendingAnimateRef.current = js;
       },
     }),
     [inject],
@@ -293,6 +300,10 @@ export const OsmMap = forwardRef<OsmMapHandle, Props>(function OsmMap(
           inject(`window.__setMarkers(${JSON.stringify(markers ?? [])});`);
           inject(`window.__setPolygons(${JSON.stringify(polygons ?? [])});`);
           if (userLocation) inject(`window.__setUser(${userLocation.latitude}, ${userLocation.longitude});`);
+          if (pendingAnimateRef.current) {
+            inject(pendingAnimateRef.current);
+            pendingAnimateRef.current = null;
+          }
           break;
         case 'change':
           if (msg.region) onRegionChange?.(msg.region);

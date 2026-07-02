@@ -104,11 +104,14 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     // The token may simply have expired while the app was backgrounded — try a
     // refresh and one retry before declaring the session dead and signing out.
     const fresh = await refreshOnce();
-    if (fresh) {
+    // Guard on authToken again: if the user signed out while the refresh was
+    // in flight (setAuthToken(null) via the auth bridge), a late-resolving
+    // refresh must not resurrect the cleared token or trigger a sign-out loop.
+    if (fresh && authToken) {
       authToken = fresh;
       res = await doFetch(path, options, fresh);
     }
-    if (res.status === 401) onUnauthorized?.();
+    if (res.status === 401 && authToken) onUnauthorized?.();
   }
 
   if (res.status === 204) return undefined as T;

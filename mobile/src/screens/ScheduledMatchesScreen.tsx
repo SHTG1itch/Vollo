@@ -6,7 +6,6 @@ import type { RootStackParamList } from '../navigation/types';
 import { api, ApiError } from '../api/client';
 import { Avatar, Button, Card, EmptyState, ErrorState } from '../components/ui';
 import { showToast } from '../components/Toast';
-import { notifyError } from '../lib/haptics';
 import { SurfaceBadge } from '../components/SurfaceBadge';
 import { colors, font, fonts, radius, spacing } from '../theme';
 import type { ScheduledMatchCard } from '../types';
@@ -68,7 +67,6 @@ export function ScheduledMatchesScreen() {
       const { scheduled_match } = await api.respondToScheduledMatch(s.id, action);
       setItems((prev) => prev.map((x) => (x.id === s.id ? scheduled_match : x)));
     } catch (e) {
-      notifyError();
       showToast(e instanceof ApiError ? e.message : 'Could not update — try again', 'error');
     } finally {
       setBusyId(null);

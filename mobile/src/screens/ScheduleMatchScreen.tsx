@@ -7,7 +7,7 @@ import { api, ApiError } from '../api/client';
 import { Avatar, Button, Card, Field, Muted } from '../components/ui';
 import { SurfaceBadge } from '../components/SurfaceBadge';
 import { showToast } from '../components/Toast';
-import { notifyError, notifySuccess, tapLight } from '../lib/haptics';
+import { tapLight } from '../lib/haptics';
 import { colors, font, fonts, radius, spacing, surfaceColors, surfaceColorsSoft } from '../theme';
 import type { Surface } from '../types';
 
@@ -89,7 +89,6 @@ export function ScheduleMatchScreen({ navigation, route }: Props) {
         ...(note.trim() ? { note: note.trim() } : {}),
         ...(isChallenge ? { is_challenge: true } : {}),
       });
-      notifySuccess();
       showToast(
         isChallenge
           ? 'Challenge sent ⚔️ They’ll get a notification to accept.'
@@ -100,7 +99,6 @@ export function ScheduleMatchScreen({ navigation, route }: Props) {
       );
       navigation.goBack();
     } catch (e) {
-      notifyError();
       showToast(e instanceof ApiError ? e.message : 'Could not schedule — try again', 'error');
     } finally {
       setSaving(false);
