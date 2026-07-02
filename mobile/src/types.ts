@@ -195,7 +195,7 @@ export interface HeadToHead {
 
 export interface ProfileAnalytics {
   overall: { matches: number; wins: number; losses: number; win_rate: number };
-  by_surface: Array<{
+  by_surface: {
     surface: Surface;
     matches: number;
     wins: number;
@@ -203,7 +203,7 @@ export interface ProfileAnalytics {
     win_rate: number;
     games_won: number;
     games_lost: number;
-  }>;
+  }[];
   serve: {
     first_serve_pct: number;
     second_serve_pct: number;
@@ -225,7 +225,7 @@ export interface ProfileAnalytics {
     long_pct: number;
   };
   playstyle: string;
-  recent_form: Array<'W' | 'L'>;
+  recent_form: ('W' | 'L')[];
   avg_rpe: number;
 }
 

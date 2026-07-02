@@ -23,7 +23,7 @@ const ICONS: Record<keyof TabParamList, IconName> = {
 function icon(name: keyof TabParamList) {
   // color comes from tabBarActive/InactiveTintColor; a heavier stroke when
   // focused gives the Strava-style weight shift without swapping glyphs.
-  return ({ color, focused }: { color: string; focused: boolean }) => (
+  const TabIcon = ({ color, focused }: { color: string; focused: boolean }) => (
     <Icon
       name={ICONS[name]}
       size={name === 'Log' ? 27 : 23}
@@ -31,6 +31,8 @@ function icon(name: keyof TabParamList) {
       strokeWidth={focused ? 2.4 : 1.8}
     />
   );
+  TabIcon.displayName = `TabIcon(${name})`;
+  return TabIcon;
 }
 
 export function Tabs() {

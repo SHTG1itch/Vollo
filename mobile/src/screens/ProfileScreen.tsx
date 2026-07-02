@@ -24,9 +24,9 @@ import type {
   SurfaceRating,
   Territory,
 } from '../types';
+import { formatScoreLine, timeAgo } from '../utils/format';
 
 const HEX6 = /^#[0-9A-Fa-f]{6}$/;
-import { formatScoreLine, timeAgo } from '../utils/format';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 

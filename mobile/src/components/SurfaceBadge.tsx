@@ -1,7 +1,6 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { font, fonts, radius, spacing } from '../theme';
-import { surfaceColors, surfaceColorsSoft, surfaceLabel } from '../theme';
+import { font, fonts, radius, spacing , surfaceColors, surfaceColorsSoft, surfaceLabel } from '../theme';
 import type { Surface } from '../types';
 
 export function SurfaceBadge({ surface, small }: { surface: Surface; small?: boolean }) {

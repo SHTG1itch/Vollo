@@ -59,7 +59,7 @@ export function SplitBar({
 }
 
 /** Recent form as a row of W/L dots. */
-export function FormDots({ form }: { form: Array<'W' | 'L'> }) {
+export function FormDots({ form }: { form: ('W' | 'L')[] }) {
   if (form.length === 0) return null;
   return (
     <View style={{ flexDirection: 'row', gap: 4 }}>
