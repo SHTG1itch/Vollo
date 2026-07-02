@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { ApiError, api, setAuthToken, setUnauthorizedHandler } from '../api/client';
+import { ApiError, api, setAuthToken, setSessionRefresher, setUnauthorizedHandler } from '../api/client';
 import { supabase } from '../lib/supabase';
 import { getAppleCredential, getGoogleIdToken, OAuthCancelled } from '../lib/oauth';
 import { useFeed } from './feed';
@@ -173,7 +173,17 @@ void supabase.auth.getSession().then(({ data }) => {
   useAuth.setState({ hydrated: true });
 });
 
-// Any 401 from our API means the session is dead — sign out cleanly.
+// On a 401 the client first asks us for a fresh token — an access token that
+// expired while backgrounded is refreshable and must not end the session.
+setSessionRefresher(async () => {
+  const { data, error } = await supabase.auth.refreshSession();
+  if (error || !data.session) return null;
+  // onAuthStateChange mirrors the new token too; return it so the client can
+  // retry the failed request immediately without waiting for that bridge.
+  return data.session.access_token;
+});
+
+// Only when the refresh also failed is the session truly dead — sign out cleanly.
 setUnauthorizedHandler(() => {
   if (useAuth.getState().token) void supabase.auth.signOut();
 });

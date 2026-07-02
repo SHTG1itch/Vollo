@@ -36,31 +36,53 @@ export function setAuthToken(token: string | null): void {
 
 /**
  * Registered by the auth store so the client can trigger a clean sign-out when
- * any request comes back 401 (expired/invalid token), without importing the
- * store directly (which would be a circular dependency).
+ * a request comes back 401 and the session could not be refreshed, without
+ * importing the store directly (which would be a circular dependency).
  */
 let onUnauthorized: (() => void) | null = null;
 export function setUnauthorizedHandler(fn: (() => void) | null): void {
   onUnauthorized = fn;
 }
 
+/**
+ * Registered by the auth store. On a 401 the client asks for a fresh access
+ * token (Supabase refreshSession) and retries the request once — a token that
+ * expired while the app was backgrounded must not tear down a refreshable
+ * session. Resolves to the new token, or null when the session is truly dead.
+ */
+let refreshSession: (() => Promise<string | null>) | null = null;
+export function setSessionRefresher(fn: (() => Promise<string | null>) | null): void {
+  refreshSession = fn;
+}
+
+// Single-flight: concurrent 401s share one refresh instead of stampeding.
+let refreshInFlight: Promise<string | null> | null = null;
+function refreshOnce(): Promise<string | null> {
+  if (!refreshInFlight) {
+    refreshInFlight = (refreshSession ? refreshSession() : Promise.resolve(null))
+      .catch(() => null)
+      .finally(() => {
+        refreshInFlight = null;
+      });
+  }
+  return refreshInFlight;
+}
+
 /** Abort a request that hangs so the UI never spins forever. */
 const REQUEST_TIMEOUT_MS = 15_000;
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+async function doFetch(path: string, options: RequestInit, token: string | null): Promise<Response> {
   const headers: Record<string, string> = {
     Accept: 'application/json',
     ...(options.body ? { 'Content-Type': 'application/json' } : {}),
     ...(options.headers as Record<string, string> | undefined),
   };
-  if (authToken) headers.Authorization = `Bearer ${authToken}`;
+  if (token) headers.Authorization = `Bearer ${token}`;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
-  let res: Response;
   try {
-    res = await fetch(`${API_BASE}${path}`, { ...options, headers, signal: controller.signal });
+    return await fetch(`${API_BASE}${path}`, { ...options, headers, signal: controller.signal });
   } catch (e) {
     const aborted = e instanceof Error && e.name === 'AbortError';
     throw new ApiError(
@@ -73,10 +95,20 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   } finally {
     clearTimeout(timeout);
   }
+}
 
-  if (res.status === 401) {
-    // Expired/invalid session — let the app sign out before surfacing the error.
-    onUnauthorized?.();
+async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  let res = await doFetch(path, options, authToken);
+
+  if (res.status === 401 && authToken) {
+    // The token may simply have expired while the app was backgrounded — try a
+    // refresh and one retry before declaring the session dead and signing out.
+    const fresh = await refreshOnce();
+    if (fresh) {
+      authToken = fresh;
+      res = await doFetch(path, options, fresh);
+    }
+    if (res.status === 401) onUnauthorized?.();
   }
 
   if (res.status === 204) return undefined as T;
