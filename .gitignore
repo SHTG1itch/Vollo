@@ -26,6 +26,9 @@ pnpm-debug.log*
 .expo/
 .expo-shared/
 web-build/
+# Continuous Native Generation — android/ios are `expo prebuild` artifacts
+mobile/android/
+mobile/ios/
 *.jks
 *.p8
 *.p12
@@ -57,3 +60,6 @@ pgdata/
 # Misc
 .cache/
 tmp/
+
+# Supabase CLI state
+supabase/.temp/
