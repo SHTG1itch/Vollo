@@ -5,6 +5,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { api, type UserSearchResult } from '../api/client';
 import { Avatar, Button, EmptyState, Field, Screen } from '../components/ui';
+import { Icon } from '../components/icons';
 import { colors, font, fonts, radius, shadow, spacing } from '../theme';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -69,7 +70,7 @@ export function UserSearchScreen() {
     <Screen edges={['top']}>
       <View style={styles.header}>
         <Pressable onPress={() => navigation.goBack()} hitSlop={10} accessibilityRole="button" accessibilityLabel="Go back">
-          <Text style={styles.back}>‹</Text>
+          <Icon name="chevron-left" size={26} color={colors.primary} strokeWidth={2.4} />
         </Pressable>
         <Field
           value={q}
@@ -123,7 +124,6 @@ export function UserSearchScreen() {
 
 const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.lg, paddingBottom: spacing.md },
-  back: { color: colors.primary, fontSize: 34, fontFamily: fonts.display, marginTop: -4 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

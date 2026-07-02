@@ -11,6 +11,7 @@ import { MatchCard } from '../components/MatchCard';
 import { EmptyState, ErrorState, SegmentedControl } from '../components/ui';
 import { FeedSkeleton } from '../components/Skeleton';
 import { VolloWordmark } from '../components/VolloLogo';
+import { Icon } from '../components/icons';
 import { colors, radius, spacing } from '../theme';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -40,7 +41,7 @@ export function FeedScreen() {
             accessibilityRole="button"
             accessibilityLabel="Find players"
           >
-            <Text style={styles.searchIcon}>🔍</Text>
+            <Icon name="search" size={18} color={colors.textDim} />
           </Pressable>
         </View>
         <SegmentedControl
@@ -125,6 +126,5 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  searchIcon: { fontSize: 16 },
   list: { padding: spacing.lg, paddingTop: 0 },
 });

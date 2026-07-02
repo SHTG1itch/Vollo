@@ -9,6 +9,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { api, ApiError } from '../api/client';
 import { Button, Card, Field } from '../components/ui';
+import { Icon } from '../components/icons';
 import { SurfaceBadge } from '../components/SurfaceBadge';
 import { OsmMap, type LatLng, type OsmMapHandle } from '../components/OsmMap';
 import { colors, font, fonts, radius, shadow, spacing, surfaceColors, surfaceColorsSoft } from '../theme';
@@ -224,7 +225,7 @@ export function AddCourtScreen({ route, navigation }: Props) {
           accessibilityRole="button"
           accessibilityLabel="Centre on my location"
         >
-          {locating ? <ActivityIndicator color={colors.primary} /> : <Text style={styles.recenterIcon}>◎</Text>}
+          {locating ? <ActivityIndicator color={colors.primary} /> : <Icon name="locate" size={22} color={colors.primary} />}
         </Pressable>
       </View>
 
@@ -319,7 +320,6 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     ...shadow.card,
   },
-  recenterIcon: { color: colors.primary, fontSize: 22, fontFamily: fonts.display },
   form: { margin: spacing.lg, gap: spacing.md },
   surfaceRow: { flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' },
   countRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },

@@ -9,6 +9,7 @@ import type { RootStackParamList, TabParamList } from '../navigation/types';
 import { api } from '../api/client';
 import { useAuth } from '../store/auth';
 import { OsmMap, type LatLng, type OsmMapHandle, type OsmMarker, type OsmPolygon } from '../components/OsmMap';
+import { Icon } from '../components/icons';
 import { colors, font, fonts, radius, shadow, spacing, surfaceColors, TERRITORY_STROKE } from '../theme';
 import type { Court, Territory } from '../types';
 
@@ -590,7 +591,7 @@ export function MapScreen() {
           accessibilityRole="button"
           accessibilityLabel="Search courts"
         >
-          <Text style={styles.searchIcon}>🔍</Text>
+          <Icon name="search" size={20} color={colors.text} />
         </Pressable>
       </View>
 
@@ -614,7 +615,7 @@ export function MapScreen() {
         accessibilityRole="button"
         accessibilityLabel="Add a court"
       >
-        <Text style={styles.addCourtIcon}>＋</Text>
+        <Icon name="plus" size={18} color={colors.onPrimary} strokeWidth={2.6} />
         <Text style={styles.addCourtText}>Court</Text>
       </Pressable>
 
@@ -625,7 +626,7 @@ export function MapScreen() {
         accessibilityRole="button"
         accessibilityLabel="Recenter map on my location"
       >
-        <Text style={styles.recenterIcon}>◎</Text>
+        <Icon name="locate" size={22} color={colors.primary} />
       </Pressable>
 
       {/* Selected territory card — who's dominating this zone, and what it takes
@@ -736,7 +737,6 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     ...shadow.card,
   },
-  searchIcon: { fontSize: 20 },
   detailCard: {
     position: 'absolute',
     bottom: spacing.xl,
@@ -809,7 +809,6 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     ...shadow.card,
   },
-  recenterIcon: { color: colors.primary, fontSize: 22, fontFamily: fonts.display },
   addCourt: {
     position: 'absolute',
     right: spacing.lg,
@@ -823,6 +822,5 @@ const styles = StyleSheet.create({
     gap: 4,
     ...shadow.card,
   },
-  addCourtIcon: { color: colors.onPrimary, fontSize: 20, fontFamily: fonts.display },
   addCourtText: { color: colors.onPrimary, fontSize: font.small, fontFamily: fonts.bold },
 });

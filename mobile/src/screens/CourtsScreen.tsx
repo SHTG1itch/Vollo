@@ -6,6 +6,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { api, ApiError } from '../api/client';
 import { Button, ErrorState, Field, H2, Loading, Muted, Screen } from '../components/ui';
+import { Icon } from '../components/icons';
 import { SurfaceBadge } from '../components/SurfaceBadge';
 import { colors, font, fonts, radius, shadow, spacing } from '../theme';
 import type { Court } from '../types';
@@ -116,11 +117,11 @@ export function CourtsScreen() {
             accessibilityRole="button"
             accessibilityLabel="Go back"
           >
-            <Text style={styles.back}>‹</Text>
+            <Icon name="chevron-left" size={26} color={colors.primary} strokeWidth={2.4} />
           </Pressable>
           <H2>Courts</H2>
         </View>
-        <Button label="＋ Add" onPress={openAdd} style={{ height: 38 }} />
+        <Button label="+ Add" onPress={openAdd} style={{ height: 38 }} />
       </View>
 
       <View style={styles.searchRow}>
@@ -170,7 +171,6 @@ export function CourtsScreen() {
 
 const styles = StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: spacing.lg, paddingBottom: spacing.sm },
-  back: { color: colors.primary, fontSize: 34, fontFamily: fonts.display, marginTop: -4 },
   searchRow: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-end', paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
   searchSpinner: { width: 56, height: 48, alignItems: 'center', justifyContent: 'center' },
   courtRow: {

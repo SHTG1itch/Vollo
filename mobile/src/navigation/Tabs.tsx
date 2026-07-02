@@ -1,5 +1,4 @@
 import React from 'react';
-import { Text } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import type { TabParamList } from './types';
 import { FeedScreen } from '../screens/FeedScreen';
@@ -8,21 +7,29 @@ import { LogMatchScreen } from '../screens/LogMatchScreen';
 import { NotificationsScreen } from '../screens/NotificationsScreen';
 import { MeScreen } from '../screens/ProfileScreen';
 import { useNotifications } from '../store/notifications';
+import { Icon, type IconName } from '../components/icons';
 import { colors, fonts, shadow } from '../theme';
 
 const Tab = createBottomTabNavigator<TabParamList>();
 
-const ICONS: Record<keyof TabParamList, string> = {
-  Feed: '🎾',
-  Map: '🗺️',
-  Log: '➕',
-  Alerts: '🔔',
-  Me: '👤',
+const ICONS: Record<keyof TabParamList, IconName> = {
+  Feed: 'home',
+  Map: 'map',
+  Log: 'plus-circle',
+  Alerts: 'bell',
+  Me: 'user',
 };
 
 function icon(name: keyof TabParamList) {
-  return ({ focused }: { focused: boolean }) => (
-    <Text style={{ fontSize: name === 'Log' ? 26 : 20, opacity: focused ? 1 : 0.5 }}>{ICONS[name]}</Text>
+  // color comes from tabBarActive/InactiveTintColor; a heavier stroke when
+  // focused gives the Strava-style weight shift without swapping glyphs.
+  return ({ color, focused }: { color: string; focused: boolean }) => (
+    <Icon
+      name={ICONS[name]}
+      size={name === 'Log' ? 27 : 23}
+      color={color}
+      strokeWidth={focused ? 2.4 : 1.8}
+    />
   );
 }
 
@@ -37,7 +44,8 @@ export function Tabs() {
         tabBarStyle: {
           backgroundColor: colors.surface,
           borderTopColor: colors.border,
-          height: 88,
+          // No fixed height — the navigator sizes itself from the safe-area
+          // inset, so devices without a home indicator aren't over-padded.
           paddingTop: 6,
           ...shadow.bar,
         },
