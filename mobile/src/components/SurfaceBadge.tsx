@@ -1,13 +1,13 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { font, fonts, radius, spacing } from '../theme';
-import { surfaceColors, surfaceLabel } from '../theme';
+import { surfaceColors, surfaceColorsSoft, surfaceLabel } from '../theme';
 import type { Surface } from '../types';
 
 export function SurfaceBadge({ surface, small }: { surface: Surface; small?: boolean }) {
   const color = surfaceColors[surface];
   return (
-    <View style={[styles.wrap, { backgroundColor: `${color}22`, borderColor: color }]}>
+    <View style={[styles.wrap, { backgroundColor: surfaceColorsSoft[surface], borderColor: color }]}>
       <View style={[styles.dot, { backgroundColor: color }]} />
       <Text style={[styles.text, { color, fontSize: small ? font.tiny : font.small }]}>
         {surfaceLabel[surface]}

@@ -12,7 +12,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Modal,
   Pressable,
   StyleSheet,
@@ -21,11 +20,13 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
 import { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
 import * as Clipboard from 'expo-clipboard';
 import { MatchShareCard, SHARE_ASPECT, type ShareVariant } from './MatchShareCard';
 import { Button } from './ui';
+import { showToast } from './Toast';
 import { colors, fonts, radius, spacing } from '../theme';
 import type { MatchCard } from '../types';
 
@@ -92,7 +93,7 @@ export function ShareStorySheet({
     try {
       const uri = await rasterize('tmpfile');
       if (!(await Sharing.isAvailableAsync())) {
-        Alert.alert('Sharing unavailable', 'This device can’t open the share sheet.');
+        showToast('This device can’t open the share sheet.', 'error');
         return;
       }
       await Sharing.shareAsync(uri, {
@@ -101,7 +102,7 @@ export function ShareStorySheet({
         dialogTitle: 'Share your match to a story',
       });
     } catch (e) {
-      Alert.alert('Could not create image', e instanceof Error ? e.message : 'Please try again.');
+      showToast(e instanceof Error ? e.message : 'Could not create the image — please try again.', 'error');
     } finally {
       setBusy(null);
     }
@@ -116,7 +117,7 @@ export function ShareStorySheet({
       await Clipboard.setImageAsync(b64);
       setNote('Copied to clipboard — paste it into any story or chat.');
     } catch (e) {
-      Alert.alert('Could not copy image', e instanceof Error ? e.message : 'Please try again.');
+      showToast(e instanceof Error ? e.message : 'Could not copy the image — please try again.', 'error');
     } finally {
       setBusy(null);
     }
@@ -130,6 +131,9 @@ export function ShareStorySheet({
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={handleClose} statusBarTranslucent>
+      {/* The sheet backdrop is near-black — flip to light status icons while
+          it's open (reverts automatically when the modal unmounts this). */}
+      <StatusBar style="light" />
       <View style={[styles.backdrop, { paddingTop: insets.top + spacing.sm, paddingBottom: insets.bottom + spacing.lg }]}>
         <View style={styles.header}>
           <Text style={styles.title}>Share to story</Text>

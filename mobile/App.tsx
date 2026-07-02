@@ -5,7 +5,8 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as Notifications from 'expo-notifications';
 import { useFonts } from 'expo-font';
-import { DefaultTheme, NavigationContainer, type Theme } from '@react-navigation/native';
+import { DefaultTheme, NavigationContainer, type LinkingOptions, type Theme } from '@react-navigation/native';
+import type { RootStackParamList } from './src/navigation/types';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { navigationRef, navigateFromPush, flushPendingPush } from './src/navigation/ref';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
@@ -17,6 +18,30 @@ import { FONT_ASSETS } from './src/fonts';
 import { BallSpinner } from './src/components/BallSpinner';
 import { VolloWordmark } from './src/components/VolloLogo';
 import { colors } from './src/theme';
+
+// vollo:// deep links (matches the `scheme` in app.json) — vollo://match/:id,
+// vollo://court/:id, vollo://player/:username. Tab and auth screens resolve by
+// name so a link never dead-ends while signed out.
+const linking: LinkingOptions<RootStackParamList> = {
+  prefixes: ['vollo://'],
+  config: {
+    screens: {
+      MatchDetail: 'match/:matchId',
+      Court: 'court/:courtId',
+      UserProfile: 'player/:username',
+      ScheduledMatches: 'challenges',
+      Tabs: {
+        screens: {
+          Feed: 'feed',
+          Map: 'map',
+          Log: 'log',
+          Alerts: 'alerts',
+          Me: 'me',
+        },
+      },
+    },
+  },
+};
 
 const navTheme: Theme = {
   ...DefaultTheme,
@@ -87,7 +112,7 @@ export default function App() {
       <SafeAreaProvider>
         <StatusBar style="dark" />
         <ErrorBoundary>
-          <NavigationContainer ref={navigationRef} theme={navTheme} onReady={flushPendingPush}>
+          <NavigationContainer ref={navigationRef} theme={navTheme} linking={linking} onReady={flushPendingPush}>
             <RootNavigator />
           </NavigationContainer>
           <ToastHost />

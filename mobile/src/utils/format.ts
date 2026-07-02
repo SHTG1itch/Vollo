@@ -3,7 +3,8 @@ import type { ScoreArray } from '../types';
 export function timeAgo(iso: string): string {
   const date = new Date(iso);
   const then = date.getTime();
-  const diff = Date.now() - then;
+  // Clamp future timestamps (clock skew) to "just now" instead of negatives.
+  const diff = Math.max(0, Date.now() - then);
   const min = Math.floor(diff / 60000);
   if (min < 1) return 'just now';
   if (min < 60) return `${min}m ago`;

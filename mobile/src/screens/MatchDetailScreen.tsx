@@ -12,6 +12,8 @@ import { ProgressBar, RallyDistribution, SplitBar } from '../components/charts';
 import { KudosButton } from '../components/KudosButton';
 import { ConfettiBurst } from '../components/ConfettiBurst';
 import { ShareStorySheet } from '../components/ShareStorySheet';
+import { showToast } from '../components/Toast';
+import { notifySuccess, tapMedium } from '../lib/haptics';
 import { colors, font, fonts, radius, spacing } from '../theme';
 import type { MatchCard, MatchStats } from '../types';
 import { formatScoreLine, timeAgo } from '../utils/format';
@@ -88,15 +90,29 @@ export function MatchDetailScreen({ route, navigation }: Props) {
     else navigation.navigate('UserProfile', { username });
   };
 
+  // In-flight guard: rapid double-taps must not race add/remove calls (the
+  // feed store has the same guard); the result is mirrored back into any feed
+  // card already on screen so the list isn't stale after navigating back.
+  const kudosInFlight = useRef(false);
+  const syncFeedKudos = (kudosCount: number, viewerHas: boolean) => {
+    useFeed.setState((s) => ({
+      matches: s.matches.map((m) => (m.id === matchId ? { ...m, kudos_count: kudosCount, viewer_has_kudos: viewerHas } : m)),
+    }));
+  };
+
   const toggleKudos = async () => {
-    if (!match) return;
+    if (!match || kudosInFlight.current) return;
+    kudosInFlight.current = true;
     const was = match.viewer_has_kudos ?? false;
     setMatch({ ...match, viewer_has_kudos: !was, kudos_count: match.kudos_count + (was ? -1 : 1) });
     try {
       const res = was ? await api.removeKudos(matchId) : await api.addKudos(matchId);
       setMatch((cur) => (cur ? { ...cur, kudos_count: res.kudos_count, viewer_has_kudos: res.viewer_has_kudos } : cur));
+      syncFeedKudos(res.kudos_count, res.viewer_has_kudos);
     } catch {
       setMatch((cur) => (cur ? { ...cur, viewer_has_kudos: was, kudos_count: cur.kudos_count + (was ? 1 : -1) } : cur));
+    } finally {
+      kudosInFlight.current = false;
     }
   };
 
@@ -110,7 +126,7 @@ export function MatchDetailScreen({ route, navigation }: Props) {
       setDraft('');
       setMatch((cur) => (cur ? { ...cur, comment_count: cur.comment_count + 1 } : cur));
     } catch (e) {
-      Alert.alert('Comment failed', e instanceof ApiError ? e.message : 'Try again');
+      showToast(e instanceof ApiError ? e.message : 'Could not post your comment — try again.', 'error');
     } finally {
       setPosting(false);
     }
@@ -119,13 +135,16 @@ export function MatchDetailScreen({ route, navigation }: Props) {
   const verify = async (action: 'confirm' | 'reject') => {
     if (!match || verifying) return;
     setVerifying(true);
+    tapMedium();
     try {
       const { match: updated } = await api.verifyMatch(matchId, action);
       setMatch(updated);
       // Reflect the new status in any feed card already on screen.
       useFeed.setState((s) => ({ matches: s.matches.map((m) => (m.id === matchId ? updated : m)) }));
+      notifySuccess();
+      showToast(action === 'confirm' ? 'Match confirmed — it now counts.' : 'Match disputed — it won’t count.', 'success');
     } catch (e) {
-      Alert.alert('Could not update', e instanceof ApiError ? e.message : 'Try again');
+      showToast(e instanceof ApiError ? e.message : 'Could not update the match — try again.', 'error');
     } finally {
       setVerifying(false);
     }
@@ -143,7 +162,7 @@ export function MatchDetailScreen({ route, navigation }: Props) {
             useFeed.setState((s) => ({ matches: s.matches.filter((m) => m.id !== matchId) }));
             navigation.goBack();
           } catch (e) {
-            Alert.alert('Delete failed', e instanceof ApiError ? e.message : 'Try again');
+            showToast(e instanceof ApiError ? e.message : 'Could not delete the match — try again.', 'error');
           }
         },
       },
@@ -269,7 +288,7 @@ export function MatchDetailScreen({ route, navigation }: Props) {
 
         {user ? (
           <View style={styles.commentInput}>
-            <Field value={draft} onChangeText={setDraft} placeholder="Add a comment…" style={{ flex: 1 }} />
+            <Field value={draft} onChangeText={setDraft} placeholder="Add a comment…" maxLength={500} style={{ flex: 1 }} />
             <Button label="Post" onPress={postComment} loading={posting} disabled={!draft.trim()} style={{ paddingHorizontal: spacing.lg }} />
           </View>
         ) : null}

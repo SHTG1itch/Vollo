@@ -1,5 +1,6 @@
 import React from 'react';
-import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -14,15 +15,23 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 export function NotificationsScreen() {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
-  const { items, loading, error, fetch, markAllRead } = useNotifications();
+  const { items, loading, refreshing, error, fetch, markAllRead } = useNotifications();
 
   // Refetch every time the tab gains focus so the badge/list reflect reality,
-  // then mark everything read shortly after.
+  // then mark everything read shortly after. The mark-read timer starts only
+  // once the fetch has resolved — running them concurrently let a slow fetch
+  // land after the optimistic mark-read and resurrect the unread badge.
   useFocusEffect(
     React.useCallback(() => {
-      void fetch();
-      const t = setTimeout(() => void markAllRead(), 1200);
-      return () => clearTimeout(t);
+      let cancelled = false;
+      let t: ReturnType<typeof setTimeout> | undefined;
+      void fetch().then(() => {
+        if (!cancelled) t = setTimeout(() => void markAllRead(), 1200);
+      });
+      return () => {
+        cancelled = true;
+        if (t) clearTimeout(t);
+      };
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []),
   );
@@ -45,11 +54,12 @@ export function NotificationsScreen() {
       ) : loading && items.length === 0 ? (
         <Loading label="Loading activity…" />
       ) : (
-        <FlatList
+        <FlashList
           data={items}
           keyExtractor={(n) => n.id}
-          contentContainerStyle={{ padding: spacing.lg, paddingTop: 0, gap: spacing.sm }}
-          refreshControl={<RefreshControl refreshing={loading} onRefresh={() => fetch()} tintColor={colors.primary} />}
+          contentContainerStyle={{ padding: spacing.lg, paddingTop: 0 }}
+          ItemSeparatorComponent={() => <View style={{ height: spacing.sm }} />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => fetch(true)} tintColor={colors.primary} />}
           renderItem={({ item }) => {
             const data = item.data as Record<string, unknown> | null | undefined;
             const tappable =
