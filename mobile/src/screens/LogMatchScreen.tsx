@@ -12,7 +12,7 @@ import { Avatar, Button, Card, Field, H2, Muted } from '../components/ui';
 import { ScoreInput } from '../components/ScoreInput';
 import { Stepper } from '../components/Stepper';
 import { SurfaceBadge } from '../components/SurfaceBadge';
-import { colors, font, radius, spacing, surfaceColors, surfaceColorsSoft } from '../theme';
+import { colors, font, fonts, radius, spacing, surfaceColors, surfaceColorsSoft } from '../theme';
 import type { Court, MatchStats, ScoreArray, Surface } from '../types';
 import { analyzeLocal } from '../utils/format';
 
@@ -584,10 +584,10 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   content: { padding: spacing.lg, gap: spacing.lg },
   preview: { alignItems: 'center', gap: 2 },
-  previewResult: { fontSize: font.h1, fontWeight: '900', letterSpacing: 2 },
-  previewSets: { color: colors.textDim, fontSize: font.small, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
-  sectionTitle: { color: colors.textDim, fontSize: font.small, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
-  groupTitle: { color: colors.primary, fontSize: font.small, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 },
+  previewResult: { fontSize: font.h1, fontFamily: fonts.display, letterSpacing: 2 },
+  previewSets: { color: colors.textDim, fontSize: font.small, fontFamily: fonts.bold, textTransform: 'uppercase', letterSpacing: 0.5 },
+  sectionTitle: { color: colors.textDim, fontSize: font.small, fontFamily: fonts.bold, textTransform: 'uppercase', letterSpacing: 0.5 },
+  groupTitle: { color: colors.primary, fontSize: font.small, fontFamily: fonts.bold, textTransform: 'uppercase', letterSpacing: 0.5 },
   surfaceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   surfaceChip: { padding: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border },
   rpeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
@@ -596,10 +596,10 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border,
   },
   rpePillActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  rpeText: { color: colors.textDim, fontWeight: '700' },
-  rpeTextActive: { color: colors.onPrimary, fontWeight: '800' },
+  rpeText: { color: colors.textDim, fontFamily: fonts.bold },
+  rpeTextActive: { color: colors.onPrimary, fontFamily: fonts.bold },
   statsToggle: { paddingVertical: spacing.sm },
-  statsToggleText: { color: colors.primary, fontWeight: '700', fontSize: font.body },
+  statsToggleText: { color: colors.primary, fontFamily: fonts.bold, fontSize: font.body },
   addPhoto: {
     height: 96,
     borderRadius: radius.md,
@@ -610,7 +610,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  addPhotoText: { color: colors.primary, fontWeight: '800', fontSize: font.body },
+  addPhotoText: { color: colors.primary, fontFamily: fonts.bold, fontSize: font.body },
   photoWrap: { position: 'relative' },
   photo: { width: '100%', aspectRatio: 4 / 3, borderRadius: radius.md, backgroundColor: colors.surfaceAlt },
   photoRemove: {
@@ -624,41 +624,41 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  photoRemoveText: { color: colors.white, fontWeight: '800', fontSize: 14 },
+  photoRemoveText: { color: colors.white, fontFamily: fonts.bold, fontSize: 14 },
   courtChip: {
     backgroundColor: colors.surfaceAlt, borderRadius: radius.md, paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm, borderWidth: 1, borderColor: colors.border, maxWidth: 180,
   },
   courtChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  courtChipText: { color: colors.text, fontWeight: '700', fontSize: font.small },
+  courtChipText: { color: colors.text, fontFamily: fonts.bold, fontSize: font.small },
   courtChipSub: { color: colors.textFaint, fontSize: font.tiny },
   addCourtChip: { borderColor: colors.primary, borderStyle: 'dashed', justifyContent: 'center' },
-  addCourtChipText: { color: colors.primary, fontWeight: '800', fontSize: font.small },
+  addCourtChipText: { color: colors.primary, fontFamily: fonts.bold, fontSize: font.small },
   tbToggle: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.xs },
   checkbox: {
     width: 22, height: 22, borderRadius: radius.sm, borderWidth: 1.5, borderColor: colors.border,
     alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface,
   },
   checkboxOn: { backgroundColor: colors.primary, borderColor: colors.primary },
-  checkboxMark: { color: colors.onPrimary, fontWeight: '900', fontSize: 13 },
+  checkboxMark: { color: colors.onPrimary, fontFamily: fonts.bold, fontSize: 13 },
   tbToggleText: { color: colors.textDim, fontSize: font.small, flexShrink: 1 },
   oppChip: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm, alignSelf: 'flex-start',
     backgroundColor: colors.primarySoft, borderRadius: radius.pill, paddingVertical: spacing.xs,
     paddingHorizontal: spacing.sm, maxWidth: '100%',
   },
-  oppChipName: { color: colors.text, fontWeight: '700', fontSize: font.small, flexShrink: 1 },
-  oppRemove: { color: colors.textDim, fontWeight: '800', paddingHorizontal: spacing.xs },
+  oppChipName: { color: colors.text, fontFamily: fonts.bold, fontSize: font.small, flexShrink: 1 },
+  oppRemove: { color: colors.textDim, fontFamily: fonts.bold, paddingHorizontal: spacing.xs },
   oppResult: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm, backgroundColor: colors.surfaceAlt,
     borderRadius: radius.md, padding: spacing.sm, borderWidth: 1, borderColor: colors.border,
   },
-  oppResultName: { color: colors.text, fontWeight: '700', fontSize: font.small },
+  oppResultName: { color: colors.text, fontFamily: fonts.bold, fontSize: font.small },
   oppResultHandle: { color: colors.textFaint, fontSize: font.tiny },
   dayChip: {
     paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.md,
     backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border,
   },
   dayChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  dayChipText: { color: colors.textDim, fontWeight: '700', fontSize: font.small },
+  dayChipText: { color: colors.textDim, fontFamily: fonts.bold, fontSize: font.small },
 });

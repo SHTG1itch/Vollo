@@ -7,7 +7,7 @@ import type { RootStackParamList } from '../navigation/types';
 import { api, ApiError } from '../api/client';
 import { Button, ErrorState, Field, H2, Loading, Muted, Screen } from '../components/ui';
 import { SurfaceBadge } from '../components/SurfaceBadge';
-import { colors, font, radius, shadow, spacing } from '../theme';
+import { colors, font, fonts, radius, shadow, spacing } from '../theme';
 import type { Court } from '../types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -170,7 +170,7 @@ export function CourtsScreen() {
 
 const styles = StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: spacing.lg, paddingBottom: spacing.sm },
-  back: { color: colors.primary, fontSize: 34, fontWeight: '700', marginTop: -4 },
+  back: { color: colors.primary, fontSize: 34, fontFamily: fonts.display, marginTop: -4 },
   searchRow: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-end', paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
   searchSpinner: { width: 56, height: 48, alignItems: 'center', justifyContent: 'center' },
   courtRow: {
@@ -178,6 +178,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.md, borderWidth: 1, borderColor: colors.border,
     ...shadow.card,
   },
-  courtName: { color: colors.text, fontWeight: '700', fontSize: font.body },
+  courtName: { color: colors.text, fontFamily: fonts.bold, fontSize: font.body },
   courtSub: { color: colors.textFaint, fontSize: font.small, marginTop: 2 },
 });

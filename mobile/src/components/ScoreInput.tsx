@@ -1,6 +1,6 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { colors, font, radius, spacing } from '../theme';
+import { colors, font, fonts, radius, spacing } from '../theme';
 import type { ScoreArray, SetScore } from '../types';
 
 /**
@@ -96,7 +96,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     padding: spacing.sm,
   },
-  setIndex: { color: colors.textDim, fontWeight: '800', width: 20, textAlign: 'center' },
+  setIndex: { color: colors.textDim, fontFamily: fonts.bold, width: 20, textAlign: 'center' },
   sides: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   dash: { color: colors.textFaint, fontSize: font.h3 },
   counter: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
@@ -108,9 +108,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  counterBtnText: { color: colors.primary, fontSize: 18, fontWeight: '800' },
-  counterValue: { color: colors.text, fontSize: font.h3, fontWeight: '800', minWidth: 24, textAlign: 'center' },
-  remove: { color: colors.loss, fontSize: font.body, fontWeight: '800', paddingHorizontal: spacing.xs },
+  counterBtnText: { color: colors.primary, fontSize: 18, fontFamily: fonts.display },
+  counterValue: { color: colors.text, fontSize: font.h3, fontFamily: fonts.heading, minWidth: 24, textAlign: 'center' },
+  remove: { color: colors.loss, fontSize: font.body, fontFamily: fonts.bold, paddingHorizontal: spacing.xs },
   addBtn: { alignItems: 'center', paddingVertical: spacing.sm },
-  addText: { color: colors.primary, fontWeight: '700' },
+  addText: { color: colors.primary, fontFamily: fonts.bold },
 });

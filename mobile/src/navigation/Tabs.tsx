@@ -8,7 +8,7 @@ import { LogMatchScreen } from '../screens/LogMatchScreen';
 import { NotificationsScreen } from '../screens/NotificationsScreen';
 import { MeScreen } from '../screens/ProfileScreen';
 import { useNotifications } from '../store/notifications';
-import { colors, shadow } from '../theme';
+import { colors, fonts, shadow } from '../theme';
 
 const Tab = createBottomTabNavigator<TabParamList>();
 
@@ -41,7 +41,7 @@ export function Tabs() {
           paddingTop: 6,
           ...shadow.bar,
         },
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '700' },
+        tabBarLabelStyle: { fontSize: 11, fontFamily: fonts.bold },
       }}
     >
       <Tab.Screen name="Feed" component={FeedScreen} options={{ tabBarIcon: icon('Feed') }} />

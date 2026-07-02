@@ -11,7 +11,7 @@ import { api, ApiError } from '../api/client';
 import { Button, Card, Field } from '../components/ui';
 import { SurfaceBadge } from '../components/SurfaceBadge';
 import { OsmMap, type LatLng, type OsmMapHandle } from '../components/OsmMap';
-import { colors, font, radius, shadow, spacing, surfaceColors, surfaceColorsSoft } from '../theme';
+import { colors, font, fonts, radius, shadow, spacing, surfaceColors, surfaceColorsSoft } from '../theme';
 import type { Surface } from '../types';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AddCourt'>;
@@ -304,7 +304,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     ...shadow.card,
   },
-  hintText: { color: colors.text, fontWeight: '700', fontSize: font.small },
+  hintText: { color: colors.text, fontFamily: fonts.bold, fontSize: font.small },
   recenter: {
     position: 'absolute',
     right: spacing.lg,
@@ -319,7 +319,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     ...shadow.card,
   },
-  recenterIcon: { color: colors.primary, fontSize: 22, fontWeight: '800' },
+  recenterIcon: { color: colors.primary, fontSize: 22, fontFamily: fonts.display },
   form: { margin: spacing.lg, gap: spacing.md },
   surfaceRow: { flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' },
   countRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },

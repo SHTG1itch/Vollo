@@ -222,7 +222,7 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: spacing.sm },
   title: { color: colors.white, fontFamily: fonts.display, fontSize: 22, letterSpacing: 0.3 },
   close: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', borderRadius: radius.pill, backgroundColor: 'rgba(255,255,255,0.12)' },
-  closeText: { color: colors.white, fontSize: 16, fontWeight: '700' },
+  closeText: { color: colors.white, fontSize: 16, fontFamily: fonts.bold },
   previewArea: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.md },
   previewFrame: {
     backgroundColor: colors.black,

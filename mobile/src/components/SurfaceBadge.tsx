@@ -1,6 +1,6 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { font, radius, spacing } from '../theme';
+import { font, fonts, radius, spacing } from '../theme';
 import { surfaceColors, surfaceLabel } from '../theme';
 import type { Surface } from '../types';
 
@@ -27,5 +27,5 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   dot: { width: 7, height: 7, borderRadius: 4 },
-  text: { fontWeight: '700' },
+  text: { fontFamily: fonts.bold },
 });

@@ -6,7 +6,7 @@ import { api } from '../api/client';
 import { useAuth } from '../store/auth';
 import { Avatar, Button, Card, ErrorState, Loading, Muted } from '../components/ui';
 import { SurfaceBadge } from '../components/SurfaceBadge';
-import { colors, font, radius, shadow, spacing } from '../theme';
+import { colors, font, fonts, radius, shadow, spacing } from '../theme';
 import type { Court, LeaderboardEntry } from '../types';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Court'>;
@@ -138,7 +138,7 @@ export function CourtDetailScreen({ route, navigation }: Props) {
 const styles = StyleSheet.create({
   content: { padding: spacing.lg, gap: spacing.md },
   titleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.sm },
-  name: { color: colors.text, fontSize: font.h2, fontWeight: '800', flex: 1 },
+  name: { color: colors.text, fontSize: font.h2, fontFamily: fonts.heading, flex: 1 },
   controllerBox: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.md, backgroundColor: colors.accentSoft,
     borderRadius: radius.md, padding: spacing.md, marginTop: spacing.sm,
@@ -151,17 +151,17 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     marginTop: 2,
   },
-  sectorText: { color: colors.primary, fontWeight: '700', fontSize: font.small },
+  sectorText: { color: colors.primary, fontFamily: fonts.bold, fontSize: font.small },
   crown: { fontSize: 24 },
   controllerLabel: { color: colors.textDim, fontSize: font.tiny, textTransform: 'uppercase', letterSpacing: 0.5 },
-  controllerName: { color: colors.text, fontWeight: '800', fontSize: font.body },
+  controllerName: { color: colors.text, fontFamily: fonts.bold, fontSize: font.body },
   boardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  boardTitle: { color: colors.text, fontWeight: '800', fontSize: font.h3 },
+  boardTitle: { color: colors.text, fontFamily: fonts.heading, fontSize: font.h3 },
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, backgroundColor: colors.surface, borderRadius: radius.md, padding: spacing.md, borderWidth: 1, borderColor: colors.border, ...shadow.card },
   rowYou: { backgroundColor: colors.primarySoft, borderColor: colors.primary },
-  youTag: { color: colors.primary, fontWeight: '800', fontSize: font.tiny },
-  rank: { color: colors.textDim, fontWeight: '800', width: 30, fontSize: font.body },
-  rowName: { color: colors.text, fontWeight: '700' },
+  youTag: { color: colors.primary, fontFamily: fonts.bold, fontSize: font.tiny },
+  rank: { color: colors.textDim, fontFamily: fonts.bold, width: 30, fontSize: font.body },
+  rowName: { color: colors.text, fontFamily: fonts.bold },
   rowSub: { color: colors.textFaint, fontSize: font.tiny },
-  rowScore: { color: colors.primary, fontWeight: '800' },
+  rowScore: { color: colors.primary, fontFamily: fonts.bold },
 });

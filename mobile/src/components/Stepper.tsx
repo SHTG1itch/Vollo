@@ -1,6 +1,6 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { colors, font, radius, spacing } from '../theme';
+import { colors, font, fonts, radius, spacing } from '../theme';
 
 export function Stepper({
   label,
@@ -62,6 +62,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  btnText: { color: colors.primary, fontSize: 20, fontWeight: '800', lineHeight: 22 },
-  value: { color: colors.text, fontSize: font.h3, fontWeight: '800', minWidth: 28, textAlign: 'center' },
+  btnText: { color: colors.primary, fontSize: 20, fontFamily: fonts.display, lineHeight: 22 },
+  value: { color: colors.text, fontSize: font.h3, fontFamily: fonts.heading, minWidth: 28, textAlign: 'center' },
 });

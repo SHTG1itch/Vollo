@@ -6,7 +6,7 @@ import { useAuth } from '../store/auth';
 import { Button, Field, Muted, Screen } from '../components/ui';
 import { SocialAuth } from '../components/SocialAuth';
 import { VolloWordmark } from '../components/VolloLogo';
-import { colors, font, radius, shadow, spacing } from '../theme';
+import { colors, font, fonts, radius, shadow, spacing } from '../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Login'>;
 
@@ -82,7 +82,7 @@ const styles = StyleSheet.create({
   error: {
     color: colors.loss,
     fontSize: font.small,
-    fontWeight: '600',
+    fontFamily: fonts.bold,
     textAlign: 'center',
     backgroundColor: colors.lossSoft,
     paddingVertical: spacing.sm,

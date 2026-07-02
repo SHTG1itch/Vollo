@@ -16,7 +16,7 @@ import { UserSearchScreen } from '../screens/UserSearchScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { ScheduledMatchesScreen } from '../screens/ScheduledMatchesScreen';
 import { ScheduleMatchScreen } from '../screens/ScheduleMatchScreen';
-import { colors } from '../theme';
+import { colors, fonts } from '../theme';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -28,7 +28,7 @@ export function RootNavigator() {
       screenOptions={{
         headerStyle: { backgroundColor: colors.surface },
         headerTintColor: colors.primary,
-        headerTitleStyle: { color: colors.text, fontWeight: '800' },
+        headerTitleStyle: { color: colors.text, fontFamily: fonts.heading },
         headerShadowVisible: false,
         contentStyle: { backgroundColor: colors.bg },
       }}

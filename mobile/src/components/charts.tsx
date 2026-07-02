@@ -1,6 +1,6 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { colors, font, radius, spacing } from '../theme';
+import { colors, font, fonts, radius, spacing } from '../theme';
 
 /** A single horizontal progress bar with a label and value. */
 export function ProgressBar({
@@ -110,12 +110,12 @@ export function RallyDistribution({
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  label: { color: colors.textDim, fontSize: font.small, fontWeight: '600' },
-  caption: { color: colors.text, fontSize: font.small, fontWeight: '700' },
+  label: { color: colors.textDim, fontSize: font.small, fontFamily: fonts.bold },
+  caption: { color: colors.text, fontSize: font.small, fontFamily: fonts.bold },
   track: { height: 9, backgroundColor: colors.surfaceAlt, borderRadius: radius.pill, overflow: 'hidden' },
   fill: { height: '100%', borderRadius: radius.pill },
   formDot: { width: 22, height: 22, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
-  formDotText: { color: colors.white, fontWeight: '800', fontSize: font.tiny },
+  formDotText: { color: colors.white, fontFamily: fonts.bold, fontSize: font.tiny },
   rallySeg: {
     height: 30,
     borderRadius: radius.sm,
@@ -123,6 +123,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: spacing.xs,
   },
-  rallySegText: { fontWeight: '800', fontSize: font.tiny },
+  rallySegText: { fontFamily: fonts.bold, fontSize: font.tiny },
   rallyLabel: { color: colors.textFaint, fontSize: font.tiny, textAlign: 'center' },
 });

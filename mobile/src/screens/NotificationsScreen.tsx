@@ -6,7 +6,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { useNotifications } from '../store/notifications';
 import { EmptyState, ErrorState, Loading } from '../components/ui';
-import { colors, font, radius, shadow, spacing } from '../theme';
+import { colors, font, fonts, radius, shadow, spacing } from '../theme';
 import { timeAgo } from '../utils/format';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -79,12 +79,12 @@ export function NotificationsScreen() {
 }
 
 const styles = StyleSheet.create({
-  title: { color: colors.text, fontSize: font.h1, fontWeight: '800', padding: spacing.lg },
+  title: { color: colors.text, fontSize: font.h1, fontFamily: fonts.display, padding: spacing.lg },
   row: { flexDirection: 'row', gap: spacing.md, backgroundColor: colors.surface, borderRadius: radius.md, padding: spacing.md, borderWidth: 1, borderColor: colors.border, ...shadow.card },
   unread: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
   dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.primary, marginTop: 6 },
   dotPlaceholder: { width: 8 },
-  rowTitle: { color: colors.text, fontWeight: '700', fontSize: font.body },
+  rowTitle: { color: colors.text, fontFamily: fonts.bold, fontSize: font.body },
   rowBody: { color: colors.textDim, fontSize: font.small, marginTop: 2 },
   rowTime: { color: colors.textFaint, fontSize: font.tiny, marginTop: 4 },
 });

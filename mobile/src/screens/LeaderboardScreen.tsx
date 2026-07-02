@@ -5,7 +5,7 @@ import type { RootStackParamList } from '../navigation/types';
 import { api } from '../api/client';
 import { useAuth } from '../store/auth';
 import { Avatar, EmptyState, ErrorState, Loading } from '../components/ui';
-import { colors, font, radius, shadow, spacing } from '../theme';
+import { colors, font, fonts, radius, shadow, spacing } from '../theme';
 import type { LeaderboardEntry } from '../types';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Leaderboard'>;
@@ -73,14 +73,14 @@ export function LeaderboardScreen({ route, navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
-  title: { color: colors.text, fontWeight: '800', fontSize: font.h3, marginBottom: spacing.sm },
+  title: { color: colors.text, fontFamily: fonts.heading, fontSize: font.h3, marginBottom: spacing.sm },
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, backgroundColor: colors.surface, borderRadius: radius.md, padding: spacing.md, borderWidth: 1, borderColor: colors.border, ...shadow.card },
   rowControlled: { borderColor: colors.primary },
   rowYou: { backgroundColor: colors.primarySoft, borderColor: colors.primary },
-  youTag: { color: colors.primary, fontWeight: '800', fontSize: font.tiny },
-  rank: { color: colors.textDim, fontWeight: '800', width: 34, fontSize: font.body, textAlign: 'center' },
-  name: { color: colors.text, fontWeight: '700' },
+  youTag: { color: colors.primary, fontFamily: fonts.bold, fontSize: font.tiny },
+  rank: { color: colors.textDim, fontFamily: fonts.bold, width: 34, fontSize: font.body, textAlign: 'center' },
+  name: { color: colors.text, fontFamily: fonts.bold },
   sub: { color: colors.textFaint, fontSize: font.tiny, marginTop: 2 },
-  score: { color: colors.primary, fontWeight: '800', fontSize: font.body },
+  score: { color: colors.primary, fontFamily: fonts.bold, fontSize: font.body },
   scoreLeader: { color: colors.onAccent, backgroundColor: colors.accent, paddingHorizontal: spacing.sm, paddingVertical: 2, borderRadius: radius.pill, overflow: 'hidden' },
 });

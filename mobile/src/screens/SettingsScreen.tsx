@@ -6,7 +6,7 @@ import type { RootStackParamList } from '../navigation/types';
 import { api, ApiError } from '../api/client';
 import { useAuth } from '../store/auth';
 import { Button, Card, Muted } from '../components/ui';
-import { colors, font, spacing } from '../theme';
+import { colors, font, fonts, spacing } from '../theme';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -72,5 +72,5 @@ export function SettingsScreen() {
 
 const styles = StyleSheet.create({
   content: { padding: spacing.lg, gap: spacing.md },
-  section: { color: colors.textDim, fontWeight: '800', fontSize: font.small, textTransform: 'uppercase', letterSpacing: 0.5 },
+  section: { color: colors.textDim, fontFamily: fonts.bold, fontSize: font.small, textTransform: 'uppercase', letterSpacing: 0.5 },
 });

@@ -6,7 +6,7 @@ import Animated, {
   withSequence,
   withSpring,
 } from 'react-native-reanimated';
-import { colors, font, radius, spacing } from '../theme';
+import { colors, font, fonts, radius, spacing } from '../theme';
 import { formatCount } from '../utils/format';
 
 /**
@@ -52,6 +52,6 @@ const styles = StyleSheet.create({
   btnActive: { backgroundColor: colors.primarySoft },
   ball: { fontSize: 18 },
   ballInactive: { opacity: 0.55 },
-  count: { color: colors.textDim, fontWeight: '700', fontSize: font.small },
+  count: { color: colors.textDim, fontFamily: fonts.bold, fontSize: font.small },
   countActive: { color: colors.primary },
 });

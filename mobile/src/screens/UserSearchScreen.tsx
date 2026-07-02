@@ -5,7 +5,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { api, type UserSearchResult } from '../api/client';
 import { Avatar, Button, EmptyState, Field, Screen } from '../components/ui';
-import { colors, font, radius, shadow, spacing } from '../theme';
+import { colors, font, fonts, radius, shadow, spacing } from '../theme';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -123,7 +123,7 @@ export function UserSearchScreen() {
 
 const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.lg, paddingBottom: spacing.md },
-  back: { color: colors.primary, fontSize: 34, fontWeight: '700', marginTop: -4 },
+  back: { color: colors.primary, fontSize: 34, fontFamily: fonts.display, marginTop: -4 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -135,6 +135,6 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     ...shadow.card,
   },
-  name: { color: colors.text, fontWeight: '700', fontSize: font.body },
+  name: { color: colors.text, fontFamily: fonts.bold, fontSize: font.body },
   handle: { color: colors.textFaint, fontSize: font.small, marginTop: 2 },
 });
