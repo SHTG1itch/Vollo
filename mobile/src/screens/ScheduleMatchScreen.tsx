@@ -1,11 +1,13 @@
 import React, { useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { api, ApiError } from '../api/client';
 import { Avatar, Button, Card, Field, Muted } from '../components/ui';
 import { SurfaceBadge } from '../components/SurfaceBadge';
+import { showToast } from '../components/Toast';
+import { notifyError, notifySuccess, tapLight } from '../lib/haptics';
 import { colors, font, fonts, radius, spacing, surfaceColors, surfaceColorsSoft } from '../theme';
 import type { Surface } from '../types';
 
@@ -71,11 +73,11 @@ export function ScheduleMatchScreen({ navigation, route }: Props) {
 
   const submit = async () => {
     if (!hasOpponent) {
-      Alert.alert('Add an opponent', 'Choose who you want to play.');
+      showToast('Choose who you want to play.', 'error');
       return;
     }
     if (inPast) {
-      Alert.alert('Pick a future time', 'That slot is already in the past.');
+      showToast('That slot is already in the past — pick a future time.', 'error');
       return;
     }
     setSaving(true);
@@ -87,23 +89,26 @@ export function ScheduleMatchScreen({ navigation, route }: Props) {
         ...(note.trim() ? { note: note.trim() } : {}),
         ...(isChallenge ? { is_challenge: true } : {}),
       });
-      Alert.alert(
-        isChallenge ? 'Challenge sent ⚔️' : 'Match proposed',
+      notifySuccess();
+      showToast(
         isChallenge
-          ? 'They’ll get a notification to accept your challenge.'
+          ? 'Challenge sent ⚔️ They’ll get a notification to accept.'
           : presetOpponentId
-            ? 'They’ll get a notification to accept or decline.'
-            : 'Added to your scheduled matches.',
-        [{ text: 'OK', onPress: () => navigation.goBack() }],
+            ? 'Match proposed — they’ll get a notification to accept or decline.'
+            : 'Match added to your scheduled matches.',
+        'success',
       );
+      navigation.goBack();
     } catch (e) {
-      Alert.alert('Could not schedule', e instanceof ApiError ? e.message : 'Try again');
+      notifyError();
+      showToast(e instanceof ApiError ? e.message : 'Could not schedule — try again', 'error');
     } finally {
       setSaving(false);
     }
   };
 
   return (
+    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.bg }}
       contentContainerStyle={[styles.content, { paddingTop: insets.top + spacing.lg }]}
@@ -140,6 +145,7 @@ export function ScheduleMatchScreen({ navigation, route }: Props) {
             <Pressable
               key={d}
               onPress={() => {
+                if (dayOffset !== d) tapLight();
                 setDayOffset(d);
                 if (d === 0 && base.getTime() + hour * 3_600_000 <= now) {
                   const next = HOURS.find((h) => base.getTime() + h * 3_600_000 > now);
@@ -154,7 +160,14 @@ export function ScheduleMatchScreen({ navigation, route }: Props) {
         </ScrollView>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
           {availableHours.map((h) => (
-            <Pressable key={h} onPress={() => setHour(h)} style={[styles.chip, hour === h && styles.chipActive]}>
+            <Pressable
+              key={h}
+              onPress={() => {
+                if (hour !== h) tapLight();
+                setHour(h);
+              }}
+              style={[styles.chip, hour === h && styles.chipActive]}
+            >
               <Text style={[styles.chipText, hour === h && styles.chipTextActive]}>{hourLabel(h)}</Text>
             </Pressable>
           ))}
@@ -169,7 +182,10 @@ export function ScheduleMatchScreen({ navigation, route }: Props) {
           {SURFACES.map((s) => (
             <Pressable
               key={s}
-              onPress={() => setSurface(surface === s ? null : s)}
+              onPress={() => {
+                if (surface !== s) tapLight();
+                setSurface(surface === s ? null : s);
+              }}
               style={[styles.surfaceChip, surface === s && { borderColor: surfaceColors[s], backgroundColor: surfaceColorsSoft[s] }]}
             >
               <SurfaceBadge surface={s} small />
@@ -181,12 +197,13 @@ export function ScheduleMatchScreen({ navigation, route }: Props) {
       {/* Note */}
       <Card style={{ gap: spacing.sm }}>
         <Text style={styles.section}>Note (optional)</Text>
-        <Field value={note} onChangeText={setNote} placeholder="e.g. Best of 3, bring new balls" multiline style={{ height: 70, paddingTop: spacing.sm }} />
+        <Field value={note} onChangeText={setNote} placeholder="e.g. Best of 3, bring new balls" multiline maxLength={280} style={{ height: 70, paddingTop: spacing.sm }} />
       </Card>
 
       <Button label={`${isChallenge ? '⚔️ Send challenge' : 'Propose'} · ${dayLabel(dayOffset, base)} ${hourLabel(hour)}`} onPress={submit} loading={saving} disabled={!hasOpponent || inPast} />
       <View style={{ height: spacing.xxl }} />
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 

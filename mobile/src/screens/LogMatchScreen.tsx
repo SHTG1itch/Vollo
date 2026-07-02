@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
@@ -8,6 +8,8 @@ import type { RootStackParamList, TabParamList } from '../navigation/types';
 import { api, ApiError, type CreateMatchPayload, type UserSearchResult } from '../api/client';
 import { useFeed } from '../store/feed';
 import { pickAndUploadMatchPhoto } from '../lib/uploadImage';
+import { showToast } from '../components/Toast';
+import { notifyError, notifySuccess, tapLight } from '../lib/haptics';
 import { Avatar, Button, Card, Field, H2, Muted } from '../components/ui';
 import { ScoreInput } from '../components/ScoreInput';
 import { Stepper } from '../components/Stepper';
@@ -229,7 +231,8 @@ export function LogMatchScreen() {
       const url = await pickAndUploadMatchPhoto();
       if (url) setPhotoUrl(url);
     } catch (e) {
-      Alert.alert('Upload failed', e instanceof Error ? e.message : 'Please try again.');
+      notifyError();
+      showToast(e instanceof Error ? e.message : 'Upload failed — please try again.', 'error');
     } finally {
       setUploadingPhoto(false);
     }
@@ -237,7 +240,7 @@ export function LogMatchScreen() {
 
   const submit = async () => {
     if (!scoreValid) {
-      Alert.alert('Check the score', 'Each set needs a winner and the match cannot end in a tie.');
+      showToast('Each set needs a winner and the match cannot end in a tie.', 'error');
       return;
     }
     setSubmitting(true);
@@ -265,6 +268,8 @@ export function LogMatchScreen() {
       };
       const { match } = await api.createMatch(payload);
       prepend(match);
+      notifySuccess();
+      showToast('Match logged 🎾', 'success');
       navigation.navigate('Tabs', { screen: 'Feed' });
       // Reset the match-specific fields for the next log; deliberately keep
       // surface + court as session context for back-to-back logging.
@@ -283,13 +288,15 @@ export function LogMatchScreen() {
       setShowStats(false);
       setStats(emptyStats());
     } catch (e) {
-      Alert.alert('Could not log match', e instanceof ApiError ? e.message : 'Something went wrong');
+      notifyError();
+      showToast(e instanceof ApiError ? e.message : 'Could not log match — something went wrong', 'error');
     } finally {
       setSubmitting(false);
     }
   };
 
   return (
+    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
     <ScrollView
       style={styles.container}
       contentContainerStyle={[styles.content, { paddingTop: insets.top + spacing.lg }]}
@@ -322,6 +329,7 @@ export function LogMatchScreen() {
             <Pressable
               key={s}
               onPress={() => {
+                if (surface !== s) tapLight();
                 setSurface(s);
                 setSurfaceTouched(true);
               }}
@@ -413,7 +421,10 @@ export function LogMatchScreen() {
           {[0, 1, 2, 3, 4, 5, 6, 7].map((d) => (
             <Pressable
               key={d}
-              onPress={() => setDaysAgo(d)}
+              onPress={() => {
+                if (daysAgo !== d) tapLight();
+                setDaysAgo(d);
+              }}
               style={[styles.dayChip, daysAgo === d && styles.dayChipActive]}
             >
               <Text style={[styles.dayChipText, daysAgo === d && { color: colors.onPrimary }]}>
@@ -427,7 +438,14 @@ export function LogMatchScreen() {
       {/* Court — tie the match to a location so the domination engine counts it */}
       <Section title="Court">
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: spacing.sm }}>
-          <CourtChip label="No court" active={courtId === null} onPress={() => setCourtId(null)} />
+          <CourtChip
+            label="No court"
+            active={courtId === null}
+            onPress={() => {
+              if (courtId !== null) tapLight();
+              setCourtId(null);
+            }}
+          />
           <Pressable onPress={openAddCourt} style={[styles.courtChip, styles.addCourtChip]}>
             <Text style={styles.addCourtChipText}>＋ Add court</Text>
           </Pressable>
@@ -438,6 +456,7 @@ export function LogMatchScreen() {
               sub={c.distance_km != null ? `${c.distance_km.toFixed(1)} km` : (c.city ?? undefined)}
               active={courtId === c.id}
               onPress={() => {
+                if (courtId !== c.id) tapLight();
                 setCourtId(c.id);
                 // Adopt the court's surface only if the user hasn't picked one
                 // themselves, so selecting a court can't silently override it.
@@ -457,7 +476,10 @@ export function LogMatchScreen() {
           {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
             <Pressable
               key={n}
-              onPress={() => setRpe(rpe === n ? null : n)}
+              onPress={() => {
+                if (rpe !== n) tapLight();
+                setRpe(rpe === n ? null : n);
+              }}
               style={[styles.rpePill, rpe === n && styles.rpePillActive]}
             >
               <Text style={[styles.rpeText, rpe === n && styles.rpeTextActive]}>{n}</Text>
@@ -478,7 +500,7 @@ export function LogMatchScreen() {
 
       {/* Notes */}
       <Section title="Notes">
-        <Field value={notes} onChangeText={setNotes} placeholder="How did it go?" multiline style={{ height: 80, paddingTop: spacing.sm }} />
+        <Field value={notes} onChangeText={setNotes} placeholder="How did it go?" multiline maxLength={500} style={{ height: 80, paddingTop: spacing.sm }} />
       </Section>
 
       {/* Photo — a proof-of-play shot shown on the feed card */}
@@ -548,6 +570,7 @@ export function LogMatchScreen() {
       <Button label="Log match" onPress={submit} loading={submitting} disabled={!scoreValid} style={{ marginTop: spacing.md }} />
       <View style={{ height: spacing.xxl }} />
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -8,6 +8,8 @@ import { api } from '../api/client';
 import { useAuth } from '../store/auth';
 import { Avatar, Button, Card, ErrorState, Loading, Muted, Stat } from '../components/ui';
 import { CountUp } from '../components/CountUp';
+import { showToast } from '../components/Toast';
+import { tapMedium } from '../lib/haptics';
 import { FormDots, ProgressBar, RallyDistribution, SplitBar } from '../components/charts';
 import { SurfaceBadge } from '../components/SurfaceBadge';
 import { colors, font, fonts, radius, spacing, surfaceColors } from '../theme';
@@ -102,6 +104,7 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
 
   const toggleFollow = async () => {
     if (!profile || followLoading) return;
+    tapMedium();
     const was = following;
     // Optimistically flip the button AND the follower count, revert both on error.
     setFollowing(!was);
@@ -113,7 +116,7 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
     } catch {
       setFollowing(was);
       adjustFollowerCount(was ? 1 : -1);
-      Alert.alert('Could not update', 'Please try again.');
+      showToast('Could not update — please try again.', 'error');
     } finally {
       setFollowLoading(false);
     }

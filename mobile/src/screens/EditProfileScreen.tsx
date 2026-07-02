@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
-import { ActivityIndicator, Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { api, ApiError } from '../api/client';
 import { useAuth } from '../store/auth';
 import { Avatar, Button, Card, Field, Muted } from '../components/ui';
 import { pickAndUploadProfileImage } from '../lib/uploadImage';
+import { showToast } from '../components/Toast';
+import { notifyError, notifySuccess, tapLight } from '../lib/haptics';
 import { colors, font, fonts, radius, spacing } from '../theme';
 import type { GeocodeResult } from '../types';
 
@@ -80,7 +82,8 @@ export function EditProfileScreen({ navigation }: Props) {
       const url = await pickAndUploadProfileImage('avatar');
       if (url) setAvatarUrl(url); // save() persists it via api.updateProfile
     } catch (e) {
-      Alert.alert('Upload failed', e instanceof Error ? e.message : 'Please try again.');
+      notifyError();
+      showToast(e instanceof Error ? e.message : 'Upload failed — please try again.', 'error');
     } finally {
       setUploadingAvatar(false);
     }
@@ -93,7 +96,8 @@ export function EditProfileScreen({ navigation }: Props) {
       const url = await pickAndUploadProfileImage('cover');
       if (url) setCoverUrl(url);
     } catch (e) {
-      Alert.alert('Upload failed', e instanceof Error ? e.message : 'Please try again.');
+      notifyError();
+      showToast(e instanceof Error ? e.message : 'Upload failed — please try again.', 'error');
     } finally {
       setUploadingCover(false);
     }
@@ -105,13 +109,31 @@ export function EditProfileScreen({ navigation }: Props) {
       const { results: r } = await api.geocode(homeQuery.trim());
       setResults(r);
     } catch {
-      /* ignore */
+      showToast('Location search failed — please try again.', 'error');
     }
   };
 
   const save = async () => {
     setSaving(true);
     try {
+      // Resolve a typed-but-unconfirmed home base: if the query doesn't match a
+      // picked result (and isn't just the untouched saved label), geocode it now
+      // so the text isn't silently discarded.
+      let resolvedHome = home;
+      const homeText = homeQuery.trim();
+      const homeUntouched = !home && homeText === (user?.home_label ?? '').trim();
+      if (homeText && !homeUntouched && (!home || home.label !== homeText)) {
+        try {
+          const { results: r } = await api.geocode(homeText);
+          resolvedHome = r[0] ?? null;
+        } catch {
+          resolvedHome = null;
+        }
+        if (!resolvedHome) {
+          showToast('Could not find that location — tap Find and pick a result', 'error');
+          return;
+        }
+      }
       const body: Record<string, unknown> = { display_name: displayName.trim(), bio: bio.trim(), dominant_hand: hand };
       // Send '' to clear back to the default hashed hue; a hex sets the signature.
       body.color = color ?? '';
@@ -119,7 +141,7 @@ export function EditProfileScreen({ navigation }: Props) {
       if (trimmedAvatar) body.avatar_url = trimmedAvatar;
       const trimmedCover = coverUrl.trim();
       if (trimmedCover) body.cover_url = trimmedCover;
-      if (home) body.home = { lat: home.lat, lng: home.lng, label: home.label };
+      if (resolvedHome) body.home = { lat: resolvedHome.lat, lng: resolvedHome.lng, label: resolvedHome.label };
       // Public gear loadout — send the full object so clearing a field persists.
       body.equipment = {
         ...(racquet.trim() ? { racquet: racquet.trim() } : {}),
@@ -129,16 +151,20 @@ export function EditProfileScreen({ navigation }: Props) {
       };
       const { user: updated } = await api.updateProfile(body);
       setUser(updated);
+      notifySuccess();
+      showToast('Profile saved', 'success');
       navigation.goBack();
     } catch (e) {
-      Alert.alert('Save failed', e instanceof ApiError ? e.message : 'Try again');
+      notifyError();
+      showToast(e instanceof ApiError ? e.message : 'Save failed — try again', 'error');
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: colors.bg }} contentContainerStyle={styles.content}>
+    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+    <ScrollView style={{ flex: 1, backgroundColor: colors.bg }} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <Card style={{ gap: spacing.md }}>
         <Pressable
           onPress={onPickCover}
@@ -189,12 +215,19 @@ export function EditProfileScreen({ navigation }: Props) {
           </View>
         </View>
         <Field label="Display name" value={displayName} onChangeText={setDisplayName} />
-        <Field label="Bio" value={bio} onChangeText={setBio} placeholder="Tell players about your game" multiline style={{ height: 80, paddingTop: spacing.sm }} />
+        <Field label="Bio" value={bio} onChangeText={setBio} placeholder="Tell players about your game" multiline maxLength={280} style={{ height: 80, paddingTop: spacing.sm }} />
         <View style={{ gap: spacing.xs }}>
           <Text style={styles.label}>Dominant hand</Text>
           <View style={{ flexDirection: 'row', gap: spacing.sm }}>
             {(['right', 'left'] as const).map((h) => (
-              <Pressable key={h} onPress={() => setHand(h)} style={[styles.handChip, hand === h && styles.handChipActive]}>
+              <Pressable
+                key={h}
+                onPress={() => {
+                  if (hand !== h) tapLight();
+                  setHand(h);
+                }}
+                style={[styles.handChip, hand === h && styles.handChipActive]}
+              >
                 <Text style={[styles.handText, hand === h && styles.handTextActive]}>{h === 'right' ? 'Right' : 'Left'}-handed</Text>
               </Pressable>
             ))}
@@ -275,6 +308,7 @@ export function EditProfileScreen({ navigation }: Props) {
 
       <Button label="Save" onPress={save} loading={saving} disabled={!displayName.trim()} />
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 

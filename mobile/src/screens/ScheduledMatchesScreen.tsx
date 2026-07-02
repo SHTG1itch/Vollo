@@ -1,10 +1,12 @@
 import React, { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { api, ApiError } from '../api/client';
-import { Avatar, Button, Card, EmptyState } from '../components/ui';
+import { Avatar, Button, Card, EmptyState, ErrorState } from '../components/ui';
+import { showToast } from '../components/Toast';
+import { notifyError } from '../lib/haptics';
 import { SurfaceBadge } from '../components/SurfaceBadge';
 import { colors, font, fonts, radius, spacing } from '../theme';
 import type { ScheduledMatchCard } from '../types';
@@ -38,13 +40,16 @@ export function ScheduledMatchesScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(false);
 
   const load = useCallback(async () => {
     try {
       const { scheduled_matches } = await api.getScheduledMatches();
       setItems(scheduled_matches);
+      setLoadError(false);
     } catch {
-      /* keep whatever we have */
+      // Keep whatever we have, but surface the failure when there's nothing to show.
+      setLoadError(true);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -63,7 +68,8 @@ export function ScheduledMatchesScreen() {
       const { scheduled_match } = await api.respondToScheduledMatch(s.id, action);
       setItems((prev) => prev.map((x) => (x.id === s.id ? scheduled_match : x)));
     } catch (e) {
-      Alert.alert('Could not update', e instanceof ApiError ? e.message : 'Try again');
+      notifyError();
+      showToast(e instanceof ApiError ? e.message : 'Could not update — try again', 'error');
     } finally {
       setBusyId(null);
     }
@@ -87,6 +93,18 @@ export function ScheduledMatchesScreen() {
       <View style={styles.center}>
         <ActivityIndicator color={colors.primary} size="large" />
       </View>
+    );
+  }
+
+  if (items.length === 0 && loadError) {
+    return (
+      <ErrorState
+        message="Couldn't load your matches."
+        onRetry={() => {
+          setLoading(true);
+          void load();
+        }}
+      />
     );
   }
 
@@ -120,7 +138,6 @@ export function ScheduledMatchesScreen() {
         const meta = STATUS_META[s.status];
         const canRespond = s.status === 'proposed' && s.viewer_role === 'opponent';
         const awaiting = s.status === 'proposed' && s.viewer_role === 'creator';
-        const canCancel = s.status === 'proposed' || s.status === 'accepted';
         const busy = busyId === s.id;
         return (
           <Card key={s.id} style={{ gap: spacing.md }}>
@@ -165,7 +182,7 @@ export function ScheduledMatchesScreen() {
               </View>
             ) : null}
 
-            {awaiting && canCancel ? (
+            {awaiting ? (
               <Pressable onPress={() => respond(s, 'cancel')} disabled={busy} style={{ alignSelf: 'flex-start' }}>
                 <Text style={styles.cancelLink}>Cancel proposal</Text>
               </Pressable>

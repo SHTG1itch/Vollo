@@ -41,18 +41,36 @@ export function ScoreInput({ value, onChange }: { value: ScoreArray; onChange: (
         <View key={idx} style={styles.setRow}>
           <Text style={styles.setIndex}>{idx + 1}</Text>
           <View style={styles.sides}>
-            <Counter value={set[0]} onMinus={() => updateSet(idx, 0, -1)} onPlus={() => updateSet(idx, 0, 1)} win={set[0] > set[1]} />
+            <Counter
+              value={set[0]}
+              onMinus={() => updateSet(idx, 0, -1)}
+              onPlus={() => updateSet(idx, 0, 1)}
+              win={set[0] > set[1]}
+              label={`your games in set ${idx + 1}`}
+            />
             <Text style={styles.dash}>–</Text>
-            <Counter value={set[1]} onMinus={() => updateSet(idx, 1, -1)} onPlus={() => updateSet(idx, 1, 1)} win={set[1] > set[0]} />
+            <Counter
+              value={set[1]}
+              onMinus={() => updateSet(idx, 1, -1)}
+              onPlus={() => updateSet(idx, 1, 1)}
+              win={set[1] > set[0]}
+              label={`opponent games in set ${idx + 1}`}
+            />
           </View>
-          <Pressable onPress={() => removeSet(idx)} disabled={value.length <= 1} hitSlop={6}>
+          <Pressable
+            onPress={() => removeSet(idx)}
+            disabled={value.length <= 1}
+            hitSlop={6}
+            accessibilityRole="button"
+            accessibilityLabel={`Remove set ${idx + 1}`}
+          >
             <Text style={[styles.remove, value.length <= 1 && { opacity: 0.25 }]}>✕</Text>
           </Pressable>
         </View>
       ))}
 
       {value.length < 5 ? (
-        <Pressable onPress={addSet} style={styles.addBtn}>
+        <Pressable onPress={addSet} style={styles.addBtn} accessibilityRole="button" accessibilityLabel="Add a set">
           <Text style={styles.addText}>+ Add set</Text>
         </Pressable>
       ) : null}
@@ -65,19 +83,23 @@ function Counter({
   onMinus,
   onPlus,
   win,
+  label,
 }: {
   value: number;
   onMinus: () => void;
   onPlus: () => void;
   win: boolean;
+  label: string;
 }) {
   return (
     <View style={styles.counter}>
-      <Pressable onPress={onMinus} style={styles.counterBtn} hitSlop={4}>
+      <Pressable onPress={onMinus} style={styles.counterBtn} hitSlop={4} accessibilityRole="button" accessibilityLabel={`Decrease ${label}`}>
         <Text style={styles.counterBtnText}>−</Text>
       </Pressable>
-      <Text style={[styles.counterValue, win && { color: colors.primary }]}>{value}</Text>
-      <Pressable onPress={onPlus} style={styles.counterBtn} hitSlop={4}>
+      <Text style={[styles.counterValue, win && { color: colors.primary }]} accessibilityLabel={`${label}: ${value}`}>
+        {value}
+      </Text>
+      <Pressable onPress={onPlus} style={styles.counterBtn} hitSlop={4} accessibilityRole="button" accessibilityLabel={`Increase ${label}`}>
         <Text style={styles.counterBtnText}>+</Text>
       </Pressable>
     </View>

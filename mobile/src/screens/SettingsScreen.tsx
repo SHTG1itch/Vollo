@@ -6,6 +6,8 @@ import type { RootStackParamList } from '../navigation/types';
 import { api, ApiError } from '../api/client';
 import { useAuth } from '../store/auth';
 import { Button, Card, Muted } from '../components/ui';
+import { showToast } from '../components/Toast';
+import { notifyError } from '../lib/haptics';
 import { colors, font, fonts, spacing } from '../theme';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -35,10 +37,12 @@ export function SettingsScreen() {
             setDeleting(true);
             try {
               await api.deleteAccount();
-              logout();
+              await logout();
             } catch (e) {
+              notifyError();
+              showToast(e instanceof ApiError ? e.message : 'Could not delete account — please try again.', 'error');
+            } finally {
               setDeleting(false);
-              Alert.alert('Could not delete account', e instanceof ApiError ? e.message : 'Please try again.');
             }
           },
         },

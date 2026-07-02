@@ -36,78 +36,71 @@ stream). Each match feeds three systems:
 | Layer | Choice | Why |
 |------|--------|-----|
 | Mobile | **Expo (React Native) + TypeScript** | One codebase → iOS & Android; EAS free cloud builds |
-| State | **Zustand** | Tiny, minimal re-renders, AsyncStorage persistence |
-| Maps | **react-native-maps + OpenStreetMap raster tiles** | Bypasses commercial vector-map licensing |
+| State | **Zustand** | Tiny, minimal re-renders |
+| Maps | **react-native-maps (iOS) / keyless Leaflet WebView (Android) + OSM raster tiles** | No commercial map licensing, no Google Maps API key |
 | Courts | **OpenStreetMap Overpass API** | Imports real-world tennis courts into the map at $0 (no key) |
 | Lists | **@shopify/flash-list** | High-performance feed rendering |
-| API | **Node.js + Express + TypeScript** | Shared language with the app |
-| Database | **PostgreSQL + PostGIS** | Native spatial geometry + `ST_ConcaveHull` territories |
+| API | **Supabase Edge Function (Deno + Hono + TypeScript)** | Single free function fronts all data access |
+| Auth | **Supabase Auth** (+ native Google / Apple sign-in) | Sessions, refresh tokens, email confirmation |
+| Database | **Supabase PostgreSQL + PostGIS** | Native spatial geometry + `ST_ConcaveHull` territories |
+| Storage | **Supabase Storage** (`user-media`) | Profile/cover/match photos |
 | Geocoding | **Nominatim (OSM)** / Geoapify free tier | Address → coordinates at no cost |
-| Hosting | **Render** (API) + **Supabase** (Postgres/PostGIS) free tiers | $0 runway |
 | Push | **Expo Push** → APNs + FCM | Free relay |
 
 ---
 
-## Monorepo layout
+## Repo layout
 
 ```
 Vollo/
-├── backend/                 # Express + PostGIS API
-│   ├── db/migrations/        # SQL schema (PostGIS, leaderboard + feed views)
+├── mobile/                   # Expo app
 │   └── src/
-│       ├── services/         # scoring, streak, rating, territory (convex hull), analytics…
-│       ├── routes/           # auth, matches, feed, courts, territories, users, notifications
-│       ├── workers/          # rolling streak + territory cron sweeps
-│       ├── utils/geo.ts      # haversine, clustering, compass naming, hull (testable mirror)
-│       └── db/               # pool, migration runner, seed
-├── mobile/                  # Expo app
-│   └── src/
-│       ├── api/              # typed fetch client
-│       ├── store/            # Zustand: auth, feed (optimistic kudos), notifications
-│       ├── components/       # MatchCard, KudosButton, ScoreInput, charts…
+│       ├── api/              # typed fetch client (base URL from app.json extra)
+│       ├── store/            # Zustand: auth (Supabase session bridge), feed, notifications
+│       ├── components/       # MatchCard, KudosButton, ScoreInput, Toast, icons, charts…
 │       ├── screens/          # Feed, Map, LogMatch, MatchDetail, Profile/analytics…
-│       └── navigation/       # tabs + root stack
-├── docker-compose.yml       # local PostGIS
-└── render.yaml              # one-click $0 deploy blueprint
+│       ├── lib/              # supabase client, oauth, haptics, image upload
+│       └── navigation/       # tabs + root stack + deep links (vollo://)
+└── supabase/
+    ├── functions/api/        # the entire backend: Hono router, scoring, streak,
+    │                         # rating, territory (concave hull), analytics, sweeps
+    └── migrations/           # SQL schema (PostGIS, views, triggers, RLS)
 ```
+
+The API runs as **one Supabase Edge Function** (`supabase/functions/api`), reached at
+`https://<project>.supabase.co/functions/v1/api/*`. It connects to Postgres with the
+service role (all client data access is funnelled through it; the public REST API
+stays sealed) and validates Supabase Auth bearer tokens per request.
 
 ---
 
-## Quickstart (local)
+## Quickstart
 
-### 1. Database (PostGIS via Docker)
-
-```bash
-docker compose up -d          # starts postgis/postgis on localhost:5432
-```
-
-### 2. Backend API
-
-```bash
-cd backend
-cp .env.example .env          # defaults already match docker-compose
-npm install
-npm run migrate               # apply the schema
-npm run seed                  # demo users, NYC courts, matches, territories
-npm run dev                   # http://localhost:4000
-```
-
-Demo login: **`srivats` / `volley123`**
-
-### 3. Mobile app
+### Mobile app
 
 ```bash
 cd mobile
 npm install
-# On a physical device, point the app at your machine's LAN IP:
-EXPO_PUBLIC_API_URL=http://<your-lan-ip>:4000 npx expo start
+npx expo start
 ```
 
-Open in **Expo Go** (scan the QR) or an emulator. Sign in with the demo account.
+Open in **Expo Go** (scan the QR) or `i` / `a` for a simulator/emulator. The app
+points at the production Supabase project via `app.json → extra.apiUrl`; override
+with `EXPO_PUBLIC_API_URL` to target a different deployment.
 
-> **Android map note:** the OSM raster tiles are 100% free. `react-native-maps`
-> still uses the device's base map provider underneath; on Android you may add a
-> (free) Google Maps API key for the base layer, but all *tiles* you see are OSM.
+> **Android map note:** Android renders a keyless Leaflet-in-WebView OSM map
+> (react-native-maps would crash without a Google Maps API key); iOS uses
+> react-native-maps on Apple Maps. Don't add a Google key or MapLibre — the
+> current setup is deliberate and Expo Go-safe.
+
+### Backend (Supabase)
+
+- **Migrations** live in `supabase/migrations` (applied via the Supabase MCP/CLI).
+- **Deploy** the edge function: bundle `supabase/functions/api` and deploy as the
+  `api` function with `verify_jwt` disabled (the function does its own Supabase
+  token validation, and `/auth/login` + `/auth/username-available` must be
+  reachable pre-auth).
+- OAuth provider setup is documented in [`supabase/OAUTH_SETUP.md`](supabase/OAUTH_SETUP.md).
 
 ---
 
@@ -124,7 +117,7 @@ MatchScore = (gamesWon − gamesLost) × StreakModifier
 ### Temporal heat index (streaks)
 Activity is bucketed into rolling 7-day windows. The streak is the run of consecutive
 windows with ≥1 match; the modifier scales up `+0.1` per maintained week, capped at
-`×2.0`. A daily cron sweep decays modifiers the moment a window lapses.
+`×2.0`. A 6-hourly sweep decays modifiers the moment a window lapses.
 
 ### Match verification (competitive integrity)
 A match logged against a **registered Vollo player** starts `pending` and counts for
@@ -157,11 +150,8 @@ On every counting match (and on a 6-hourly sweep) the engine, for each affected 
    ```
 4. **diffs** against existing territories → fires `territory_gained` / `territory_changed`
    / `territory_lost` notifications, and `court_taken` / `court_dethroned` when control
-   flips. The polygon is served as GeoJSON and rendered as a semi-transparent neon-green
-   `<Polygon/>` (`rgba(50,205,50,0.20)`).
-
-A pure-TypeScript mirror of the geometry (haversine, clustering, monotone-chain hull,
-compass district naming) lives in `backend/src/utils/geo.ts` and is fully unit-tested.
+   flips. The polygon is served as GeoJSON and rendered as a semi-transparent
+   brand-green polygon overlay.
 
 ### Vollo Rating (Bayesian)
 Each `(player, surface)` skill is a Gaussian posterior `θ ~ N(μ, σ²)`, where μ is
@@ -185,7 +175,7 @@ verified-match gate keeps that honest).
 
 ---
 
-## Beyond the spec (added features)
+## Feature highlights
 
 - **Real-world courts on the map** — the map and court pickers pull tennis courts
   straight from OpenStreetMap (Overpass API) for the current viewport and serve
@@ -197,57 +187,46 @@ verified-match gate keeps that honest).
 - **Drop-a-pin court adding** — can't find a court? Pan the map so the 🎾 sits on
   it, name it, pick a surface, set how many courts the venue has, and it's saved
   as a shared court everyone sees (reverse-geocoding fills the city best-effort).
-- **Match → location → domination** — every match can be tied to a court/sector,
-  which feeds the 30-day court leaderboard and the concave-hull territory engine.
 - **Match verification** — a match tagged against a registered player only counts
   once they confirm it (pending → verified / rejected), keeping Elo and turf honest.
 - **Turf Wars** — when a rival closes in on a court you control inside your
   territory, you get a "⚔️ Turf War Initiated" alert so control is a constant fight.
 - **Challenge a player** — a ⚔️ Challenge button on any profile (or on a domination
   zone's card) proposes a schedulable match; the opponent gets a challenge push.
-- **Tap a zone to see who to beat** — the map's sector card shows the dominant
-  player and how many wins they hold there, so you know the bar to claim it.
+- **Share to story** — a Strava-style share sheet rasterises a match card at story
+  resolution for Instagram/Snapchat, or copies it to the clipboard.
+- **Photos everywhere** — profile, cover and proof-of-play match photos via
+  Supabase Storage.
+- **Native Google / Apple sign-in** — ID-token flow into Supabase Auth; username
+  login is proxied server-side so emails never leave the backend.
 - **Fast, crash-free map** — courts paint instantly from the DB while new ones
-  import from OSM in the background. All native overlays unmount while you pan/zoom
-  and remount only once the gesture settles (so there's zero native-view churn —
-  the dominant crash vector), overlays commit on the idle frame and reuse their
-  native views when unchanged, sub-threshold pans coalesce, zoom is bounded, and
-  vertices/markers are capped.
-- **Public equipment loadout** — racquet, strings, tension and shoes on every
-  profile, so you can see what gear strong players use.
-- **Per-surface Vollo Rating (Bayesian)** — a Gaussian skill posterior N(μ, σ)
-  per surface, updated Bayesianly (Glicko-style) per match: each result is an
-  update layer that adds precision (so a new player's rating moves fast and a
-  seasoned one barely budges), with the game margin weighting the evidence.
-  Applied only once a match counts (verified/auto). Only the logging player's
-  rating moves (no unilateral tanking); ratings are a pure replay of match
-  history, so deleting a match recomputes exactly.
-- **Achievements / badges** — Clay Grinder, Comeback King, Territory Lord, On Fire…
-- **Head-to-head rivalries**, **comments**, **follows**, and a following-only feed.
-- **Playstyle labeling** — "Clay Court Grinder" vs "Hard Court Specialist" from your
-  surface win-rates and rally tendencies.
-- **In-app + Expo push notifications** and an Activity tab with unread badge.
-- **Compass-named districts** ("North District") derived from your home base.
+  import from OSM in the background; native overlays are capped, unmount during
+  gestures, and remount on the idle frame.
+- **Public equipment loadout**, **achievements**, **head-to-head rivalries**,
+  **comments**, **follows**, a following-only feed, **in-app + push notifications**,
+  and **compass-named districts** ("North District") from your home base.
 
 ---
 
 ## API reference (selected)
 
+All routes live under `https://<project>.supabase.co/functions/v1/api`.
+
 | Method & path | Purpose |
 |---|---|
-| `POST /api/auth/login` · `GET /api/auth/username-available?username=` · `GET /api/auth/me` | Auth — sign-up is client-side via **Supabase Auth**; sign-in is proxied server-side so a username resolves to a session without exposing email; the function validates the token and resolves the profile. **Google / Apple sign-in** use the native ID-token flow client-side (no new route) and validate through the same path — see [`supabase/OAUTH_SETUP.md`](supabase/OAUTH_SETUP.md). (The legacy Express backend in `backend/` still uses custom JWT.) |
+| `POST /api/auth/login` · `GET /api/auth/username-available?username=` · `GET /api/auth/me` | Auth — sign-up is client-side via **Supabase Auth**; sign-in is proxied server-side (DB-backed brute-force throttle) so a username resolves to a session without exposing email. **Google / Apple sign-in** use the native ID-token flow client-side — see [`supabase/OAUTH_SETUP.md`](supabase/OAUTH_SETUP.md) |
 | `GET /api/scheduled-matches` · `POST …` · `PATCH /:id` | Propose/accept/decline/cancel matches & **challenges** (`is_challenge`); a logged match links its result back |
-| `GET /api/feed?scope=global\|following&before=` | Paginated match cards |
+| `GET /api/feed?scope=global\|following&before=` | Paginated match cards (keyset cursor) |
 | `POST /api/matches` | Log a match (+ optional stat matrix); tagging a Vollo player makes it **pending verification** |
 | `GET /api/matches/pending` · `POST /api/matches/:id/verify` | Matches awaiting my confirmation; opponent confirms (counts) or rejects (disputed) |
 | `POST /api/matches/:id/kudos` · `DELETE …` | Kudos (idempotent) |
+| `GET /api/matches/:id/comments` · `POST …` | Comments (composite keyset cursor) |
 | `GET /api/courts?lat=&lng=&radius_km=` | Nearby courts (PostGIS `ST_DWithin`) |
 | `GET /api/courts/discover?min_lng=&min_lat=&max_lng=&max_lat=` | Import + name + group OSM courts into facility sectors, list them (`import=0` = DB-only fast paint) |
 | `POST /api/courts` | Add a court — a shared pin every user then sees |
 | `GET /api/courts/:id/leaderboard` | 30-day court leaderboard |
-| `GET /api/courts/geocode?q=` | Free Nominatim/Geoapify geocoding |
-| `GET /api/courts/reverse-geocode?lat=&lng=` | Reverse geocode a dropped pin → city/address |
-| `PATCH /api/users/me` | Update profile + public equipment loadout |
+| `GET /api/courts/geocode?q=` · `GET /api/courts/reverse-geocode?lat=&lng=` | Free Nominatim/Geoapify geocoding |
+| `PATCH /api/users/me` | Update profile + public equipment loadout (media URLs must point at Vollo storage) |
 | `GET /api/territories?min_lng=&min_lat=&max_lng=&max_lat=` | Territory polygons (GeoJSON) |
 | `GET /api/users/search?q=` | Find players by name/username (to follow / tag) |
 | `GET /api/users/:username/analytics` | Full performance profile |
@@ -258,22 +237,9 @@ verified-match gate keeps that honest).
 ## Testing
 
 ```bash
-cd backend && npm test        # 36 vitest cases: scoring, streak, geo, rating
-cd backend && npm run typecheck
-cd mobile  && npm run typecheck
+cd mobile && npm run typecheck
+cd mobile && npm run lint
 ```
-
----
-
-## Deploy at $0
-
-1. **Supabase** — create a free project; PostGIS ships enabled. Copy the connection string.
-2. **Render** — *New → Blueprint*, select this repo (`render.yaml`). Set `DATABASE_URL`
-   (Supabase) when prompted; `JWT_SECRET` is generated. The cron sweeps run in-process
-   via `START_WORKER=true`, so one free web service covers everything.
-3. From the Render shell once: `npm run migrate` (and optionally `npm run seed`).
-4. Point the mobile app at the deployed URL via `EXPO_PUBLIC_API_URL`, then build with
-   `eas build` (free tier) for iOS/Android.
 
 ---
 

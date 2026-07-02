@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View,
+  ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View,
 } from 'react-native';
 import MapView, { UrlTile, type Region } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -12,6 +12,8 @@ import { Button, Card, Field } from '../components/ui';
 import { Icon } from '../components/icons';
 import { SurfaceBadge } from '../components/SurfaceBadge';
 import { OsmMap, type LatLng, type OsmMapHandle } from '../components/OsmMap';
+import { showToast } from '../components/Toast';
+import { notifyError, notifySuccess, tapLight } from '../lib/haptics';
 import { colors, font, fonts, radius, shadow, spacing, surfaceColors, surfaceColorsSoft } from '../theme';
 import type { Surface } from '../types';
 
@@ -93,7 +95,7 @@ export function AddCourtScreen({ route, navigation }: Props) {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Location off', 'Enable location to centre on where you are.');
+        showToast('Enable location to centre on where you are.', 'error');
         return;
       }
       const pos = await Location.getCurrentPositionAsync({});
@@ -117,14 +119,14 @@ export function AddCourtScreen({ route, navigation }: Props) {
       const { results } = await api.geocode(q, 1);
       const hit = results[0];
       if (!hit) {
-        Alert.alert('Not found', 'Try a different address, or just pan the map.');
+        showToast('Address not found — try a different one, or just pan the map.', 'error');
         return;
       }
       const r = { ...DEFAULT_REGION, latitude: hit.lat, longitude: hit.lng };
       center.current = { lat: r.latitude, lng: r.longitude };
       mapRef.current?.animateToRegion(r, 450);
     } catch {
-      Alert.alert('Search unavailable', 'Address search is busy — just pan the map to the court.');
+      showToast('Address search is busy — just pan the map to the court.', 'error');
     } finally {
       setSearching(false);
     }
@@ -137,7 +139,7 @@ export function AddCourtScreen({ route, navigation }: Props) {
   const submit = async () => {
     const trimmed = name.trim();
     if (!trimmed || submitting) {
-      if (!trimmed) Alert.alert('Name the court', 'Give the court a name so other players can find it.');
+      if (!trimmed) showToast('Give the court a name so other players can find it.', 'error');
       return;
     }
     setSubmitting(true);
@@ -167,6 +169,8 @@ export function AddCourtScreen({ route, navigation }: Props) {
         ...(address ? { address } : {}),
       });
 
+      notifySuccess();
+      showToast('Court added 🎾', 'success');
       if (origin === 'log') {
         navigation.navigate('Tabs', { screen: 'Log', params: { newCourtId: court.id } });
       } else {
@@ -174,7 +178,8 @@ export function AddCourtScreen({ route, navigation }: Props) {
         navigation.replace('Court', { courtId: court.id });
       }
     } catch (e) {
-      Alert.alert('Could not add court', e instanceof ApiError ? e.message : 'Try again');
+      notifyError();
+      showToast(e instanceof ApiError ? e.message : 'Could not add court — try again', 'error');
     } finally {
       setSubmitting(false);
     }
@@ -231,13 +236,16 @@ export function AddCourtScreen({ route, navigation }: Props) {
 
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <Card style={styles.form}>
-          <Field label="Court name" value={name} onChangeText={setName} placeholder="Central Park Tennis Center" />
+          <Field label="Court name" value={name} onChangeText={setName} placeholder="Central Park Tennis Center" maxLength={120} />
 
           <View style={styles.surfaceRow}>
             {SURFACES.map((s) => (
               <Pressable
                 key={s}
-                onPress={() => setSurface(s)}
+                onPress={() => {
+                  if (surface !== s) tapLight();
+                  setSurface(s);
+                }}
                 style={[styles.surfaceChip, surface === s && { borderColor: surfaceColors[s], backgroundColor: surfaceColorsSoft[s] }]}
               >
                 <SurfaceBadge surface={s} small />
