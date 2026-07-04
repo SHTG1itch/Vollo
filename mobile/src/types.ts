@@ -291,6 +291,19 @@ export interface ProfileResponse {
   restricted: boolean;
 }
 
+export type GoalMetric = 'matches' | 'wins' | 'hours';
+export type GoalPeriod = 'weekly' | 'monthly';
+
+/** A personal weekly/monthly target; `current` is progress in the live period. */
+export interface Goal {
+  id: string;
+  metric: GoalMetric;
+  period: GoalPeriod;
+  target: number;
+  current: number;
+  created_at: string;
+}
+
 export interface BlockedUser {
   id: string;
   username: string;

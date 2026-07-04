@@ -5,6 +5,9 @@ import type {
   BlockedUser,
   Court,
   GeocodeResult,
+  Goal,
+  GoalMetric,
+  GoalPeriod,
   HeadToHead,
   LeaderboardEntry,
   MatchCard,
@@ -284,6 +287,12 @@ export const api = {
     request<{ user: AuthResponse['user'] }>('/users/me', { method: 'PATCH', body: JSON.stringify(body) }),
   follow: (username: string) => request<{ ok: boolean }>(`/users/${username}/follow`, { method: 'POST' }),
   unfollow: (username: string) => request<void>(`/users/${username}/follow`, { method: 'DELETE' }),
+  // ── Goals ──
+  getGoals: () => request<{ goals: Goal[] }>('/users/me/goals'),
+  setGoal: (body: { metric: GoalMetric; period: GoalPeriod; target: number }) =>
+    request<{ ok: boolean }>('/users/me/goals', { method: 'POST', body: JSON.stringify(body) }),
+  deleteGoal: (id: string) => request<void>(`/users/me/goals/${id}`, { method: 'DELETE' }),
+
   blockUser: (username: string) => request<{ ok: boolean }>(`/users/${username}/block`, { method: 'POST' }),
   unblockUser: (username: string) => request<void>(`/users/${username}/block`, { method: 'DELETE' }),
   getBlockedUsers: () => request<{ users: BlockedUser[] }>('/users/me/blocks'),

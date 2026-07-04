@@ -20,8 +20,8 @@ import {
   bboxQuerySchema, commentSchema, commentsQuerySchema, courtsQuerySchema,
   createCourtSchema, createMatchSchema, createScheduledMatchSchema, discoverQuerySchema, feedQuerySchema,
   geocodeQuerySchema, loginSchema, notificationIdsSchema, pushTokenSchema,
-  reverseGeocodeQuerySchema, updateProfileSchema, updateScheduledMatchSchema, userSearchQuerySchema,
-  verifyMatchSchema,
+  reverseGeocodeQuerySchema, setGoalSchema, updateProfileSchema, updateScheduledMatchSchema,
+  userSearchQuerySchema, verifyMatchSchema,
 } from './validation.ts';
 import type { CreateMatchInput } from './validation.ts';
 import { analyzeScore, matchScore } from './scoring.ts';
@@ -1352,6 +1352,61 @@ app.delete('/api/users/me', requireAuth, async (c) => {
     // Legacy row with no linked auth identity — remove the profile directly.
     await query('DELETE FROM users WHERE id = $1', [userId]);
   }
+  return c.body(null, 204);
+});
+
+// ─── Goals ───────────────────────────────────────────────────────────────
+// Personal weekly/monthly targets. Progress is computed on read from counted
+// matches in the current period, so verification flips and deletes stay exact.
+app.get('/api/users/me/goals', requireAuth, async (c) => {
+  const rows = await query<{
+    id: string; metric: string; period: string; target: string; created_at: unknown;
+    matches: string; wins: string; hours: string;
+  }>(
+    `SELECT g.id, g.metric::text AS metric, g.period::text AS period, g.target, g.created_at,
+            COALESCE(p.matches, 0) AS matches, COALESCE(p.wins, 0) AS wins, COALESCE(p.hours, 0) AS hours
+       FROM goals g
+       LEFT JOIN LATERAL (
+         SELECT COUNT(*) AS matches,
+                COUNT(*) FILTER (WHERE m.result = 'win') AS wins,
+                COALESCE(SUM(m.duration_minutes), 0) / 60.0 AS hours
+           FROM matches m
+          WHERE m.user_id = g.user_id
+            AND m.verification_status IN ('auto','verified')
+            AND m.played_at >= CASE WHEN g.period = 'weekly'
+                                    THEN date_trunc('week', now())
+                                    ELSE date_trunc('month', now()) END
+       ) p ON true
+      WHERE g.user_id = $1
+      ORDER BY g.period ASC, g.metric ASC`,
+    [uid(c)],
+  );
+  const goals = rows.map((r) => ({
+    id: r.id,
+    metric: r.metric,
+    period: r.period,
+    target: Number(r.target),
+    current:
+      r.metric === 'matches' ? Number(r.matches)
+      : r.metric === 'wins' ? Number(r.wins)
+      : Math.round(Number(r.hours) * 10) / 10,
+    created_at: toIso(r.created_at),
+  }));
+  return c.json({ goals });
+});
+
+app.post('/api/users/me/goals', requireAuth, async (c) => {
+  const b = setGoalSchema.parse(await jsonBody(c));
+  await query(
+    `INSERT INTO goals (user_id, metric, period, target) VALUES ($1, $2, $3, $4)
+     ON CONFLICT (user_id, metric, period) DO UPDATE SET target = EXCLUDED.target`,
+    [uid(c), b.metric, b.period, b.target],
+  );
+  return c.json({ ok: true }, 201);
+});
+
+app.delete('/api/users/me/goals/:id', requireAuth, async (c) => {
+  await query('DELETE FROM goals WHERE id = $1 AND user_id = $2', [c.req.param('id'), uid(c)]);
   return c.body(null, 204);
 });
 

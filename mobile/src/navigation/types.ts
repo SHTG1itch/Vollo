@@ -36,6 +36,7 @@ export type RootStackParamList = {
   EditProfile: undefined;
   UserSearch: undefined;
   Settings: undefined;
+  Goals: undefined;
   ScheduledMatches: undefined;
   // Propose a match; opponent is prefilled when launched from their profile.
   // `challenge` frames it as a competitive challenge (combative copy + alert).

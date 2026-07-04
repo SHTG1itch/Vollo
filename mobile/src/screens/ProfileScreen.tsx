@@ -13,8 +13,10 @@ import { tapMedium } from '../lib/haptics';
 import { FormDots, ProgressBar, RallyDistribution, SplitBar } from '../components/charts';
 import { SurfaceBadge } from '../components/SurfaceBadge';
 import { colors, font, fonts, radius, spacing, surfaceColors } from '../theme';
+import { goalCaption, goalTitle } from './GoalsScreen';
 import type {
   Achievement,
+  Goal,
   HeadToHead,
   MatchCard,
   ProfileAnalytics,
@@ -33,6 +35,7 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 export function ProfileView({ username, isSelf }: { username: string; isSelf: boolean }) {
   const navigation = useNavigation<Nav>();
 
+  const [goals, setGoals] = useState<Goal[]>([]);
   const [profile, setProfile] = useState<ProfileResponse | null>(null);
   const [analytics, setAnalytics] = useState<ProfileAnalytics | null>(null);
   const [ratings, setRatings] = useState<SurfaceRating[]>([]);
@@ -72,7 +75,7 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
           return;
         }
 
-        const [a, r, ach, st, terr, hh, feed] = await Promise.allSettled([
+        const [a, r, ach, st, terr, hh, feed, gl] = await Promise.allSettled([
           api.getAnalytics(username),
           api.getRatings(username),
           api.getAchievements(username),
@@ -80,8 +83,11 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
           api.getUserTerritories(prof.user.id),
           api.getHeadToHead(username),
           api.getUserFeed(prof.user.id, { limit: 5 }),
+          // Goals are personal — only the owner sees (or has) them.
+          isSelf ? api.getGoals() : Promise.resolve({ goals: [] as Goal[] }),
         ]);
         if (!active) return;
+        if (gl.status === 'fulfilled') setGoals(gl.value.goals);
         if (a.status === 'fulfilled') setAnalytics(a.value.analytics);
         if (r.status === 'fulfilled') setRatings(r.value.ratings);
         if (ach.status === 'fulfilled') setAchievements(ach.value.achievements);
@@ -309,6 +315,31 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
         </Card>
       </View>
       )}
+
+      {/* Goals (own profile only) */}
+      {isSelf ? (
+        <Card style={{ gap: spacing.md }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <SectionTitle>Goals</SectionTitle>
+            <Pressable onPress={() => navigation.navigate('Goals')} accessibilityRole="button" hitSlop={8}>
+              <Text style={styles.territoryGo}>{goals.length > 0 ? 'Manage →' : 'Set a goal →'}</Text>
+            </Pressable>
+          </View>
+          {goals.length === 0 ? (
+            <Muted style={{ textAlign: 'left' }}>Set a weekly or monthly target to stay on your game.</Muted>
+          ) : (
+            goals.map((g) => (
+              <ProgressBar
+                key={g.id}
+                label={goalTitle(g)}
+                pct={(g.current / g.target) * 100}
+                caption={goalCaption(g)}
+                color={g.current >= g.target ? colors.win : colors.primary}
+              />
+            ))
+          )}
+        </Card>
+      ) : null}
 
       {/* Gear (public equipment) */}
       {gear.length > 0 ? (

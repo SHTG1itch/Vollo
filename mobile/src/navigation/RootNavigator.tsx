@@ -14,6 +14,7 @@ import { UserProfileScreen } from '../screens/ProfileScreen';
 import { EditProfileScreen } from '../screens/EditProfileScreen';
 import { UserSearchScreen } from '../screens/UserSearchScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
+import { GoalsScreen } from '../screens/GoalsScreen';
 import { ScheduledMatchesScreen } from '../screens/ScheduledMatchesScreen';
 import { ScheduleMatchScreen } from '../screens/ScheduleMatchScreen';
 import { colors, fonts } from '../theme';
@@ -45,6 +46,7 @@ export function RootNavigator() {
           <Stack.Screen name="EditProfile" component={EditProfileScreen} options={{ title: 'Edit profile' }} />
           <Stack.Screen name="UserSearch" component={UserSearchScreen} options={{ headerShown: false }} />
           <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings' }} />
+          <Stack.Screen name="Goals" component={GoalsScreen} options={{ title: 'Goals' }} />
           <Stack.Screen name="ScheduledMatches" component={ScheduledMatchesScreen} options={{ title: 'Matches & challenges' }} />
           <Stack.Screen name="ScheduleMatch" component={ScheduleMatchScreen} options={{ title: 'Challenge' }} />
         </Stack.Group>

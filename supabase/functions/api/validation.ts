@@ -221,6 +221,26 @@ export const updateProfileSchema = z.object({
   is_private: z.boolean().optional(),
 });
 
+// ─── Goals ──────────────────────────────────────────────────────────────────
+// One goal per (metric, period) — POSTing again retargets the same goal.
+// Hours allow half steps; matches/wins must be whole numbers.
+export const setGoalSchema = z
+  .object({
+    metric: z.enum(['matches', 'wins', 'hours']),
+    period: z.enum(['weekly', 'monthly']),
+    target: z.number().positive().max(1000),
+  })
+  .superRefine((g, ctx) => {
+    const step = g.metric === 'hours' ? 0.5 : 1;
+    if (Math.round(g.target / step) * step !== g.target) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: g.metric === 'hours' ? 'hours goals go in half-hour steps' : 'target must be a whole number',
+        path: ['target'],
+      });
+    }
+  });
+
 // A query-string boolean: "1"/"true" → true, anything else present → false,
 // absent or empty → the default. Tolerant so a stray/empty flag never 400s.
 const boolParam = (def: boolean) =>
