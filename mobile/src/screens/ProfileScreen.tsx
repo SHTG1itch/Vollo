@@ -6,7 +6,7 @@ import type { NativeStackNavigationProp, NativeStackScreenProps } from '@react-n
 import type { RootStackParamList } from '../navigation/types';
 import { api } from '../api/client';
 import { useAuth } from '../store/auth';
-import { Avatar, Button, Card, ErrorState, Loading, Muted, Stat } from '../components/ui';
+import { Avatar, Button, Card, ErrorState, Loading, Muted, SectionHeader, Stat } from '../components/ui';
 import { CountUp } from '../components/CountUp';
 import { showToast } from '../components/Toast';
 import { tapMedium } from '../lib/haptics';
@@ -348,12 +348,13 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
       {/* Goals (own profile only) */}
       {isSelf ? (
         <Card style={{ gap: spacing.md }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-            <SectionTitle>Goals</SectionTitle>
-            <Pressable onPress={() => navigation.navigate('Goals')} accessibilityRole="button" hitSlop={8}>
-              <Text style={styles.territoryGo}>{goals.length > 0 ? 'Manage →' : 'Set a goal →'}</Text>
-            </Pressable>
-          </View>
+          <SectionHeader
+            title="Goals"
+            action={{
+              label: goals.length > 0 ? 'Manage →' : 'Set a goal →',
+              onPress: () => navigation.navigate('Goals'),
+            }}
+          />
           {goals.length === 0 ? (
             <Muted style={{ textAlign: 'left' }}>Set a weekly or monthly target to stay on your game.</Muted>
           ) : (
@@ -373,7 +374,7 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
       {/* Gear (public equipment) */}
       {gear.length > 0 ? (
         <Card style={{ gap: spacing.sm }}>
-          <SectionTitle>Gear</SectionTitle>
+          <SectionHeader title="Gear" />
           {gear.map((g) => (
             <View key={g.label} style={styles.gearRow}>
               <Text style={styles.gearIcon}>{g.icon}</Text>
@@ -387,7 +388,7 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
       {/* Recent form */}
       {analytics && analytics.recent_form.length > 0 ? (
         <Card style={{ gap: spacing.sm }}>
-          <SectionTitle>Recent form</SectionTitle>
+          <SectionHeader title="Recent form" />
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <FormDots form={analytics.recent_form} />
             <Text style={styles.winRate}>{analytics.overall.win_rate}% win rate</Text>
@@ -398,7 +399,7 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
       {/* Surface partitioning */}
       {analytics && analytics.by_surface.length > 0 ? (
         <Card style={{ gap: spacing.md }}>
-          <SectionTitle>Win rate by surface</SectionTitle>
+          <SectionHeader title="Win rate by surface" />
           {analytics.by_surface.map((s) => (
             <ProgressBar
               key={s.surface}
@@ -413,7 +414,7 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
       {/* Ratings per surface */}
       {ratings.length > 0 ? (
         <Card style={{ gap: spacing.sm }}>
-          <SectionTitle>Surface ratings</SectionTitle>
+          <SectionHeader title="Surface ratings" />
           {ratings.map((r) => (
             <View key={r.surface} style={styles.ratingRow}>
               <SurfaceBadge surface={r.surface as Surface} small />
@@ -432,7 +433,7 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
       {/* Stat matrix */}
       {analytics && analytics.overall.matches > 0 ? (
         <Card style={{ gap: spacing.lg }}>
-          <SectionTitle>Stat matrix</SectionTitle>
+          <SectionHeader title="Stat matrix" />
           <View style={{ gap: spacing.md }}>
             <ProgressBar label="1st serve in" pct={analytics.serve.first_serve_pct} />
             <ProgressBar label="2nd serve in" pct={analytics.serve.second_serve_pct} color={colors.accent} />
@@ -455,7 +456,7 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
       {/* Territories — tap a zone to fly to it on the Domination Map */}
       {territories.length > 0 ? (
         <Card style={{ gap: spacing.sm }}>
-          <SectionTitle>Territories</SectionTitle>
+          <SectionHeader title="Territories" />
           {territories.map((t) => {
             const dot = t.owner_color && HEX6.test(t.owner_color) ? t.owner_color : colors.primary;
             return (
@@ -487,16 +488,10 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
       {achievements.length > 0 ||
       (profile.stats.match_count > 0 && !profile.restricted && !profile.viewer_has_blocked) ? (
         <Card style={{ gap: spacing.sm }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-            <SectionTitle>Achievements</SectionTitle>
-            <Pressable
-              onPress={() => navigation.navigate('Records', { username })}
-              accessibilityRole="button"
-              hitSlop={8}
-            >
-              <Text style={styles.territoryGo}>Trophy case →</Text>
-            </Pressable>
-          </View>
+          <SectionHeader
+            title="Achievements"
+            action={{ label: 'Trophy case →', onPress: () => navigation.navigate('Records', { username }) }}
+          />
           {achievements.length > 0 ? (
             <View style={styles.badges}>
               {achievements.map((a) => (
@@ -515,7 +510,7 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
       {/* Head to head */}
       {h2h.length > 0 ? (
         <Card style={{ gap: spacing.sm }}>
-          <SectionTitle>Rivalries</SectionTitle>
+          <SectionHeader title="Rivalries" />
           {h2h.slice(0, 6).map((h, i) => (
             <View key={i} style={styles.h2hRow}>
               <Text style={styles.h2hName}>{h.opponent_name}</Text>
@@ -532,16 +527,10 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
       {/* Recent matches */}
       {recent.length > 0 ? (
         <Card style={{ gap: spacing.sm }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-            <SectionTitle>Recent matches</SectionTitle>
-            <Pressable
-              onPress={() => navigation.navigate('TrainingLog', { username })}
-              accessibilityRole="button"
-              hitSlop={8}
-            >
-              <Text style={styles.territoryGo}>Calendar →</Text>
-            </Pressable>
-          </View>
+          <SectionHeader
+            title="Recent matches"
+            action={{ label: 'Calendar →', onPress: () => navigation.navigate('TrainingLog', { username }) }}
+          />
           {recent.map((m) => (
             <Pressable key={m.id} style={styles.matchRow} onPress={() => navigation.navigate('MatchDetail', { matchId: m.id })}>
               <Text style={[styles.matchResult, { color: m.result === 'win' ? colors.win : colors.loss }]}>
@@ -557,10 +546,6 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
       <View style={{ height: spacing.xxl }} />
     </ScrollView>
   );
-}
-
-function SectionTitle({ children }: { children: React.ReactNode }) {
-  return <Text style={styles.sectionTitle}>{children}</Text>;
 }
 
 export function MeScreen() {

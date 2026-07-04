@@ -246,6 +246,30 @@ export function Stat({ label, value, color = colors.text }: { label: string; val
   );
 }
 
+/**
+ * The one section-title row: uppercase label left, optional action link right,
+ * both on the same baseline. Every card section uses this so titles and their
+ * trailing links line up identically across screens.
+ */
+export function SectionHeader({
+  title,
+  action,
+}: {
+  title: string;
+  action?: { label: string; onPress: () => void };
+}) {
+  return (
+    <View style={styles.sectionHeader}>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      {action ? (
+        <Pressable onPress={action.onPress} hitSlop={8} accessibilityRole="button" accessibilityLabel={action.label}>
+          <Text style={styles.sectionAction}>{action.label}</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
 export function H1({ children }: { children: React.ReactNode }) {
   return <Text style={styles.h1}>{children}</Text>;
 }
@@ -305,6 +329,9 @@ const styles = StyleSheet.create({
   segmentItemActive: { backgroundColor: colors.primary },
   segmentText: { color: colors.textDim, fontFamily: fonts.bold, fontSize: font.small },
   segmentTextActive: { color: colors.onPrimary, fontFamily: fonts.bold },
+  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', minHeight: 18 },
+  sectionTitle: { color: colors.textDim, fontFamily: fonts.bold, fontSize: font.small, textTransform: 'uppercase', letterSpacing: 0.5 },
+  sectionAction: { color: colors.primary, fontSize: font.tiny, fontFamily: fonts.bold },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl, gap: spacing.xs },
   dim: { color: colors.textDim, fontSize: font.small, fontFamily: fonts.body, textAlign: 'center' },
   emptyTitle: { color: colors.text, fontSize: font.h3, fontFamily: fonts.heading },

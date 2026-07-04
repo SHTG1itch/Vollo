@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { api, ApiError } from '../api/client';
-import { Button, Card, EmptyState, Loading, Muted, SegmentedControl } from '../components/ui';
+import { Button, Card, EmptyState, Loading, Muted, SectionHeader, SegmentedControl } from '../components/ui';
 import { ProgressBar } from '../components/charts';
 import { Stepper } from '../components/Stepper';
 import { showToast } from '../components/Toast';
@@ -82,7 +82,7 @@ export function GoalsScreen() {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: colors.bg }} contentContainerStyle={styles.content}>
       <Card style={{ gap: spacing.md }}>
-        <Text style={styles.section}>Set a goal</Text>
+        <SectionHeader title="Set a goal" />
         <SegmentedControl
           options={[
             { label: 'Matches', value: 'matches' as GoalMetric },
@@ -122,7 +122,7 @@ export function GoalsScreen() {
         />
       ) : (
         <Card style={{ gap: spacing.lg }}>
-          <Text style={styles.section}>Your goals</Text>
+          <SectionHeader title="Your goals" />
           {goals.map((g) => (
             <View key={g.id} style={{ gap: spacing.xs }}>
               <ProgressBar
@@ -157,7 +157,6 @@ export function GoalsScreen() {
 
 const styles = StyleSheet.create({
   content: { padding: spacing.lg, gap: spacing.md },
-  section: { color: colors.textDim, fontFamily: fonts.bold, fontSize: font.small, textTransform: 'uppercase', letterSpacing: 0.5 },
   goalFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   goalDone: { color: colors.win, fontFamily: fonts.bold, fontSize: font.small },
   remove: { color: colors.textFaint, fontSize: font.tiny, fontFamily: fonts.bold, padding: 4 },

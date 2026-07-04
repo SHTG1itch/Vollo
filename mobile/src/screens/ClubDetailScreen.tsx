@@ -5,7 +5,7 @@ import type { NativeStackNavigationProp, NativeStackScreenProps } from '@react-n
 import type { RootStackParamList } from '../navigation/types';
 import { api, ApiError } from '../api/client';
 import { useAuth } from '../store/auth';
-import { Avatar, Button, Card, ErrorState, Loading, Muted } from '../components/ui';
+import { Avatar, Button, Card, ErrorState, Loading, Muted, SectionHeader } from '../components/ui';
 import { MatchCard } from '../components/MatchCard';
 import { showToast } from '../components/Toast';
 import { tapMedium } from '../lib/haptics';
@@ -169,7 +169,7 @@ export function ClubDetailScreen({ route }: NativeStackScreenProps<RootStackPara
 
       {leaderboard.length > 0 ? (
         <Card style={{ gap: spacing.sm }}>
-          <Text style={styles.section}>This month&apos;s leaderboard</Text>
+          <SectionHeader title="This month's leaderboard" />
           {leaderboard.slice(0, 10).map((e) => (
             <Pressable key={e.user_id} style={styles.lbRow} onPress={() => goToPlayer(e.username)} accessibilityRole="button">
               <Text style={styles.lbRank}>{e.rank}</Text>
@@ -190,7 +190,7 @@ export function ClubDetailScreen({ route }: NativeStackScreenProps<RootStackPara
 
       {members.length > 0 ? (
         <Card style={{ gap: spacing.sm }}>
-          <Text style={styles.section}>Members</Text>
+          <SectionHeader title="Members" />
           {members.slice(0, 12).map((m) => (
             <Pressable key={m.id} style={styles.memberRow} onPress={() => goToPlayer(m.username)} accessibilityRole="button">
               <Avatar name={m.display_name} uri={m.avatar_url} size={30} />
@@ -205,7 +205,7 @@ export function ClubDetailScreen({ route }: NativeStackScreenProps<RootStackPara
         </Card>
       ) : null}
 
-      <Text style={styles.section}>Recent club matches</Text>
+      <SectionHeader title="Recent club matches" />
       {matches.length === 0 ? (
         <Muted>No matches from club members yet.</Muted>
       ) : (
@@ -230,7 +230,6 @@ const styles = StyleSheet.create({
   name: { color: colors.text, fontSize: font.h1, fontFamily: fonts.display },
   meta: { color: colors.textFaint, fontSize: font.small },
   desc: { color: colors.textDim, fontSize: font.body },
-  section: { color: colors.textDim, fontFamily: fonts.bold, fontSize: font.small, textTransform: 'uppercase', letterSpacing: 0.5 },
   lbRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   lbRank: { color: colors.textFaint, fontFamily: fonts.display, fontSize: font.body, width: 22, textAlign: 'center' },
   lbName: { color: colors.text, fontFamily: fonts.bold, fontSize: font.small },

@@ -3,7 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { api, ApiError } from '../api/client';
-import { Card, EmptyState, ErrorState, Loading, Stat } from '../components/ui';
+import { Card, EmptyState, ErrorState, Loading, SectionHeader, Stat } from '../components/ui';
 import { CountUp } from '../components/CountUp';
 import { SurfaceBadge } from '../components/SurfaceBadge';
 import { tapLight } from '../lib/haptics';
@@ -110,7 +110,7 @@ export function YearInReviewScreen({
 
       {/* Month by month */}
       <Card style={{ gap: spacing.md }}>
-        <Text style={styles.section}>Month by month</Text>
+        <SectionHeader title="Month by month" />
         <View style={styles.chart}>
           {review.monthly.map((m) => (
             <View key={m.month} style={styles.chartCol}>
@@ -149,7 +149,7 @@ export function YearInReviewScreen({
 
       {/* Highlights */}
       <Card style={{ gap: spacing.md }}>
-        <Text style={styles.section}>Highlights</Text>
+        <SectionHeader title="Highlights" />
         {review.longest_win_streak > 1 ? (
           <HighlightRow icon="🔥" title="Longest win streak" value={`${review.longest_win_streak} in a row`} />
         ) : null}
@@ -216,7 +216,6 @@ const styles = StyleSheet.create({
   hero: { color: colors.primary, fontSize: 64, fontFamily: fonts.display },
   heroLabel: { color: colors.textFaint, fontSize: font.tiny, fontFamily: fonts.bold, letterSpacing: 1 },
   heroSub: { color: colors.textDim, fontSize: font.body, fontFamily: fonts.bold, marginTop: spacing.xs },
-  section: { color: colors.textDim, fontFamily: fonts.bold, fontSize: font.small, textTransform: 'uppercase', letterSpacing: 0.5 },
   chart: { flexDirection: 'row', height: 110, alignItems: 'flex-end' },
   chartCol: { flex: 1, alignItems: 'center', gap: 4, height: '100%', justifyContent: 'flex-end' },
   barTrack: { flex: 1, width: 12, justifyContent: 'flex-end' },

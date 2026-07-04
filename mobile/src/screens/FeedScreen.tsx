@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { ActivityIndicator, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';

@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { api, ApiError } from '../api/client';
-import { Avatar, Button, Card, Field, Muted } from '../components/ui';
+import { Avatar, Button, Card, Field, Muted, SectionHeader } from '../components/ui';
 import { SurfaceBadge } from '../components/SurfaceBadge';
 import { showToast } from '../components/Toast';
 import { tapLight } from '../lib/haptics';
@@ -116,7 +116,7 @@ export function ScheduleMatchScreen({ navigation, route }: Props) {
 
       {/* Opponent */}
       <Card style={{ gap: spacing.sm }}>
-        <Text style={styles.section}>Opponent</Text>
+        <SectionHeader title="Opponent" />
         {presetOpponentId ? (
           <View style={styles.oppChip}>
             <Avatar name={presetOpponentName} size={32} />
@@ -137,7 +137,7 @@ export function ScheduleMatchScreen({ navigation, route }: Props) {
 
       {/* When */}
       <Card style={{ gap: spacing.md }}>
-        <Text style={styles.section}>When</Text>
+        <SectionHeader title="When" />
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
           {Array.from({ length: 14 }, (_, d) => d).map((d) => (
             <Pressable
@@ -175,7 +175,7 @@ export function ScheduleMatchScreen({ navigation, route }: Props) {
 
       {/* Surface (optional) */}
       <Card style={{ gap: spacing.sm }}>
-        <Text style={styles.section}>Surface (optional)</Text>
+        <SectionHeader title="Surface (optional)" />
         <View style={styles.surfaceRow}>
           {SURFACES.map((s) => (
             <Pressable
@@ -194,7 +194,7 @@ export function ScheduleMatchScreen({ navigation, route }: Props) {
 
       {/* Note */}
       <Card style={{ gap: spacing.sm }}>
-        <Text style={styles.section}>Note (optional)</Text>
+        <SectionHeader title="Note (optional)" />
         <Field value={note} onChangeText={setNote} placeholder="e.g. Best of 3, bring new balls" multiline maxLength={280} style={{ height: 70, paddingTop: spacing.sm }} />
       </Card>
 
@@ -208,7 +208,6 @@ export function ScheduleMatchScreen({ navigation, route }: Props) {
 const styles = StyleSheet.create({
   content: { padding: spacing.lg, gap: spacing.md },
   title: { color: colors.text, fontSize: font.h1, fontFamily: fonts.display, letterSpacing: 0.3 },
-  section: { color: colors.textDim, fontSize: font.small, fontFamily: fonts.bold, textTransform: 'uppercase', letterSpacing: 0.5 },
   oppChip: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   oppName: { color: colors.text, fontFamily: fonts.bold, fontSize: font.body },
   oppHandle: { color: colors.textFaint, fontSize: font.small },
