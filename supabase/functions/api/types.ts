@@ -16,6 +16,8 @@ export type NotificationType =
   | 'kudos'
   | 'comment'
   | 'follow'
+  | 'follow_request'
+  | 'follow_accepted'
   | 'territory_gained'
   | 'territory_lost'
   | 'territory_changed'

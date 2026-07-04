@@ -215,8 +215,10 @@ verified-match gate keeps that honest).
 - **Season recap** — a year-in-review with hero totals, month-by-month stacked
   bars, top rival, home court, favourite surface and kudos received.
 - **Privacy + blocking** — a private-account toggle (matches/stats visible to
-  followers only) and player blocking that severs follows both ways and makes
-  the two players mutually invisible (feed, search, profiles, comments, kudos).
+  followers only) with a Strava-style **follow approval queue** (requests land
+  in Alerts; accept/decline), and player blocking that severs follows and
+  pending requests both ways, making the two players mutually invisible
+  (feed, search, profiles, comments, kudos).
 - **Public equipment loadout**, **achievements**, **head-to-head rivalries**,
   **comments**, **follows**, a following-only feed, **in-app + push notifications**,
   and **compass-named districts** ("North District") from your home base.
@@ -250,6 +252,7 @@ All routes live under `https://<project>.supabase.co/functions/v1/api`.
 | `GET /api/clubs` · `GET /api/clubs/mine` · `POST /api/clubs` | Discover/search clubs, my clubs, start a club |
 | `GET /api/clubs/:id` · `…/leaderboard` · `…/feed` · `POST`/`DELETE …/join` | Club detail + members, 30-day leaderboard, shared feed, join/leave |
 | `POST /api/users/:username/block` · `DELETE …` · `GET /api/users/me/blocks` | Block/unblock a player, list blocked players |
+| `GET /api/users/me/follow-requests` · `POST …/:userId` | Private-account follow approval queue (accept/decline) |
 | `DELETE /api/users/me` | Delete your account (cascades all owned data) |
 
 ---
