@@ -217,6 +217,8 @@ export const updateProfileSchema = z.object({
     })
     .optional(),
   equipment: equipmentSchema.optional(),
+  // Private account: matches/stats visible only to followers (see 021).
+  is_private: z.boolean().optional(),
 });
 
 // A query-string boolean: "1"/"true" → true, anything else present → false,

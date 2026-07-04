@@ -40,7 +40,7 @@ type Env = { Variables: { user?: AuthClaims } };
 
 const USER_SELECT = `
   id, username, email, display_name, avatar_url, cover_url, bio, dominant_hand, color,
-  ST_Y(home_geom) AS home_lat, ST_X(home_geom) AS home_lng, home_label, equipment, created_at
+  ST_Y(home_geom) AS home_lat, ST_X(home_geom) AS home_lng, home_label, equipment, is_private, created_at
 `;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -244,6 +244,58 @@ async function resolveUserId(username: string): Promise<string> {
 }
 
 /**
+ * Can `viewerId` see `targetId`'s content (matches, stats, analytics)?
+ * - `blocked`: a block exists in either direction — the players are mutually
+ *   invisible, so callers surface a 404 (never reveal the block).
+ * - `restricted`: the target is private and the viewer isn't a follower — the
+ *   profile shell stays visible but matches/stats do not.
+ */
+async function profileAccess(
+  targetId: string,
+  viewerId: string | null,
+): Promise<{ blocked: boolean; restricted: boolean }> {
+  if (viewerId === targetId) return { blocked: false, restricted: false };
+  const row = await queryOne<{ is_private: boolean; blocked: boolean; follows: boolean }>(
+    `SELECT u.is_private,
+            EXISTS(SELECT 1 FROM blocks b
+                    WHERE (b.blocker_id = u.id AND b.blocked_id = $2)
+                       OR (b.blocker_id = $2 AND b.blocked_id = u.id)) AS blocked,
+            EXISTS(SELECT 1 FROM follows f
+                    WHERE f.follower_id = $2 AND f.following_id = u.id) AS follows
+       FROM users u WHERE u.id = $1`,
+    [targetId, viewerId],
+  );
+  if (!row) throw ApiError.notFound('User not found');
+  return { blocked: Boolean(row.blocked), restricted: row.is_private && !row.follows };
+}
+
+/** Guard for content routes: 404 when blocked (invisible), 403 when private. */
+async function assertCanViewContent(targetId: string, viewerId: string | null): Promise<void> {
+  const access = await profileAccess(targetId, viewerId);
+  if (access.blocked) throw ApiError.notFound('User not found');
+  if (access.restricted) throw new ApiError(403, 'private_profile', 'This profile is private');
+}
+
+/**
+ * SQL fragments that hide matches the viewer may not see, matching
+ * assertCanViewContent: no block in either direction, and private authors only
+ * for their followers (or themselves). `viewerParam` is the placeholder holding
+ * the (nullable) viewer id; `authorCol` the match author column. With a NULL
+ * viewer the block EXISTS never matches and only public authors pass.
+ */
+function matchVisibilityConditions(viewerParam: string, authorCol: string): string[] {
+  return [
+    `(${authorCol} = ${viewerParam} OR NOT EXISTS(
+        SELECT 1 FROM blocks b
+         WHERE (b.blocker_id = ${viewerParam} AND b.blocked_id = ${authorCol})
+            OR (b.blocker_id = ${authorCol} AND b.blocked_id = ${viewerParam})))`,
+    `(${authorCol} = ${viewerParam}
+       OR NOT (SELECT u.is_private FROM users u WHERE u.id = ${authorCol})
+       OR EXISTS(SELECT 1 FROM follows f WHERE f.follower_id = ${viewerParam} AND f.following_id = ${authorCol}))`,
+  ];
+}
+
+/**
  * Apply a (now-counting) match's effects to the logger: recompute their streak,
  * persist the court MatchScore with the current streak modifier, and recompute
  * their Bayesian per-surface ratings from history. Used both for matches that
@@ -369,7 +421,7 @@ app.get('/api/feed', optionalAuth, async (c) => {
   const viewerId = c.get('user')?.sub ?? null;
   if (scope === 'following' && !viewerId) throw ApiError.unauthorized('Sign in to view your following feed');
 
-  const conditions: string[] = [];
+  const conditions: string[] = [...matchVisibilityConditions('$1', 'mf.user_id')];
   const params: unknown[] = [viewerId];
   let p = params.length;
 
@@ -404,6 +456,7 @@ app.get('/api/feed', optionalAuth, async (c) => {
 app.get('/api/feed/user/:userId', optionalAuth, async (c) => {
   const { limit, before } = feedQuerySchema.parse(c.req.query());
   const viewerId = c.get('user')?.sub ?? null;
+  await assertCanViewContent(c.req.param('userId'), viewerId);
   const params: unknown[] = [viewerId, c.req.param('userId')];
   let p = params.length;
   let extra = '';
@@ -665,9 +718,20 @@ app.post('/api/matches/:id/verify', requireAuth, async (c) => {
   return c.json({ match: await fetchMatchCard(id, userId) });
 });
 
+/** The match's participants always see it; everyone else is subject to the
+ *  author's privacy + blocks. Throws (404/403) when the viewer may not see it. */
+async function assertCanViewMatch(
+  match: { user_id: string; opponent_id?: string | null },
+  viewerId: string | null,
+): Promise<void> {
+  if (viewerId && (viewerId === match.user_id || viewerId === match.opponent_id)) return;
+  await assertCanViewContent(match.user_id, viewerId);
+}
+
 app.get('/api/matches/:id', optionalAuth, async (c) => {
   const card = await fetchMatchCard(c.req.param('id'), c.get('user')?.sub ?? null);
   if (!card) throw ApiError.notFound('Match not found');
+  await assertCanViewMatch(card, c.get('user')?.sub ?? null);
   return c.json({ match: card });
 });
 
@@ -722,8 +786,10 @@ app.delete('/api/matches/:id', requireAuth, async (c) => {
 app.post('/api/matches/:id/kudos', requireAuth, async (c) => {
   const userId = uid(c);
   const id = c.req.param('id');
-  const match = await queryOne<{ user_id: string }>('SELECT user_id FROM matches WHERE id = $1', [id]);
+  const match = await queryOne<{ user_id: string; opponent_id: string | null }>(
+    'SELECT user_id, opponent_id FROM matches WHERE id = $1', [id]);
   if (!match) throw ApiError.notFound('Match not found');
+  await assertCanViewMatch(match, userId);
 
   const inserted = await queryOne<{ id: string }>(
     'INSERT INTO kudos (match_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING id',
@@ -755,6 +821,10 @@ app.delete('/api/matches/:id/kudos', requireAuth, async (c) => {
 app.get('/api/matches/:id/comments', optionalAuth, async (c) => {
   const { limit, before } = commentsQuerySchema.parse(c.req.query());
   const id = c.req.param('id');
+  const parent = await queryOne<{ user_id: string; opponent_id: string | null }>(
+    'SELECT user_id, opponent_id FROM matches WHERE id = $1', [id]);
+  if (!parent) throw ApiError.notFound('Match not found');
+  await assertCanViewMatch(parent, c.get('user')?.sub ?? null);
   const params: unknown[] = [id];
   let extra = '';
   if (before) {
@@ -790,8 +860,10 @@ app.post('/api/matches/:id/comments', requireAuth, async (c) => {
   const userId = uid(c);
   const id = c.req.param('id');
   const { body } = commentSchema.parse(await jsonBody(c));
-  const match = await queryOne<{ user_id: string }>('SELECT user_id FROM matches WHERE id = $1', [id]);
+  const match = await queryOne<{ user_id: string; opponent_id: string | null }>(
+    'SELECT user_id, opponent_id FROM matches WHERE id = $1', [id]);
   if (!match) throw ApiError.notFound('Match not found');
+  await assertCanViewMatch(match, userId);
 
   const comment = await queryOne(
     `WITH inserted AS (
@@ -1208,6 +1280,7 @@ app.patch('/api/users/me', requireAuth, async (c) => {
   if (b.avatar_url !== undefined) { sets.push(`avatar_url = $${i++}`); params.push(b.avatar_url); }
   if (b.cover_url !== undefined) { sets.push(`cover_url = $${i++}`); params.push(b.cover_url); }
   if (b.dominant_hand !== undefined) { sets.push(`dominant_hand = $${i++}`); params.push(b.dominant_hand); }
+  if (b.is_private !== undefined) { sets.push(`is_private = $${i++}`); params.push(b.is_private); }
   if (b.color !== undefined) { sets.push(`color = $${i++}`); params.push(b.color); }
   if (b.home !== undefined) {
     sets.push(`home_geom = ST_SetSRID(ST_MakePoint($${i++}, $${i++}), 4326)`);
@@ -1244,6 +1317,10 @@ app.get('/api/users/search', requireAuth, async (c) => {
        FROM users u
       WHERE u.id <> $1
         AND (u.username ILIKE '%' || $2 || '%' OR u.display_name ILIKE '%' || $2 || '%')
+        -- Blocked players (either direction) are mutually invisible in search.
+        AND NOT EXISTS(SELECT 1 FROM blocks b
+                        WHERE (b.blocker_id = $1 AND b.blocked_id = u.id)
+                           OR (b.blocker_id = u.id AND b.blocked_id = $1))
       ORDER BY (u.username ILIKE $2 || '%' OR u.display_name ILIKE $2 || '%') DESC, u.username ASC
       LIMIT $3`,
     [userId, q, limit],
@@ -1278,6 +1355,46 @@ app.delete('/api/users/me', requireAuth, async (c) => {
   return c.body(null, 204);
 });
 
+// ─── Blocking ────────────────────────────────────────────────────────────
+// Declared before the /users/:username matchers so "me" is never read as a
+// username. A block is one-directional in storage but symmetric in effect.
+app.get('/api/users/me/blocks', requireAuth, async (c) => {
+  const users = await query(
+    `SELECT u.id, u.username, u.display_name, u.avatar_url, b.created_at AS blocked_at
+       FROM blocks b JOIN users u ON u.id = b.blocked_id
+      WHERE b.blocker_id = $1
+      ORDER BY b.created_at DESC LIMIT 200`,
+    [uid(c)],
+  );
+  return c.json({ users });
+});
+
+app.post('/api/users/:username/block', requireAuth, async (c) => {
+  const userId = uid(c);
+  const targetId = await resolveUserId(c.req.param('username'));
+  if (targetId === userId) throw ApiError.badRequest('You cannot block yourself');
+  await withTransaction(async (client) => {
+    await client.query(
+      'INSERT INTO blocks (blocker_id, blocked_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+      [userId, targetId],
+    );
+    // Blocking severs the relationship in both directions.
+    await client.query(
+      `DELETE FROM follows
+        WHERE (follower_id = $1 AND following_id = $2) OR (follower_id = $2 AND following_id = $1)`,
+      [userId, targetId],
+    );
+  });
+  return c.json({ ok: true }, 201);
+});
+
+app.delete('/api/users/:username/block', requireAuth, async (c) => {
+  const userId = uid(c);
+  const targetId = await resolveUserId(c.req.param('username'));
+  await query('DELETE FROM blocks WHERE blocker_id = $1 AND blocked_id = $2', [userId, targetId]);
+  return c.body(null, 204);
+});
+
 app.get('/api/users/:username', optionalAuth, async (c) => {
   const viewerId = c.get('user')?.sub ?? null;
   const row = await queryOne<Record<string, unknown>>(
@@ -1288,13 +1405,23 @@ app.get('/api/users/:username', optionalAuth, async (c) => {
             (SELECT COUNT(*) FROM territories WHERE user_id = u.id)   AS territory_count,
             CASE WHEN $2::uuid IS NULL THEN false
                  ELSE EXISTS(SELECT 1 FROM follows f WHERE f.follower_id = $2 AND f.following_id = u.id)
-            END AS viewer_is_following
+            END AS viewer_is_following,
+            CASE WHEN $2::uuid IS NULL THEN false
+                 ELSE EXISTS(SELECT 1 FROM blocks b WHERE b.blocker_id = $2 AND b.blocked_id = u.id)
+            END AS viewer_has_blocked,
+            CASE WHEN $2::uuid IS NULL THEN false
+                 ELSE EXISTS(SELECT 1 FROM blocks b WHERE b.blocker_id = u.id AND b.blocked_id = $2)
+            END AS blocked_by
        FROM users u WHERE u.username = $1`,
     [c.req.param('username'), viewerId],
   );
   if (!row) throw ApiError.notFound('User not found');
+  // Someone this user blocked never learns the account still exists.
+  if (Boolean(row.blocked_by)) throw ApiError.notFound('User not found');
 
   const isSelf = viewerId != null && viewerId === (row.id as string);
+  const restricted =
+    !isSelf && Boolean(row.is_private) && !Boolean(row.viewer_is_following);
   return c.json({
     user: isSelf ? mapUser(row) : mapPublicUser(row),
     stats: {
@@ -1304,6 +1431,9 @@ app.get('/api/users/:username', optionalAuth, async (c) => {
       territory_count: Number(row.territory_count),
     },
     viewer_is_following: Boolean(row.viewer_is_following),
+    viewer_has_blocked: Boolean(row.viewer_has_blocked),
+    // Private profile the viewer doesn't follow: the shell renders, content doesn't.
+    restricted,
   });
 });
 
@@ -1311,6 +1441,9 @@ app.post('/api/users/:username/follow', requireAuth, async (c) => {
   const userId = uid(c);
   const targetId = await resolveUserId(c.req.param('username'));
   if (targetId === userId) throw ApiError.badRequest('You cannot follow yourself');
+  // A block in either direction forbids following (presented as not-found so a
+  // block is never disclosed to the blocked party).
+  if ((await profileAccess(targetId, userId)).blocked) throw ApiError.notFound('User not found');
   const inserted = await queryOne(
     `INSERT INTO follows (follower_id, following_id) VALUES ($1, $2)
      ON CONFLICT DO NOTHING RETURNING follower_id`,
@@ -1336,25 +1469,27 @@ app.delete('/api/users/:username/follow', requireAuth, async (c) => {
   return c.body(null, 204);
 });
 
-app.get('/api/users/:username/analytics', async (c) => {
+/** Resolve a profile-content route's target and enforce privacy + blocks. */
+async function resolveViewableUserId(c: Context<Env>): Promise<string> {
   const id = await resolveUserId(c.req.param('username'));
-  return c.json({ analytics: await getProfileAnalytics(id) });
+  await assertCanViewContent(id, c.get('user')?.sub ?? null);
+  return id;
+}
+
+app.get('/api/users/:username/analytics', optionalAuth, async (c) => {
+  return c.json({ analytics: await getProfileAnalytics(await resolveViewableUserId(c)) });
 });
-app.get('/api/users/:username/ratings', async (c) => {
-  const id = await resolveUserId(c.req.param('username'));
-  return c.json({ ratings: await getRatings(id) });
+app.get('/api/users/:username/ratings', optionalAuth, async (c) => {
+  return c.json({ ratings: await getRatings(await resolveViewableUserId(c)) });
 });
-app.get('/api/users/:username/achievements', async (c) => {
-  const id = await resolveUserId(c.req.param('username'));
-  return c.json({ achievements: await getAchievements(id) });
+app.get('/api/users/:username/achievements', optionalAuth, async (c) => {
+  return c.json({ achievements: await getAchievements(await resolveViewableUserId(c)) });
 });
-app.get('/api/users/:username/streak', async (c) => {
-  const id = await resolveUserId(c.req.param('username'));
-  return c.json({ streak: await getStreakState(id) });
+app.get('/api/users/:username/streak', optionalAuth, async (c) => {
+  return c.json({ streak: await getStreakState(await resolveViewableUserId(c)) });
 });
-app.get('/api/users/:username/head-to-head', async (c) => {
-  const id = await resolveUserId(c.req.param('username'));
-  return c.json({ head_to_head: await getHeadToHead(id) });
+app.get('/api/users/:username/head-to-head', optionalAuth, async (c) => {
+  return c.json({ head_to_head: await getHeadToHead(await resolveViewableUserId(c)) });
 });
 // ─── Notifications ─────────────────────────────────────────────────────────
 app.get('/api/notifications', requireAuth, async (c) => {

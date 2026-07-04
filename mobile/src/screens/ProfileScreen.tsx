@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -59,6 +59,19 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
         setProfile(prof);
         setFollowing(prof.viewer_is_following);
 
+        // A private profile we don't follow (or one we've blocked) exposes no
+        // content — don't fire the section requests that would all 403.
+        if (prof.restricted || prof.viewer_has_blocked) {
+          setAnalytics(null);
+          setRatings([]);
+          setAchievements([]);
+          setStreak(null);
+          setTerritories([]);
+          setH2h([]);
+          setRecent([]);
+          return;
+        }
+
         const [a, r, ach, st, terr, hh, feed] = await Promise.allSettled([
           api.getAnalytics(username),
           api.getRatings(username),
@@ -113,12 +126,59 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
     try {
       if (was) await api.unfollow(username);
       else await api.follow(username);
+      // (Un)following a private account gains/loses content access — refetch.
+      if (profile.user.is_private) setReloadKey((k) => k + 1);
     } catch {
       setFollowing(was);
       adjustFollowerCount(was ? 1 : -1);
       showToast('Could not update — please try again.', 'error');
     } finally {
       setFollowLoading(false);
+    }
+  };
+
+  const [blockLoading, setBlockLoading] = useState(false);
+  const setBlockedState = (next: boolean) => {
+    setProfile((p) => (p ? { ...p, viewer_has_blocked: next } : p));
+    setBlockLoading(false);
+    setReloadKey((k) => k + 1);
+  };
+  const confirmBlock = () => {
+    if (!profile) return;
+    Alert.alert(
+      `Block @${profile.user.username}?`,
+      "You won't see each other's matches, profiles or comments, and any follows between you are removed.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Block',
+          style: 'destructive',
+          onPress: async () => {
+            setBlockLoading(true);
+            try {
+              await api.blockUser(username);
+              setFollowing(false);
+              setBlockedState(true);
+              showToast(`Blocked @${profile.user.username}`, 'success');
+            } catch {
+              setBlockLoading(false);
+              showToast('Could not block — please try again.', 'error');
+            }
+          },
+        },
+      ],
+    );
+  };
+  const unblock = async () => {
+    if (!profile || blockLoading) return;
+    setBlockLoading(true);
+    try {
+      await api.unblockUser(username);
+      setBlockedState(false);
+      showToast(`Unblocked @${profile.user.username}`, 'success');
+    } catch {
+      setBlockLoading(false);
+      showToast('Could not unblock — please try again.', 'error');
     }
   };
 
@@ -158,7 +218,10 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
           <Avatar name={profile.user.display_name} uri={profile.user.avatar_url} size={72} />
           <View style={{ flex: 1 }}>
             <Text style={styles.name}>{profile.user.display_name}</Text>
-            <Text style={styles.handle}>@{profile.user.username}</Text>
+            <Text style={styles.handle}>
+              @{profile.user.username}
+              {profile.user.is_private ? ' · 🔒' : ''}
+            </Text>
             {profile.user.home_label ? <Text style={styles.home}>📍 {profile.user.home_label}</Text> : null}
           </View>
         </View>
@@ -178,6 +241,11 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
               <Button label="Settings" variant="ghost" onPress={() => navigation.navigate('Settings')} style={{ flex: 1, height: 42 }} />
             </View>
             <Button label="⚔️ Matches & challenges" variant="ghost" onPress={() => navigation.navigate('ScheduledMatches')} style={{ height: 42 }} />
+          </View>
+        ) : profile.viewer_has_blocked ? (
+          <View style={{ gap: spacing.sm }}>
+            <Muted>You&apos;ve blocked this player. They can&apos;t see your matches or profile.</Muted>
+            <Button label="Unblock" variant="secondary" onPress={unblock} loading={blockLoading} style={{ height: 42 }} />
           </View>
         ) : (
           <View style={{ gap: spacing.sm }}>
@@ -204,11 +272,24 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
                 style={{ flex: 1, height: 42 }}
               />
             </View>
+            <Pressable onPress={confirmBlock} accessibilityRole="button" hitSlop={8}>
+              <Text style={styles.blockLink}>Block @{profile.user.username}</Text>
+            </Pressable>
           </View>
         )}
       </Card>
 
-      {/* Vollo rating + streak */}
+      {/* Private profile the viewer doesn't follow — nothing below will load. */}
+      {!isSelf && profile.restricted ? (
+        <Card style={{ alignItems: 'center', gap: spacing.xs, paddingVertical: spacing.xl }}>
+          <Text style={{ fontSize: 34 }}>🔒</Text>
+          <Text style={styles.lockTitle}>This account is private</Text>
+          <Muted>Follow {profile.user.display_name} to see their matches and stats.</Muted>
+        </Card>
+      ) : null}
+
+      {/* Vollo rating + streak (hidden while the profile's content is inaccessible) */}
+      {profile.restricted || profile.viewer_has_blocked ? null : (
       <View style={{ flexDirection: 'row', gap: spacing.md }}>
         <Card style={styles.miniCard}>
           <Text style={styles.miniLabel}>VOLLO RATING</Text>
@@ -227,6 +308,7 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
           <Text style={styles.miniSub}>×{(streak?.streak_modifier ?? 1).toFixed(1)} court boost</Text>
         </Card>
       </View>
+      )}
 
       {/* Gear (public equipment) */}
       {gear.length > 0 ? (
@@ -455,4 +537,6 @@ const styles = StyleSheet.create({
   matchResult: { fontFamily: fonts.bold, width: 18 },
   matchScore: { color: colors.text, fontFamily: fonts.bold, width: 110 },
   matchMeta: { color: colors.textFaint, fontSize: font.tiny, flex: 1 },
+  blockLink: { color: colors.textFaint, fontSize: font.tiny, fontFamily: fonts.bold, textAlign: 'center', paddingVertical: 2 },
+  lockTitle: { color: colors.text, fontSize: font.h3, fontFamily: fonts.heading },
 });

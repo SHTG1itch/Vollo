@@ -32,6 +32,7 @@ export function mapUser(r: Record<string, unknown>): User {
     home_lng: r.home_lng != null ? Number(r.home_lng) : null,
     home_label: (r.home_label as string | null) ?? null,
     equipment: normalizeEquipment(r.equipment),
+    is_private: Boolean(r.is_private),
     created_at: toIso(r.created_at),
   };
 }

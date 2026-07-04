@@ -2,6 +2,7 @@ import { API_BASE } from './config';
 import type {
   Achievement,
   AuthResponse,
+  BlockedUser,
   Court,
   GeocodeResult,
   HeadToHead,
@@ -283,6 +284,9 @@ export const api = {
     request<{ user: AuthResponse['user'] }>('/users/me', { method: 'PATCH', body: JSON.stringify(body) }),
   follow: (username: string) => request<{ ok: boolean }>(`/users/${username}/follow`, { method: 'POST' }),
   unfollow: (username: string) => request<void>(`/users/${username}/follow`, { method: 'DELETE' }),
+  blockUser: (username: string) => request<{ ok: boolean }>(`/users/${username}/block`, { method: 'POST' }),
+  unblockUser: (username: string) => request<void>(`/users/${username}/block`, { method: 'DELETE' }),
+  getBlockedUsers: () => request<{ users: BlockedUser[] }>('/users/me/blocks'),
   getAnalytics: (username: string) => request<{ analytics: ProfileAnalytics }>(`/users/${username}/analytics`),
   getRatings: (username: string) => request<{ ratings: SurfaceRating[] }>(`/users/${username}/ratings`),
   getAchievements: (username: string) => request<{ achievements: Achievement[] }>(`/users/${username}/achievements`),

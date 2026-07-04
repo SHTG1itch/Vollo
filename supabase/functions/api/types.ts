@@ -64,6 +64,8 @@ export interface User {
   home_lng: number | null;
   home_label: string | null;
   equipment: Equipment;
+  /** Private account: matches/stats visible only to followers. */
+  is_private: boolean;
   created_at: string;
 }
 

@@ -33,6 +33,8 @@ export interface User {
   home_lng: number | null;
   home_label: string | null;
   equipment: Equipment;
+  /** Private account: matches/stats visible only to followers. */
+  is_private: boolean;
   created_at: string;
 }
 
@@ -283,6 +285,18 @@ export interface ProfileResponse {
     territory_count: number;
   };
   viewer_is_following: boolean;
+  /** The viewer has blocked this player (offer "Unblock"). */
+  viewer_has_blocked: boolean;
+  /** Private profile the viewer doesn't follow — content sections are hidden. */
+  restricted: boolean;
+}
+
+export interface BlockedUser {
+  id: string;
+  username: string;
+  display_name: string;
+  avatar_url: string | null;
+  blocked_at: string;
 }
 
 export interface GeocodeResult {
