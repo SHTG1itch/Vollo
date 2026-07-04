@@ -291,6 +291,19 @@ export interface ProfileResponse {
   restricted: boolean;
 }
 
+/** All-time personal bests (trophy case). Sections are null until earned. */
+export interface PersonalRecords {
+  total_matches: number;
+  first_match_at: string | null;
+  longest_win_streak: { count: number; started_at: string; ended_at: string } | null;
+  peak_rating: { surface: Surface; rating: number } | null;
+  biggest_win: { match_id: string; score_array: ScoreArray; margin: number; played_at: string } | null;
+  most_aces: { match_id: string; aces: number; played_at: string } | null;
+  longest_match: { match_id: string; duration_minutes: number; played_at: string } | null;
+  busiest_month: { month: string; matches: number } | null;
+  comeback_wins: number;
+}
+
 export type GoalMetric = 'matches' | 'wins' | 'hours';
 export type GoalPeriod = 'weekly' | 'monthly';
 

@@ -12,6 +12,7 @@ import type {
   LeaderboardEntry,
   MatchCard,
   NotificationItem,
+  PersonalRecords,
   ProfileAnalytics,
   ProfileResponse,
   ReverseGeocodeResult,
@@ -301,6 +302,7 @@ export const api = {
   getAchievements: (username: string) => request<{ achievements: Achievement[] }>(`/users/${username}/achievements`),
   getStreak: (username: string) => request<{ streak: StreakState }>(`/users/${username}/streak`),
   getHeadToHead: (username: string) => request<{ head_to_head: HeadToHead[] }>(`/users/${username}/head-to-head`),
+  getRecords: (username: string) => request<{ records: PersonalRecords }>(`/users/${username}/records`),
   registerPushToken: (token: string, platform: string) =>
     request<{ ok: boolean }>('/users/me/push-token', { method: 'POST', body: JSON.stringify({ token, platform }) }),
 

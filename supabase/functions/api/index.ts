@@ -33,6 +33,7 @@ import { notify } from './notifications.ts';
 import { geocode, reverseGeocode } from './geocoding.ts';
 import { fetchOverpassSectors, type OverpassSector } from './overpass.ts';
 import { getProfileAnalytics, getHeadToHead } from './analytics.ts';
+import { getPersonalRecords } from './records.ts';
 import { runStreakSweep, runTerritorySweep, runCourtNameSweep, runRatingSweep } from './sweeps.ts';
 import type { AuthClaims, LeaderboardEntry, MatchCard, MatchResult, MatchStats, Surface } from './types.ts';
 
@@ -1545,6 +1546,9 @@ app.get('/api/users/:username/streak', optionalAuth, async (c) => {
 });
 app.get('/api/users/:username/head-to-head', optionalAuth, async (c) => {
   return c.json({ head_to_head: await getHeadToHead(await resolveViewableUserId(c)) });
+});
+app.get('/api/users/:username/records', optionalAuth, async (c) => {
+  return c.json({ records: await getPersonalRecords(await resolveViewableUserId(c)) });
 });
 // ─── Notifications ─────────────────────────────────────────────────────────
 app.get('/api/notifications', requireAuth, async (c) => {

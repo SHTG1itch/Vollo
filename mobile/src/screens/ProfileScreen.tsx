@@ -454,18 +454,32 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
         </Card>
       ) : null}
 
-      {/* Achievements */}
-      {achievements.length > 0 ? (
+      {/* Achievements + personal records */}
+      {achievements.length > 0 ||
+      (profile.stats.match_count > 0 && !profile.restricted && !profile.viewer_has_blocked) ? (
         <Card style={{ gap: spacing.sm }}>
-          <SectionTitle>Achievements</SectionTitle>
-          <View style={styles.badges}>
-            {achievements.map((a) => (
-              <View key={a.code} style={styles.badge}>
-                <Text style={{ fontSize: 22 }}>{a.icon}</Text>
-                <Text style={styles.badgeTitle}>{a.title}</Text>
-              </View>
-            ))}
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <SectionTitle>Achievements</SectionTitle>
+            <Pressable
+              onPress={() => navigation.navigate('Records', { username })}
+              accessibilityRole="button"
+              hitSlop={8}
+            >
+              <Text style={styles.territoryGo}>Trophy case →</Text>
+            </Pressable>
           </View>
+          {achievements.length > 0 ? (
+            <View style={styles.badges}>
+              {achievements.map((a) => (
+                <View key={a.code} style={styles.badge}>
+                  <Text style={{ fontSize: 22 }}>{a.icon}</Text>
+                  <Text style={styles.badgeTitle}>{a.title}</Text>
+                </View>
+              ))}
+            </View>
+          ) : (
+            <Muted style={{ textAlign: 'left' }}>No badges yet — keep playing to earn them.</Muted>
+          )}
         </Card>
       ) : null}
 
