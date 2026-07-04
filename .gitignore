@@ -63,3 +63,4 @@ tmp/
 
 # Supabase CLI state
 supabase/.temp/
+supabase/functions/api/deno.lock
