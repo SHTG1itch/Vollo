@@ -44,7 +44,9 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
   const [territories, setTerritories] = useState<Territory[]>([]);
   const [h2h, setH2h] = useState<HeadToHead[]>([]);
   const [recent, setRecent] = useState<MatchCard[]>([]);
-  const [following, setFollowing] = useState(false);
+  // 'none' → Follow, 'requested' → awaiting a private account's approval,
+  // 'following' → unfollow on tap.
+  const [followStatus, setFollowStatus] = useState<'none' | 'requested' | 'following'>('none');
   const [followLoading, setFollowLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -60,7 +62,9 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
         const prof = await api.getProfile(username);
         if (!active) return;
         setProfile(prof);
-        setFollowing(prof.viewer_is_following);
+        setFollowStatus(
+          prof.viewer_is_following ? 'following' : prof.viewer_has_requested ? 'requested' : 'none',
+        );
 
         // A private profile we don't follow (or one we've blocked) exposes no
         // content — don't fire the section requests that would all 403.
@@ -124,19 +128,31 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
   const toggleFollow = async () => {
     if (!profile || followLoading) return;
     tapMedium();
-    const was = following;
-    // Optimistically flip the button AND the follower count, revert both on error.
-    setFollowing(!was);
-    adjustFollowerCount(was ? -1 : 1);
+    const was = followStatus;
     setFollowLoading(true);
     try {
-      if (was) await api.unfollow(username);
-      else await api.follow(username);
-      // (Un)following a private account gains/loses content access — refetch.
-      if (profile.user.is_private) setReloadKey((k) => k + 1);
+      if (was === 'none') {
+        // May land as an instant follow (public) or a pending request (private).
+        const res = await api.follow(username);
+        setFollowStatus(res.status);
+        if (res.status === 'following') {
+          adjustFollowerCount(1);
+          if (profile.user.is_private) setReloadKey((k) => k + 1);
+        } else {
+          showToast(`Request sent — @${profile.user.username} has to approve it.`, 'success');
+        }
+      } else {
+        // 'following' → unfollow; 'requested' → withdraw the pending request.
+        await api.unfollow(username);
+        setFollowStatus('none');
+        if (was === 'following') {
+          adjustFollowerCount(-1);
+          // Losing follower access to a private account locks its content again.
+          if (profile.user.is_private) setReloadKey((k) => k + 1);
+        }
+      }
     } catch {
-      setFollowing(was);
-      adjustFollowerCount(was ? 1 : -1);
+      setFollowStatus(was);
       showToast('Could not update — please try again.', 'error');
     } finally {
       setFollowLoading(false);
@@ -163,7 +179,7 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
             setBlockLoading(true);
             try {
               await api.blockUser(username);
-              setFollowing(false);
+              setFollowStatus('none');
               setBlockedState(true);
               showToast(`Blocked @${profile.user.username}`, 'success');
             } catch {
@@ -260,8 +276,14 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
           <View style={{ gap: spacing.sm }}>
             <View style={{ flexDirection: 'row', gap: spacing.sm }}>
               <Button
-                label={following ? 'Following' : 'Follow'}
-                variant={following ? 'secondary' : 'primary'}
+                label={
+                  followStatus === 'following'
+                    ? 'Following'
+                    : followStatus === 'requested'
+                      ? 'Requested'
+                      : 'Follow'
+                }
+                variant={followStatus === 'none' ? 'primary' : 'secondary'}
                 onPress={toggleFollow}
                 loading={followLoading}
                 disabled={followLoading}
@@ -293,7 +315,11 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
         <Card style={{ alignItems: 'center', gap: spacing.xs, paddingVertical: spacing.xl }}>
           <Text style={{ fontSize: 34 }}>🔒</Text>
           <Text style={styles.lockTitle}>This account is private</Text>
-          <Muted>Follow {profile.user.display_name} to see their matches and stats.</Muted>
+          <Muted>
+            {followStatus === 'requested'
+              ? `Your follow request is waiting for ${profile.user.display_name}'s approval.`
+              : `Request to follow ${profile.user.display_name} to see their matches and stats.`}
+          </Muted>
         </Card>
       ) : null}
 

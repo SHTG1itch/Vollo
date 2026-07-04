@@ -8,6 +8,7 @@ import type {
   ClubLeaderboardEntry,
   ClubMember,
   Court,
+  FollowRequest,
   GeocodeResult,
   Goal,
   GoalMetric,
@@ -162,7 +163,10 @@ export interface UserSearchResult {
   username: string;
   display_name: string;
   avatar_url: string | null;
+  is_private: boolean;
   viewer_is_following: boolean;
+  /** Pending follow request awaiting this (private) player's approval. */
+  viewer_has_requested: boolean;
 }
 
 export interface CreateMatchPayload {
@@ -304,8 +308,17 @@ export const api = {
   getProfile: (username: string) => request<ProfileResponse>(`/users/${username}`),
   updateProfile: (body: Record<string, unknown>) =>
     request<{ user: AuthResponse['user'] }>('/users/me', { method: 'PATCH', body: JSON.stringify(body) }),
-  follow: (username: string) => request<{ ok: boolean }>(`/users/${username}/follow`, { method: 'POST' }),
+  // Following a private account yields status 'requested' until approved.
+  follow: (username: string) =>
+    request<{ ok: boolean; status: 'following' | 'requested' }>(`/users/${username}/follow`, { method: 'POST' }),
+  // Also withdraws a pending follow request.
   unfollow: (username: string) => request<void>(`/users/${username}/follow`, { method: 'DELETE' }),
+  getFollowRequests: () => request<{ requests: FollowRequest[] }>('/users/me/follow-requests'),
+  respondFollowRequest: (userId: string, action: 'accept' | 'decline') =>
+    request<{ ok: boolean }>(`/users/me/follow-requests/${userId}`, {
+      method: 'POST',
+      body: JSON.stringify({ action }),
+    }),
   // ── Goals ──
   getGoals: () => request<{ goals: Goal[] }>('/users/me/goals'),
   setGoal: (body: { metric: GoalMetric; period: GoalPeriod; target: number }) =>

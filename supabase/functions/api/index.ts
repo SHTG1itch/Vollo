@@ -19,7 +19,7 @@ import { mapCourt, mapMatchCard, mapPublicUser, mapScheduledMatch, mapUser, toIs
 import {
   bboxQuerySchema, calendarQuerySchema, clubsQuerySchema, commentSchema, commentsQuerySchema,
   courtsQuerySchema, createClubSchema, createCourtSchema, createMatchSchema, createScheduledMatchSchema,
-  discoverQuerySchema, feedQuerySchema,
+  discoverQuerySchema, feedQuerySchema, followRequestActionSchema,
   geocodeQuerySchema, loginSchema, notificationIdsSchema, pushTokenSchema,
   reverseGeocodeQuerySchema, setGoalSchema, updateProfileSchema, updateScheduledMatchSchema,
   userSearchQuerySchema, verifyMatchSchema, yearQuerySchema,
@@ -1533,8 +1533,9 @@ app.get('/api/users/search', requireAuth, async (c) => {
   const userId = uid(c);
   const { q, limit } = userSearchQuerySchema.parse(c.req.query());
   const users = await query(
-    `SELECT u.id, u.username, u.display_name, u.avatar_url,
-            EXISTS(SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.following_id = u.id) AS viewer_is_following
+    `SELECT u.id, u.username, u.display_name, u.avatar_url, u.is_private,
+            EXISTS(SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.following_id = u.id) AS viewer_is_following,
+            EXISTS(SELECT 1 FROM follow_requests r WHERE r.requester_id = $1 AND r.target_id = u.id) AS viewer_has_requested
        FROM users u
       WHERE u.id <> $1
         AND (u.username ILIKE '%' || $2 || '%' OR u.display_name ILIKE '%' || $2 || '%')
@@ -1654,10 +1655,16 @@ app.post('/api/users/:username/block', requireAuth, async (c) => {
       'INSERT INTO blocks (blocker_id, blocked_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
       [userId, targetId],
     );
-    // Blocking severs the relationship in both directions.
+    // Blocking severs the relationship in both directions — edges and any
+    // pending follow requests.
     await client.query(
       `DELETE FROM follows
         WHERE (follower_id = $1 AND following_id = $2) OR (follower_id = $2 AND following_id = $1)`,
+      [userId, targetId],
+    );
+    await client.query(
+      `DELETE FROM follow_requests
+        WHERE (requester_id = $1 AND target_id = $2) OR (requester_id = $2 AND target_id = $1)`,
       [userId, targetId],
     );
   });
@@ -1683,6 +1690,9 @@ app.get('/api/users/:username', optionalAuth, async (c) => {
                  ELSE EXISTS(SELECT 1 FROM follows f WHERE f.follower_id = $2 AND f.following_id = u.id)
             END AS viewer_is_following,
             CASE WHEN $2::uuid IS NULL THEN false
+                 ELSE EXISTS(SELECT 1 FROM follow_requests r WHERE r.requester_id = $2 AND r.target_id = u.id)
+            END AS viewer_has_requested,
+            CASE WHEN $2::uuid IS NULL THEN false
                  ELSE EXISTS(SELECT 1 FROM blocks b WHERE b.blocker_id = $2 AND b.blocked_id = u.id)
             END AS viewer_has_blocked,
             CASE WHEN $2::uuid IS NULL THEN false
@@ -1707,12 +1717,17 @@ app.get('/api/users/:username', optionalAuth, async (c) => {
       territory_count: Number(row.territory_count),
     },
     viewer_is_following: Boolean(row.viewer_is_following),
+    // Pending follow request awaiting this (private) profile's approval.
+    viewer_has_requested: Boolean(row.viewer_has_requested),
     viewer_has_blocked: Boolean(row.viewer_has_blocked),
     // Private profile the viewer doesn't follow: the shell renders, content doesn't.
     restricted,
   });
 });
 
+// Follow a public account instantly; a PRIVATE account gets a pending request
+// its owner must approve. Returns the resulting relationship state so the
+// client can render Follow / Requested / Following without a refetch.
 app.post('/api/users/:username/follow', requireAuth, async (c) => {
   const userId = uid(c);
   const targetId = await resolveUserId(c.req.param('username'));
@@ -1720,6 +1735,34 @@ app.post('/api/users/:username/follow', requireAuth, async (c) => {
   // A block in either direction forbids following (presented as not-found so a
   // block is never disclosed to the blocked party).
   if ((await profileAccess(targetId, userId)).blocked) throw ApiError.notFound('User not found');
+
+  const target = await queryOne<{ is_private: boolean; following: boolean }>(
+    `SELECT u.is_private,
+            EXISTS(SELECT 1 FROM follows f WHERE f.follower_id = $2 AND f.following_id = u.id) AS following
+       FROM users u WHERE u.id = $1`,
+    [targetId, userId],
+  );
+  if (target!.following) return c.json({ ok: true, status: 'following' });
+
+  if (target!.is_private) {
+    const requested = await queryOne(
+      `INSERT INTO follow_requests (requester_id, target_id) VALUES ($1, $2)
+       ON CONFLICT DO NOTHING RETURNING requester_id`,
+      [userId, targetId],
+    );
+    if (requested) {
+      await notify({
+        userId: targetId,
+        type: 'follow_request',
+        title: '🔐 Follow request',
+        body: `${c.get('user')!.username} wants to follow you. Approve it in your alerts.`,
+        data: { requesterId: userId },
+        push: false,
+      }).catch(() => {});
+    }
+    return c.json({ ok: true, status: 'requested' }, 201);
+  }
+
   const inserted = await queryOne(
     `INSERT INTO follows (follower_id, following_id) VALUES ($1, $2)
      ON CONFLICT DO NOTHING RETURNING follower_id`,
@@ -1735,14 +1778,57 @@ app.post('/api/users/:username/follow', requireAuth, async (c) => {
       push: false,
     }).catch(() => {});
   }
-  return c.json({ ok: true }, 201);
+  return c.json({ ok: true, status: 'following' }, 201);
 });
 
+// Unfollow — also withdraws a pending follow request, so one DELETE covers
+// both the "Following" and "Requested" button states.
 app.delete('/api/users/:username/follow', requireAuth, async (c) => {
   const userId = uid(c);
   const targetId = await resolveUserId(c.req.param('username'));
   await query('DELETE FROM follows WHERE follower_id = $1 AND following_id = $2', [userId, targetId]);
+  await query('DELETE FROM follow_requests WHERE requester_id = $1 AND target_id = $2', [userId, targetId]);
   return c.body(null, 204);
+});
+
+// ─── Follow requests (private-account approval queue) ───────────────────
+app.get('/api/users/me/follow-requests', requireAuth, async (c) => {
+  const requests = await query(
+    `SELECT u.id, u.username, u.display_name, u.avatar_url, r.created_at AS requested_at
+       FROM follow_requests r JOIN users u ON u.id = r.requester_id
+      WHERE r.target_id = $1
+      ORDER BY r.created_at DESC LIMIT 200`,
+    [uid(c)],
+  );
+  return c.json({ requests });
+});
+
+app.post('/api/users/me/follow-requests/:userId', requireAuth, async (c) => {
+  const userId = uid(c);
+  const requesterId = c.req.param('userId');
+  const { action } = followRequestActionSchema.parse(await jsonBody(c));
+  // Deleting the request claims it — a double-tap or a concurrent accept and
+  // decline can't both proceed.
+  const claimed = await queryOne(
+    'DELETE FROM follow_requests WHERE requester_id = $1 AND target_id = $2 RETURNING requester_id',
+    [requesterId, userId],
+  );
+  if (!claimed) throw ApiError.notFound('Follow request not found');
+  if (action === 'accept') {
+    await query(
+      `INSERT INTO follows (follower_id, following_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+      [requesterId, userId],
+    );
+    await notify({
+      userId: requesterId,
+      type: 'follow_accepted',
+      title: '✅ Follow request approved',
+      body: `${c.get('user')!.username} approved your follow request.`,
+      data: { userId },
+      push: false,
+    }).catch(() => {});
+  }
+  return c.json({ ok: true });
 });
 
 /** Resolve a profile-content route's target and enforce privacy + blocks. */

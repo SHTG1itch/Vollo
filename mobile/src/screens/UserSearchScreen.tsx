@@ -55,14 +55,25 @@ export function UserSearchScreen() {
     };
   }, [q]);
 
+  const patchResult = (id: string, patch: Partial<UserSearchResult>) =>
+    setResults((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+
   const toggleFollow = async (u: UserSearchResult) => {
-    const was = u.viewer_is_following;
-    setResults((rs) => rs.map((r) => (r.id === u.id ? { ...r, viewer_is_following: !was } : r)));
+    const was = { viewer_is_following: u.viewer_is_following, viewer_has_requested: u.viewer_has_requested };
     try {
-      if (was) await api.unfollow(u.username);
-      else await api.follow(u.username);
+      if (u.viewer_is_following || u.viewer_has_requested) {
+        // Unfollow, or withdraw a pending request — same DELETE.
+        patchResult(u.id, { viewer_is_following: false, viewer_has_requested: false });
+        await api.unfollow(u.username);
+      } else {
+        const res = await api.follow(u.username);
+        patchResult(u.id, {
+          viewer_is_following: res.status === 'following',
+          viewer_has_requested: res.status === 'requested',
+        });
+      }
     } catch {
-      setResults((rs) => rs.map((r) => (r.id === u.id ? { ...r, viewer_is_following: was } : r)));
+      patchResult(u.id, was);
     }
   };
 
@@ -99,8 +110,8 @@ export function UserSearchScreen() {
               <Text style={styles.handle}>@{item.username}</Text>
             </View>
             <Button
-              label={item.viewer_is_following ? 'Following' : 'Follow'}
-              variant={item.viewer_is_following ? 'secondary' : 'primary'}
+              label={item.viewer_is_following ? 'Following' : item.viewer_has_requested ? 'Requested' : 'Follow'}
+              variant={item.viewer_is_following || item.viewer_has_requested ? 'secondary' : 'primary'}
               onPress={() => toggleFollow(item)}
               style={{ height: 36, paddingHorizontal: spacing.md }}
             />

@@ -221,6 +221,11 @@ export const updateProfileSchema = z.object({
   is_private: z.boolean().optional(),
 });
 
+// The private-account owner answers a pending follow request.
+export const followRequestActionSchema = z.object({
+  action: z.enum(['accept', 'decline']),
+});
+
 // Year-in-review: a season's recap; year boundary in the viewer's local time.
 export const yearQuerySchema = z.object({
   year: z.coerce.number().int().min(2000).max(2100),

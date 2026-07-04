@@ -1,21 +1,89 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
+import { api } from '../api/client';
 import { useNotifications } from '../store/notifications';
-import { EmptyState, ErrorState, Loading } from '../components/ui';
+import { Avatar, Button, EmptyState, ErrorState, Loading } from '../components/ui';
+import { showToast } from '../components/Toast';
+import { tapMedium } from '../lib/haptics';
 import { colors, font, fonts, radius, shadow, spacing } from '../theme';
 import { timeAgo } from '../utils/format';
+import type { FollowRequest } from '../types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
+
+/** Incoming follow requests (private accounts) pinned above the activity list. */
+function FollowRequestsCard({
+  requests,
+  onResolved,
+}: {
+  requests: FollowRequest[];
+  onResolved: (userId: string) => void;
+}) {
+  const navigation = useNavigation<Nav>();
+  const [busy, setBusy] = useState<string | null>(null);
+
+  if (requests.length === 0) return null;
+
+  const respond = async (r: FollowRequest, action: 'accept' | 'decline') => {
+    tapMedium();
+    setBusy(r.id);
+    try {
+      await api.respondFollowRequest(r.id, action);
+      onResolved(r.id);
+      if (action === 'accept') showToast(`@${r.username} can now see your matches.`, 'success');
+    } catch {
+      showToast('Could not update the request — please try again.', 'error');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <View style={styles.requestsCard}>
+      <Text style={styles.requestsTitle}>FOLLOW REQUESTS</Text>
+      {requests.map((r) => (
+        <View key={r.id} style={styles.requestRow}>
+          <Pressable
+            style={styles.requestUser}
+            onPress={() => navigation.navigate('UserProfile', { username: r.username })}
+            accessibilityRole="button"
+          >
+            <Avatar name={r.display_name} uri={r.avatar_url} size={36} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.requestName} numberOfLines={1}>{r.display_name}</Text>
+              <Text style={styles.requestMeta}>@{r.username} · {timeAgo(r.requested_at)}</Text>
+            </View>
+          </Pressable>
+          <Button
+            label="Accept"
+            onPress={() => respond(r, 'accept')}
+            loading={busy === r.id}
+            disabled={busy !== null}
+            style={styles.requestBtn}
+          />
+          <Button
+            label="Decline"
+            variant="ghost"
+            onPress={() => respond(r, 'decline')}
+            disabled={busy !== null}
+            style={styles.requestBtn}
+          />
+        </View>
+      ))}
+    </View>
+  );
+}
 
 export function NotificationsScreen() {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
   const { items, loading, refreshing, error, fetch, markAllRead } = useNotifications();
+  const [requests, setRequests] = useState<FollowRequest[]>([]);
 
   // Refetch every time the tab gains focus so the badge/list reflect reality,
   // then mark everything read shortly after. The mark-read timer starts only
@@ -28,6 +96,13 @@ export function NotificationsScreen() {
       void fetch().then(() => {
         if (!cancelled) t = setTimeout(() => void markAllRead(), 1200);
       });
+      // Pending follow requests ride along with each focus refresh.
+      void api
+        .getFollowRequests()
+        .then((r) => {
+          if (!cancelled) setRequests(r.requests);
+        })
+        .catch(() => {});
       return () => {
         cancelled = true;
         if (t) clearTimeout(t);
@@ -59,6 +134,12 @@ export function NotificationsScreen() {
           keyExtractor={(n) => n.id}
           contentContainerStyle={{ padding: spacing.lg, paddingTop: 0 }}
           ItemSeparatorComponent={() => <View style={{ height: spacing.sm }} />}
+          ListHeaderComponent={
+            <FollowRequestsCard
+              requests={requests}
+              onResolved={(userId) => setRequests((list) => list.filter((r) => r.id !== userId))}
+            />
+          }
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => fetch(true)} tintColor={colors.primary} />}
           renderItem={({ item }) => {
             const data = item.data as Record<string, unknown> | null | undefined;
@@ -97,4 +178,20 @@ const styles = StyleSheet.create({
   rowTitle: { color: colors.text, fontFamily: fonts.bold, fontSize: font.body },
   rowBody: { color: colors.textDim, fontSize: font.small, marginTop: 2 },
   rowTime: { color: colors.textFaint, fontSize: font.tiny, marginTop: 4 },
+  requestsCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    gap: spacing.md,
+    marginBottom: spacing.md,
+    ...shadow.card,
+  },
+  requestsTitle: { color: colors.textDim, fontFamily: fonts.bold, fontSize: font.tiny, letterSpacing: 0.5 },
+  requestRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  requestUser: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flex: 1 },
+  requestName: { color: colors.text, fontFamily: fonts.bold, fontSize: font.small },
+  requestMeta: { color: colors.textFaint, fontSize: font.tiny },
+  requestBtn: { height: 34, paddingHorizontal: spacing.md },
 });

@@ -285,6 +285,8 @@ export interface ProfileResponse {
     territory_count: number;
   };
   viewer_is_following: boolean;
+  /** Pending follow request awaiting this (private) profile's approval. */
+  viewer_has_requested: boolean;
   /** The viewer has blocked this player (offer "Unblock"). */
   viewer_has_blocked: boolean;
   /** Private profile the viewer doesn't follow — content sections are hidden. */
@@ -382,6 +384,15 @@ export interface Goal {
   target: number;
   current: number;
   created_at: string;
+}
+
+/** An incoming follow request on a private account. */
+export interface FollowRequest {
+  id: string;
+  username: string;
+  display_name: string;
+  avatar_url: string | null;
+  requested_at: string;
 }
 
 export interface BlockedUser {
