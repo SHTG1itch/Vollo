@@ -39,6 +39,7 @@ export type RootStackParamList = {
   Goals: undefined;
   Records: { username: string };
   TrainingLog: { username: string };
+  YearInReview: { username: string; year?: number };
   Clubs: undefined;
   Club: { clubId: string };
   CreateClub: undefined;

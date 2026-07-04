@@ -19,6 +19,151 @@ export interface PersonalRecords {
 
 const COUNTED = `verification_status IN ('auto','verified')`;
 
+export interface YearInReview {
+  year: number;
+  totals: {
+    matches: number;
+    wins: number;
+    losses: number;
+    minutes: number;
+    games_won: number;
+    aces: number;
+    kudos_received: number;
+  };
+  monthly: { month: number; matches: number; wins: number }[];
+  top_opponent: { name: string; matches: number; wins: number; losses: number } | null;
+  favorite_court: { court_id: string; name: string; matches: number } | null;
+  favorite_surface: { surface: Surface; matches: number; win_rate: number } | null;
+  longest_win_streak: number;
+}
+
+/**
+ * A player's season recap (the Strava "Year in Sport" analog). Same
+ * counted-only rule as everything else; the year boundary is the viewer's
+ * local time via tzOffset (minutes behind UTC).
+ */
+export async function getYearInReview(userId: string, year: number, tzOffset: number): Promise<YearInReview> {
+  // All queries share the same local-time year window.
+  const WIN = `m.user_id = $1 AND m.${COUNTED}
+    AND m.played_at - make_interval(mins => $3) >= make_date($2, 1, 1)::timestamp
+    AND m.played_at - make_interval(mins => $3) <  make_date($2 + 1, 1, 1)::timestamp`;
+  const params = [userId, year, tzOffset];
+
+  const totals = await queryOne<{
+    matches: string; wins: string; minutes: string; games_won: string;
+  }>(
+    `SELECT COUNT(*) AS matches,
+            COUNT(*) FILTER (WHERE m.result = 'win') AS wins,
+            COALESCE(SUM(m.duration_minutes), 0) AS minutes,
+            COALESCE(SUM(m.games_won), 0) AS games_won
+       FROM matches m WHERE ${WIN}`,
+    params,
+  );
+
+  const aces = await queryOne<{ aces: string }>(
+    `SELECT COALESCE(SUM(s.aces), 0) AS aces
+       FROM matches m JOIN match_stats s ON s.match_id = m.id
+      WHERE ${WIN}`,
+    params,
+  );
+
+  const kudos = await queryOne<{ c: string }>(
+    `SELECT COUNT(*) AS c
+       FROM kudos k JOIN matches m ON m.id = k.match_id
+      WHERE ${WIN}`,
+    params,
+  );
+
+  const monthlyRows = await query<{ month: string; matches: string; wins: string }>(
+    `SELECT EXTRACT(MONTH FROM m.played_at - make_interval(mins => $3))::int AS month,
+            COUNT(*) AS matches,
+            COUNT(*) FILTER (WHERE m.result = 'win') AS wins
+       FROM matches m WHERE ${WIN}
+      GROUP BY 1 ORDER BY 1`,
+    params,
+  );
+  const byMonth = new Map(monthlyRows.map((r) => [Number(r.month), r]));
+  const monthly = Array.from({ length: 12 }, (_, i) => {
+    const r = byMonth.get(i + 1);
+    return { month: i + 1, matches: Number(r?.matches ?? 0), wins: Number(r?.wins ?? 0) };
+  });
+
+  const topOpponent = await queryOne<{ name: string; matches: string; wins: string; losses: string }>(
+    `SELECT COALESCE(ou.display_name, m.opponent_name) AS name,
+            COUNT(*) AS matches,
+            COUNT(*) FILTER (WHERE m.result = 'win') AS wins,
+            COUNT(*) FILTER (WHERE m.result = 'loss') AS losses
+       FROM matches m LEFT JOIN users ou ON ou.id = m.opponent_id
+      WHERE ${WIN} AND COALESCE(ou.display_name, m.opponent_name) IS NOT NULL
+      GROUP BY 1 ORDER BY COUNT(*) DESC, 1 ASC LIMIT 1`,
+    params,
+  );
+
+  const favoriteCourt = await queryOne<{ court_id: string; name: string; matches: string }>(
+    `SELECT c.id AS court_id, c.name, COUNT(*) AS matches
+       FROM matches m JOIN courts c ON c.id = m.court_id
+      WHERE ${WIN}
+      GROUP BY c.id, c.name ORDER BY COUNT(*) DESC, c.name ASC LIMIT 1`,
+    params,
+  );
+
+  const favoriteSurface = await queryOne<{ surface: Surface; matches: string; win_rate: string }>(
+    `SELECT m.surface, COUNT(*) AS matches,
+            ROUND(100.0 * COUNT(*) FILTER (WHERE m.result = 'win') / COUNT(*)) AS win_rate
+       FROM matches m WHERE ${WIN}
+      GROUP BY m.surface ORDER BY COUNT(*) DESC LIMIT 1`,
+    params,
+  );
+
+  const streak = await queryOne<{ len: string }>(
+    `SELECT COUNT(*) AS len
+       FROM (
+         SELECT m.result,
+                ROW_NUMBER() OVER (ORDER BY m.played_at, m.id)
+              - ROW_NUMBER() OVER (PARTITION BY m.result ORDER BY m.played_at, m.id) AS grp
+           FROM matches m WHERE ${WIN}
+       ) t
+      WHERE result = 'win'
+      GROUP BY grp ORDER BY len DESC LIMIT 1`,
+    params,
+  );
+
+  const matches = Number(totals?.matches ?? 0);
+  const wins = Number(totals?.wins ?? 0);
+  return {
+    year,
+    totals: {
+      matches,
+      wins,
+      losses: matches - wins,
+      minutes: Number(totals?.minutes ?? 0),
+      games_won: Number(totals?.games_won ?? 0),
+      aces: Number(aces?.aces ?? 0),
+      kudos_received: Number(kudos?.c ?? 0),
+    },
+    monthly,
+    top_opponent: topOpponent
+      ? {
+          name: topOpponent.name,
+          matches: Number(topOpponent.matches),
+          wins: Number(topOpponent.wins),
+          losses: Number(topOpponent.losses),
+        }
+      : null,
+    favorite_court: favoriteCourt
+      ? { court_id: favoriteCourt.court_id, name: favoriteCourt.name, matches: Number(favoriteCourt.matches) }
+      : null,
+    favorite_surface: favoriteSurface
+      ? {
+          surface: favoriteSurface.surface,
+          matches: Number(favoriteSurface.matches),
+          win_rate: Number(favoriteSurface.win_rate),
+        }
+      : null,
+    longest_win_streak: Number(streak?.len ?? 0),
+  };
+}
+
 export async function getPersonalRecords(userId: string): Promise<PersonalRecords> {
   const totals = await queryOne<{ total: string; first_at: unknown }>(
     `SELECT COUNT(*) AS total, MIN(played_at) AS first_at

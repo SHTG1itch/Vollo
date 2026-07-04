@@ -22,7 +22,7 @@ import {
   discoverQuerySchema, feedQuerySchema,
   geocodeQuerySchema, loginSchema, notificationIdsSchema, pushTokenSchema,
   reverseGeocodeQuerySchema, setGoalSchema, updateProfileSchema, updateScheduledMatchSchema,
-  userSearchQuerySchema, verifyMatchSchema,
+  userSearchQuerySchema, verifyMatchSchema, yearQuerySchema,
 } from './validation.ts';
 import type { CreateMatchInput } from './validation.ts';
 import { analyzeScore, matchScore } from './scoring.ts';
@@ -34,7 +34,7 @@ import { notify } from './notifications.ts';
 import { geocode, reverseGeocode } from './geocoding.ts';
 import { fetchOverpassSectors, type OverpassSector } from './overpass.ts';
 import { getProfileAnalytics, getHeadToHead } from './analytics.ts';
-import { getPersonalRecords } from './records.ts';
+import { getPersonalRecords, getYearInReview } from './records.ts';
 import { runStreakSweep, runTerritorySweep, runCourtNameSweep, runRatingSweep } from './sweeps.ts';
 import type { AuthClaims, LeaderboardEntry, MatchCard, MatchResult, MatchStats, Surface } from './types.ts';
 
@@ -1769,6 +1769,13 @@ app.get('/api/users/:username/head-to-head', optionalAuth, async (c) => {
 });
 app.get('/api/users/:username/records', optionalAuth, async (c) => {
   return c.json({ records: await getPersonalRecords(await resolveViewableUserId(c)) });
+});
+
+// Season recap — the "Year in Sport" analog.
+app.get('/api/users/:username/year-in-review', optionalAuth, async (c) => {
+  const { year, tz_offset } = yearQuerySchema.parse(c.req.query());
+  const id = await resolveViewableUserId(c);
+  return c.json({ review: await getYearInReview(id, year, tz_offset) });
 });
 
 // Training log: one month of per-day aggregates (+ light match refs so a day

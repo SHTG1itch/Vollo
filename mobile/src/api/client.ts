@@ -26,6 +26,7 @@ import type {
   Surface,
   SurfaceRating,
   Territory,
+  YearInReview,
 } from '../types';
 
 export class ApiError extends Error {
@@ -320,6 +321,10 @@ export const api = {
   getStreak: (username: string) => request<{ streak: StreakState }>(`/users/${username}/streak`),
   getHeadToHead: (username: string) => request<{ head_to_head: HeadToHead[] }>(`/users/${username}/head-to-head`),
   getRecords: (username: string) => request<{ records: PersonalRecords }>(`/users/${username}/records`),
+  getYearInReview: (username: string, year: number) =>
+    request<{ review: YearInReview }>(
+      `/users/${username}/year-in-review${qs({ year, tz_offset: new Date().getTimezoneOffset() })}`,
+    ),
   // tz_offset buckets days in the viewer's local time.
   getCalendar: (username: string, year: number, month: number) =>
     request<CalendarMonth>(

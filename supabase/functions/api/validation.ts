@@ -221,6 +221,12 @@ export const updateProfileSchema = z.object({
   is_private: z.boolean().optional(),
 });
 
+// Year-in-review: a season's recap; year boundary in the viewer's local time.
+export const yearQuerySchema = z.object({
+  year: z.coerce.number().int().min(2000).max(2100),
+  tz_offset: z.coerce.number().int().min(-840).max(840).default(0),
+});
+
 // ─── Clubs ──────────────────────────────────────────────────────────────────
 export const createClubSchema = z.object({
   name: z.string().trim().min(3).max(60),

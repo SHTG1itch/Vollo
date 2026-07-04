@@ -131,6 +131,21 @@ export function RecordsScreen({ route }: NativeStackScreenProps<RootStackParamLi
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: colors.bg }} contentContainerStyle={styles.content}>
+      <Pressable
+        onPress={() => navigation.navigate('YearInReview', { username })}
+        accessibilityRole="button"
+        accessibilityLabel="View season recap"
+      >
+        <Card style={styles.recapRow}>
+          <Text style={{ fontSize: 22 }}>🎉</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.rowTitle}>Season recap</Text>
+            <Text style={styles.rowSub}>The year on court, month by month</Text>
+          </View>
+          <Text style={styles.recapGo}>View →</Text>
+        </Card>
+      </Pressable>
+
       <Card style={{ gap: spacing.md }}>
         {rows.map((r) => {
           const inner = (
@@ -178,4 +193,6 @@ const styles = StyleSheet.create({
   rowTitle: { color: colors.text, fontFamily: fonts.bold, fontSize: font.body },
   rowSub: { color: colors.textFaint, fontSize: font.tiny, marginTop: 1 },
   rowValue: { color: colors.primary, fontFamily: fonts.display, fontSize: font.h3 },
+  recapRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  recapGo: { color: colors.primary, fontSize: font.tiny, fontFamily: fonts.bold },
 });

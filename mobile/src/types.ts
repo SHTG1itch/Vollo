@@ -352,6 +352,25 @@ export interface CalendarMonth {
   totals: { matches: number; wins: number; minutes: number };
 }
 
+/** A season's recap (the "Year in Sport" analog). */
+export interface YearInReview {
+  year: number;
+  totals: {
+    matches: number;
+    wins: number;
+    losses: number;
+    minutes: number;
+    games_won: number;
+    aces: number;
+    kudos_received: number;
+  };
+  monthly: { month: number; matches: number; wins: number }[];
+  top_opponent: { name: string; matches: number; wins: number; losses: number } | null;
+  favorite_court: { court_id: string; name: string; matches: number } | null;
+  favorite_surface: { surface: Surface; matches: number; win_rate: number } | null;
+  longest_win_streak: number;
+}
+
 export type GoalMetric = 'matches' | 'wins' | 'hours';
 export type GoalPeriod = 'weekly' | 'monthly';
 
