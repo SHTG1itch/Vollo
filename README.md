@@ -202,6 +202,21 @@ verified-match gate keeps that honest).
 - **Fast, crash-free map** — courts paint instantly from the DB while new ones
   import from OSM in the background; native overlays are capped, unmount during
   gestures, and remount on the idle frame.
+- **Clubs** — open groups anyone can create and join, each with a shared match
+  feed and a 30-day member leaderboard; the last admin leaving promotes the
+  longest-standing member, and an emptied club dissolves.
+- **Goals** — weekly/monthly targets (matches, wins, or hours on court) with
+  live progress bars on your profile; progress is computed from counted matches
+  so verification flips and deletes stay exact.
+- **Trophy case** — all-time personal records: longest win streak, peak rating,
+  biggest win, most aces, longest match, busiest month, comeback wins.
+- **Training log** — a month calendar of your matches (win/loss-coloured days,
+  bucketed in your local timezone) with per-day match drill-down.
+- **Season recap** — a year-in-review with hero totals, month-by-month stacked
+  bars, top rival, home court, favourite surface and kudos received.
+- **Privacy + blocking** — a private-account toggle (matches/stats visible to
+  followers only) and player blocking that severs follows both ways and makes
+  the two players mutually invisible (feed, search, profiles, comments, kudos).
 - **Public equipment loadout**, **achievements**, **head-to-head rivalries**,
   **comments**, **follows**, a following-only feed, **in-app + push notifications**,
   and **compass-named districts** ("North District") from your home base.
@@ -230,6 +245,11 @@ All routes live under `https://<project>.supabase.co/functions/v1/api`.
 | `GET /api/territories?min_lng=&min_lat=&max_lng=&max_lat=` | Territory polygons (GeoJSON) |
 | `GET /api/users/search?q=` | Find players by name/username (to follow / tag) |
 | `GET /api/users/:username/analytics` | Full performance profile |
+| `GET /api/users/:username/records` · `…/calendar?year=&month=` · `…/year-in-review?year=` | Trophy case, training-log calendar, season recap (all privacy/block-guarded) |
+| `GET /api/users/me/goals` · `POST …` · `DELETE …/:id` | Weekly/monthly goals with live progress (POST retargets) |
+| `GET /api/clubs` · `GET /api/clubs/mine` · `POST /api/clubs` | Discover/search clubs, my clubs, start a club |
+| `GET /api/clubs/:id` · `…/leaderboard` · `…/feed` · `POST`/`DELETE …/join` | Club detail + members, 30-day leaderboard, shared feed, join/leave |
+| `POST /api/users/:username/block` · `DELETE …` · `GET /api/users/me/blocks` | Block/unblock a player, list blocked players |
 | `DELETE /api/users/me` | Delete your account (cascades all owned data) |
 
 ---
