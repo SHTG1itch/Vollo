@@ -503,7 +503,16 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
       {/* Recent matches */}
       {recent.length > 0 ? (
         <Card style={{ gap: spacing.sm }}>
-          <SectionTitle>Recent matches</SectionTitle>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <SectionTitle>Recent matches</SectionTitle>
+            <Pressable
+              onPress={() => navigation.navigate('TrainingLog', { username })}
+              accessibilityRole="button"
+              hitSlop={8}
+            >
+              <Text style={styles.territoryGo}>Calendar →</Text>
+            </Pressable>
+          </View>
           {recent.map((m) => (
             <Pressable key={m.id} style={styles.matchRow} onPress={() => navigation.navigate('MatchDetail', { matchId: m.id })}>
               <Text style={[styles.matchResult, { color: m.result === 'win' ? colors.win : colors.loss }]}>

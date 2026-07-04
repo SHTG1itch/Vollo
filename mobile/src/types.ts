@@ -304,6 +304,22 @@ export interface PersonalRecords {
   comeback_wins: number;
 }
 
+/** One calendar day's activity in the training log. */
+export interface CalendarDay {
+  date: string; // YYYY-MM-DD (viewer-local)
+  matches: number;
+  wins: number;
+  minutes: number;
+  items: { id: string; result: MatchResult; score_array: ScoreArray }[];
+}
+
+export interface CalendarMonth {
+  year: number;
+  month: number; // 1-based
+  days: CalendarDay[];
+  totals: { matches: number; wins: number; minutes: number };
+}
+
 export type GoalMetric = 'matches' | 'wins' | 'hours';
 export type GoalPeriod = 'weekly' | 'monthly';
 

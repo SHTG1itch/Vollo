@@ -221,6 +221,15 @@ export const updateProfileSchema = z.object({
   is_private: z.boolean().optional(),
 });
 
+// Training-log calendar: one month of per-day match aggregates. tz_offset is
+// the viewer's getTimezoneOffset() (minutes behind UTC) so days bucket in the
+// viewer's local time, not UTC.
+export const calendarQuerySchema = z.object({
+  year: z.coerce.number().int().min(2000).max(2100),
+  month: z.coerce.number().int().min(1).max(12),
+  tz_offset: z.coerce.number().int().min(-840).max(840).default(0),
+});
+
 // ─── Goals ──────────────────────────────────────────────────────────────────
 // One goal per (metric, period) — POSTing again retargets the same goal.
 // Hours allow half steps; matches/wins must be whole numbers.

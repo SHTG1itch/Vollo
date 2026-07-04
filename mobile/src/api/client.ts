@@ -3,6 +3,7 @@ import type {
   Achievement,
   AuthResponse,
   BlockedUser,
+  CalendarMonth,
   Court,
   GeocodeResult,
   Goal,
@@ -303,6 +304,11 @@ export const api = {
   getStreak: (username: string) => request<{ streak: StreakState }>(`/users/${username}/streak`),
   getHeadToHead: (username: string) => request<{ head_to_head: HeadToHead[] }>(`/users/${username}/head-to-head`),
   getRecords: (username: string) => request<{ records: PersonalRecords }>(`/users/${username}/records`),
+  // tz_offset buckets days in the viewer's local time.
+  getCalendar: (username: string, year: number, month: number) =>
+    request<CalendarMonth>(
+      `/users/${username}/calendar${qs({ year, month, tz_offset: new Date().getTimezoneOffset() })}`,
+    ),
   registerPushToken: (token: string, platform: string) =>
     request<{ ok: boolean }>('/users/me/push-token', { method: 'POST', body: JSON.stringify({ token, platform }) }),
 

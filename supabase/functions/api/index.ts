@@ -17,7 +17,7 @@ import { adminClient, authClient } from './supabaseAdmin.ts';
 import { ApiError } from './errors.ts';
 import { mapCourt, mapMatchCard, mapPublicUser, mapScheduledMatch, mapUser, toIso } from './mappers.ts';
 import {
-  bboxQuerySchema, commentSchema, commentsQuerySchema, courtsQuerySchema,
+  bboxQuerySchema, calendarQuerySchema, commentSchema, commentsQuerySchema, courtsQuerySchema,
   createCourtSchema, createMatchSchema, createScheduledMatchSchema, discoverQuerySchema, feedQuerySchema,
   geocodeQuerySchema, loginSchema, notificationIdsSchema, pushTokenSchema,
   reverseGeocodeQuerySchema, setGoalSchema, updateProfileSchema, updateScheduledMatchSchema,
@@ -1549,6 +1549,49 @@ app.get('/api/users/:username/head-to-head', optionalAuth, async (c) => {
 });
 app.get('/api/users/:username/records', optionalAuth, async (c) => {
   return c.json({ records: await getPersonalRecords(await resolveViewableUserId(c)) });
+});
+
+// Training log: one month of per-day aggregates (+ light match refs so a day
+// can link straight to its matches). Days bucket in the viewer's local time
+// via tz_offset. Counted matches only.
+app.get('/api/users/:username/calendar', optionalAuth, async (c) => {
+  const { year, month, tz_offset } = calendarQuerySchema.parse(c.req.query());
+  const id = await resolveViewableUserId(c);
+  const rows = await query<{
+    day: string; matches: string; wins: string; minutes: string; items: unknown;
+  }>(
+    `SELECT to_char(played_at - make_interval(mins => $4), 'YYYY-MM-DD') AS day,
+            COUNT(*) AS matches,
+            COUNT(*) FILTER (WHERE result = 'win') AS wins,
+            COALESCE(SUM(duration_minutes), 0) AS minutes,
+            jsonb_agg(jsonb_build_object('id', id, 'result', result, 'score_array', score_array)
+                      ORDER BY played_at) AS items
+       FROM matches
+      WHERE user_id = $1
+        AND verification_status IN ('auto','verified')
+        AND played_at - make_interval(mins => $4) >= make_date($2, $3, 1)::timestamp
+        AND played_at - make_interval(mins => $4) <  (make_date($2, $3, 1) + interval '1 month')::timestamp
+      GROUP BY 1
+      ORDER BY 1 ASC`,
+    [id, year, month, tz_offset],
+  );
+  const days = rows.map((r) => ({
+    date: r.day,
+    matches: Number(r.matches),
+    wins: Number(r.wins),
+    minutes: Number(r.minutes),
+    items: r.items,
+  }));
+  return c.json({
+    year,
+    month,
+    days,
+    totals: {
+      matches: days.reduce((s, d) => s + d.matches, 0),
+      wins: days.reduce((s, d) => s + d.wins, 0),
+      minutes: days.reduce((s, d) => s + d.minutes, 0),
+    },
+  });
 });
 // ─── Notifications ─────────────────────────────────────────────────────────
 app.get('/api/notifications', requireAuth, async (c) => {

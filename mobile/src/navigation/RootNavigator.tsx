@@ -16,6 +16,7 @@ import { UserSearchScreen } from '../screens/UserSearchScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { GoalsScreen } from '../screens/GoalsScreen';
 import { RecordsScreen } from '../screens/RecordsScreen';
+import { TrainingLogScreen } from '../screens/TrainingLogScreen';
 import { ScheduledMatchesScreen } from '../screens/ScheduledMatchesScreen';
 import { ScheduleMatchScreen } from '../screens/ScheduleMatchScreen';
 import { colors, fonts } from '../theme';
@@ -49,6 +50,7 @@ export function RootNavigator() {
           <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings' }} />
           <Stack.Screen name="Goals" component={GoalsScreen} options={{ title: 'Goals' }} />
           <Stack.Screen name="Records" component={RecordsScreen} options={{ title: 'Trophy case' }} />
+          <Stack.Screen name="TrainingLog" component={TrainingLogScreen} options={{ title: 'Training log' }} />
           <Stack.Screen name="ScheduledMatches" component={ScheduledMatchesScreen} options={{ title: 'Matches & challenges' }} />
           <Stack.Screen name="ScheduleMatch" component={ScheduleMatchScreen} options={{ title: 'Challenge' }} />
         </Stack.Group>
