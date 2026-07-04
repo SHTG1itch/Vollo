@@ -17,8 +17,9 @@ import { adminClient, authClient } from './supabaseAdmin.ts';
 import { ApiError } from './errors.ts';
 import { mapCourt, mapMatchCard, mapPublicUser, mapScheduledMatch, mapUser, toIso } from './mappers.ts';
 import {
-  bboxQuerySchema, calendarQuerySchema, commentSchema, commentsQuerySchema, courtsQuerySchema,
-  createCourtSchema, createMatchSchema, createScheduledMatchSchema, discoverQuerySchema, feedQuerySchema,
+  bboxQuerySchema, calendarQuerySchema, clubsQuerySchema, commentSchema, commentsQuerySchema,
+  courtsQuerySchema, createClubSchema, createCourtSchema, createMatchSchema, createScheduledMatchSchema,
+  discoverQuerySchema, feedQuerySchema,
   geocodeQuerySchema, loginSchema, notificationIdsSchema, pushTokenSchema,
   reverseGeocodeQuerySchema, setGoalSchema, updateProfileSchema, updateScheduledMatchSchema,
   userSearchQuerySchema, verifyMatchSchema,
@@ -994,6 +995,225 @@ app.patch('/api/scheduled-matches/:id', requireAuth, async (c) => {
     }).catch(() => {});
   }
   return c.json({ scheduled_match: await fetchScheduledMatch(id, userId) });
+});
+
+// ─── Clubs ───────────────────────────────────────────────────────────────
+// Open groups with a shared feed and a 30-day member leaderboard. Joining is
+// instant (no approval); the creator is the first admin.
+const CLUB_SELECT = `
+  SELECT c.id, c.name, c.description, c.city, c.creator_id, c.created_at,
+         (SELECT COUNT(*) FROM club_members m WHERE m.club_id = c.id) AS member_count,
+         CASE WHEN $1::uuid IS NULL THEN false
+              ELSE EXISTS(SELECT 1 FROM club_members m WHERE m.club_id = c.id AND m.user_id = $1)
+         END AS viewer_is_member
+    FROM clubs c`;
+
+function mapClub(r: Record<string, unknown>) {
+  return {
+    id: r.id as string,
+    name: r.name as string,
+    description: (r.description as string | null) ?? null,
+    city: (r.city as string | null) ?? null,
+    creator_id: (r.creator_id as string | null) ?? null,
+    member_count: Number(r.member_count ?? 0),
+    viewer_is_member: Boolean(r.viewer_is_member),
+    created_at: toIso(r.created_at),
+  };
+}
+
+app.get('/api/clubs/mine', requireAuth, async (c) => {
+  const userId = uid(c);
+  const rows = await query<Record<string, unknown>>(
+    `${CLUB_SELECT}
+      JOIN club_members me ON me.club_id = c.id AND me.user_id = $1
+     ORDER BY me.joined_at DESC LIMIT 100`,
+    [userId],
+  );
+  return c.json({ clubs: rows.map(mapClub) });
+});
+
+app.get('/api/clubs', optionalAuth, async (c) => {
+  const { q, limit } = clubsQuerySchema.parse(c.req.query());
+  const viewerId = c.get('user')?.sub ?? null;
+  const params: unknown[] = [viewerId];
+  let where = '';
+  if (q) {
+    params.push(q);
+    where = `WHERE c.name ILIKE '%' || $2 || '%' OR c.city ILIKE '%' || $2 || '%'`;
+  }
+  params.push(limit);
+  const rows = await query<Record<string, unknown>>(
+    `${CLUB_SELECT} ${where}
+     ORDER BY member_count DESC, c.created_at ASC
+     LIMIT $${params.length}`,
+    params,
+  );
+  return c.json({ clubs: rows.map(mapClub) });
+});
+
+app.post('/api/clubs', requireAuth, async (c) => {
+  const userId = uid(c);
+  const b = createClubSchema.parse(await jsonBody(c));
+  const clubId = await withTransaction(async (client) => {
+    let inserted;
+    try {
+      inserted = await client.query<{ id: string }>(
+        'INSERT INTO clubs (name, description, city, creator_id) VALUES ($1, $2, $3, $4) RETURNING id',
+        [b.name, b.description ?? null, b.city ?? null, userId],
+      );
+    } catch (err) {
+      if (typeof err === 'object' && err !== null && (err as { code?: string }).code === '23505') {
+        throw new ApiError(409, 'conflict', 'A club with this name already exists');
+      }
+      throw err;
+    }
+    const id = inserted.rows[0]!.id;
+    await client.query(
+      "INSERT INTO club_members (club_id, user_id, role) VALUES ($1, $2, 'admin')",
+      [id, userId],
+    );
+    return id;
+  });
+  const row = await queryOne<Record<string, unknown>>(`${CLUB_SELECT} WHERE c.id = $2`, [userId, clubId]);
+  return c.json({ club: mapClub(row!) }, 201);
+});
+
+app.get('/api/clubs/:id', optionalAuth, async (c) => {
+  const viewerId = c.get('user')?.sub ?? null;
+  const id = c.req.param('id');
+  const row = await queryOne<Record<string, unknown>>(`${CLUB_SELECT} WHERE c.id = $2`, [viewerId, id]);
+  if (!row) throw ApiError.notFound('Club not found');
+  const members = await query(
+    `SELECT u.id, u.username, u.display_name, u.avatar_url, m.role::text AS role, m.joined_at
+       FROM club_members m JOIN users u ON u.id = m.user_id
+      WHERE m.club_id = $1
+      ORDER BY m.role ASC, m.joined_at ASC
+      LIMIT 50`,
+    [id],
+  );
+  return c.json({ club: mapClub(row), members });
+});
+
+app.post('/api/clubs/:id/join', requireAuth, async (c) => {
+  const userId = uid(c);
+  const id = c.req.param('id');
+  const club = await queryOne<{ id: string }>('SELECT id FROM clubs WHERE id = $1', [id]);
+  if (!club) throw ApiError.notFound('Club not found');
+  await query(
+    'INSERT INTO club_members (club_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+    [id, userId],
+  );
+  return c.json({ ok: true }, 201);
+});
+
+app.delete('/api/clubs/:id/join', requireAuth, async (c) => {
+  const userId = uid(c);
+  const id = c.req.param('id');
+  await withTransaction(async (client) => {
+    const removed = await client.query<{ user_id: string }>(
+      'DELETE FROM club_members WHERE club_id = $1 AND user_id = $2 RETURNING user_id',
+      [id, userId],
+    );
+    if (removed.rows.length === 0) return; // wasn't a member — nothing to do
+    // A club must not be left admin-less: promote the longest-standing member.
+    // If nobody is left at all, the club dissolves.
+    const remaining = await client.query<{ n: string }>(
+      'SELECT COUNT(*) AS n FROM club_members WHERE club_id = $1',
+      [id],
+    );
+    if (Number(remaining.rows[0]!.n) === 0) {
+      await client.query('DELETE FROM clubs WHERE id = $1', [id]);
+      return;
+    }
+    const admins = await client.query<{ n: string }>(
+      "SELECT COUNT(*) AS n FROM club_members WHERE club_id = $1 AND role = 'admin'",
+      [id],
+    );
+    if (Number(admins.rows[0]!.n) === 0) {
+      await client.query(
+        `UPDATE club_members SET role = 'admin'
+          WHERE club_id = $1 AND user_id = (
+            SELECT user_id FROM club_members WHERE club_id = $1 ORDER BY joined_at ASC LIMIT 1
+          )`,
+        [id],
+      );
+    }
+  });
+  return c.body(null, 204);
+});
+
+// 30-day member leaderboard — same trailing window and counted-only rule as
+// court leaderboards, ranked by summed MatchScore.
+app.get('/api/clubs/:id/leaderboard', async (c) => {
+  const id = c.req.param('id');
+  const club = await queryOne<{ id: string }>('SELECT id FROM clubs WHERE id = $1', [id]);
+  if (!club) throw ApiError.notFound('Club not found');
+  const rows = await query<Record<string, unknown>>(
+    `SELECT u.id AS user_id, u.username, u.display_name, u.avatar_url,
+            COUNT(m.id) AS matches_played,
+            COUNT(m.id) FILTER (WHERE m.result = 'win') AS wins,
+            COALESCE(SUM(m.match_score), 0) AS score
+       FROM club_members cm
+       JOIN users u ON u.id = cm.user_id
+       LEFT JOIN matches m ON m.user_id = cm.user_id
+        AND m.verification_status IN ('auto','verified')
+        AND m.played_at > now() - interval '30 days'
+      WHERE cm.club_id = $1
+      GROUP BY u.id, u.username, u.display_name, u.avatar_url
+      ORDER BY score DESC, matches_played DESC, u.username ASC
+      LIMIT 100`,
+    [id],
+  );
+  return c.json({
+    leaderboard: rows.map((r, i) => ({
+      user_id: r.user_id as string,
+      username: r.username as string,
+      display_name: r.display_name as string,
+      avatar_url: (r.avatar_url as string | null) ?? null,
+      matches_played: Number(r.matches_played),
+      wins: Number(r.wins),
+      score: Number(r.score),
+      rank: i + 1,
+    })),
+  });
+});
+
+// The club's shared feed: members' matches, still subject to each author's
+// privacy and the viewer's blocks (a private member stays private here).
+app.get('/api/clubs/:id/feed', optionalAuth, async (c) => {
+  const { limit, before } = feedQuerySchema.parse(c.req.query());
+  const viewerId = c.get('user')?.sub ?? null;
+  const id = c.req.param('id');
+  const club = await queryOne<{ id: string }>('SELECT id FROM clubs WHERE id = $1', [id]);
+  if (!club) throw ApiError.notFound('Club not found');
+
+  const conditions = [
+    `mf.user_id IN (SELECT user_id FROM club_members WHERE club_id = $2)`,
+    ...matchVisibilityConditions('$1', 'mf.user_id'),
+  ];
+  const params: unknown[] = [viewerId, id];
+  let p = params.length;
+  if (before) {
+    const cursor = decodeCursor(before);
+    params.push(cursor.t, cursor.id);
+    conditions.push(`(mf.played_at, mf.id) < ($${++p}::timestamptz, $${++p}::uuid)`);
+  }
+  params.push(limit + 1);
+  const limitIdx = ++p;
+  const rows = await query<Record<string, unknown>>(
+    `SELECT mf.*,
+            CASE WHEN $1::uuid IS NULL THEN false
+                 ELSE EXISTS(SELECT 1 FROM kudos k WHERE k.match_id = mf.id AND k.user_id = $1)
+            END AS viewer_has_kudos
+       FROM match_feed mf
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY mf.played_at DESC, mf.id DESC
+      LIMIT $${limitIdx}`,
+    params,
+  );
+  const hasMore = rows.length > limit;
+  const matches = rows.slice(0, limit).map(mapMatchCard);
+  return c.json({ matches, next_cursor: nextCursor(matches, hasMore) });
 });
 
 // ─── Courts ────────────────────────────────────────────────────────────────

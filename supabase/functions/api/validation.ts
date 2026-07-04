@@ -221,6 +221,18 @@ export const updateProfileSchema = z.object({
   is_private: z.boolean().optional(),
 });
 
+// ─── Clubs ──────────────────────────────────────────────────────────────────
+export const createClubSchema = z.object({
+  name: z.string().trim().min(3).max(60),
+  description: z.string().trim().max(280).optional(),
+  city: z.string().trim().max(120).optional(),
+});
+
+export const clubsQuerySchema = z.object({
+  q: z.string().trim().max(120).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+
 // Training-log calendar: one month of per-day match aggregates. tz_offset is
 // the viewer's getTimezoneOffset() (minutes behind UTC) so days bucket in the
 // viewer's local time, not UTC.

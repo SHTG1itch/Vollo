@@ -15,6 +15,7 @@ export type IconName =
   | 'user'
   | 'search'
   | 'locate'
+  | 'users'
   | 'chevron-left';
 
 export function Icon({
@@ -89,6 +90,14 @@ export function Icon({
           <Line x1="12" y1="19" x2="12" y2="22" {...common} />
           <Line x1="2" y1="12" x2="5" y2="12" {...common} />
           <Line x1="19" y1="12" x2="22" y2="12" {...common} />
+        </>
+      )}
+      {name === 'users' && (
+        <>
+          <Path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" {...common} />
+          <Circle cx="9" cy="7" r="4" {...common} />
+          <Path d="M23 21v-2a4 4 0 0 0-3-3.87" {...common} />
+          <Path d="M16 3.13a4 4 0 0 1 0 7.75" {...common} />
         </>
       )}
       {name === 'chevron-left' && <Polyline points="15 18 9 12 15 6" {...common} />}

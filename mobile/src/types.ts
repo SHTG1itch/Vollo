@@ -304,6 +304,38 @@ export interface PersonalRecords {
   comeback_wins: number;
 }
 
+/** An open group with a shared feed and a 30-day member leaderboard. */
+export interface Club {
+  id: string;
+  name: string;
+  description: string | null;
+  city: string | null;
+  creator_id: string | null;
+  member_count: number;
+  viewer_is_member: boolean;
+  created_at: string;
+}
+
+export interface ClubMember {
+  id: string;
+  username: string;
+  display_name: string;
+  avatar_url: string | null;
+  role: 'admin' | 'member';
+  joined_at: string;
+}
+
+export interface ClubLeaderboardEntry {
+  user_id: string;
+  username: string;
+  display_name: string;
+  avatar_url: string | null;
+  matches_played: number;
+  wins: number;
+  score: number;
+  rank: number;
+}
+
 /** One calendar day's activity in the training log. */
 export interface CalendarDay {
   date: string; // YYYY-MM-DD (viewer-local)

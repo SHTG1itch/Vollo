@@ -39,6 +39,9 @@ export type RootStackParamList = {
   Goals: undefined;
   Records: { username: string };
   TrainingLog: { username: string };
+  Clubs: undefined;
+  Club: { clubId: string };
+  CreateClub: undefined;
   ScheduledMatches: undefined;
   // Propose a match; opponent is prefilled when launched from their profile.
   // `challenge` frames it as a competitive challenge (combative copy + alert).

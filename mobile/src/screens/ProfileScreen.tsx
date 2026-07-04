@@ -246,7 +246,10 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
               <Button label="Edit profile" variant="secondary" onPress={() => navigation.navigate('EditProfile')} style={{ flex: 1, height: 42 }} />
               <Button label="Settings" variant="ghost" onPress={() => navigation.navigate('Settings')} style={{ flex: 1, height: 42 }} />
             </View>
-            <Button label="⚔️ Matches & challenges" variant="ghost" onPress={() => navigation.navigate('ScheduledMatches')} style={{ height: 42 }} />
+            <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+              <Button label="⚔️ Challenges" variant="ghost" onPress={() => navigation.navigate('ScheduledMatches')} style={{ flex: 1, height: 42 }} />
+              <Button label="🏟️ Clubs" variant="ghost" onPress={() => navigation.navigate('Clubs')} style={{ flex: 1, height: 42 }} />
+            </View>
           </View>
         ) : profile.viewer_has_blocked ? (
           <View style={{ gap: spacing.sm }}>

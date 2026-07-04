@@ -4,6 +4,9 @@ import type {
   AuthResponse,
   BlockedUser,
   CalendarMonth,
+  Club,
+  ClubLeaderboardEntry,
+  ClubMember,
   Court,
   GeocodeResult,
   Goal,
@@ -273,6 +276,19 @@ export const api = {
     request<{ scheduled_match: ScheduledMatchCard }>('/scheduled-matches', { method: 'POST', body: JSON.stringify(body) }),
   respondToScheduledMatch: (id: string, action: 'accept' | 'decline' | 'cancel') =>
     request<{ scheduled_match: ScheduledMatchCard }>(`/scheduled-matches/${id}`, { method: 'PATCH', body: JSON.stringify({ action }) }),
+
+  // ── Clubs ──
+  getClubs: (q?: string, limit = 50) => request<{ clubs: Club[] }>(`/clubs${qs({ q, limit })}`),
+  getMyClubs: () => request<{ clubs: Club[] }>('/clubs/mine'),
+  createClub: (body: { name: string; description?: string; city?: string }) =>
+    request<{ club: Club }>('/clubs', { method: 'POST', body: JSON.stringify(body) }),
+  getClub: (id: string) => request<{ club: Club; members: ClubMember[] }>(`/clubs/${id}`),
+  joinClub: (id: string) => request<{ ok: boolean }>(`/clubs/${id}/join`, { method: 'POST' }),
+  leaveClub: (id: string) => request<void>(`/clubs/${id}/join`, { method: 'DELETE' }),
+  getClubLeaderboard: (id: string) =>
+    request<{ leaderboard: ClubLeaderboardEntry[] }>(`/clubs/${id}/leaderboard`),
+  getClubFeed: (id: string, params: { before?: string; limit?: number } = {}) =>
+    request<{ matches: MatchCard[]; next_cursor: string | null }>(`/clubs/${id}/feed${qs(params)}`),
 
   // ── Territories ──
   getTerritories: (bbox?: { min_lng: number; min_lat: number; max_lng: number; max_lat: number }) =>

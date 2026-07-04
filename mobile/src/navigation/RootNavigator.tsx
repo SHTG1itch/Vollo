@@ -17,6 +17,9 @@ import { SettingsScreen } from '../screens/SettingsScreen';
 import { GoalsScreen } from '../screens/GoalsScreen';
 import { RecordsScreen } from '../screens/RecordsScreen';
 import { TrainingLogScreen } from '../screens/TrainingLogScreen';
+import { ClubsScreen } from '../screens/ClubsScreen';
+import { ClubDetailScreen } from '../screens/ClubDetailScreen';
+import { CreateClubScreen } from '../screens/CreateClubScreen';
 import { ScheduledMatchesScreen } from '../screens/ScheduledMatchesScreen';
 import { ScheduleMatchScreen } from '../screens/ScheduleMatchScreen';
 import { colors, fonts } from '../theme';
@@ -51,6 +54,9 @@ export function RootNavigator() {
           <Stack.Screen name="Goals" component={GoalsScreen} options={{ title: 'Goals' }} />
           <Stack.Screen name="Records" component={RecordsScreen} options={{ title: 'Trophy case' }} />
           <Stack.Screen name="TrainingLog" component={TrainingLogScreen} options={{ title: 'Training log' }} />
+          <Stack.Screen name="Clubs" component={ClubsScreen} options={{ title: 'Clubs' }} />
+          <Stack.Screen name="Club" component={ClubDetailScreen} options={{ title: 'Club' }} />
+          <Stack.Screen name="CreateClub" component={CreateClubScreen} options={{ title: 'Start a club' }} />
           <Stack.Screen name="ScheduledMatches" component={ScheduledMatchesScreen} options={{ title: 'Matches & challenges' }} />
           <Stack.Screen name="ScheduleMatch" component={ScheduleMatchScreen} options={{ title: 'Challenge' }} />
         </Stack.Group>

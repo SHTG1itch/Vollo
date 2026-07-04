@@ -34,15 +34,26 @@ export function FeedScreen() {
       <View style={styles.header}>
         <View style={styles.headerTop}>
           <VolloWordmark size={28} />
-          <Pressable
-            onPress={() => navigation.navigate('UserSearch')}
-            hitSlop={8}
-            style={styles.searchBtn}
-            accessibilityRole="button"
-            accessibilityLabel="Find players"
-          >
-            <Icon name="search" size={18} color={colors.textDim} />
-          </Pressable>
+          <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+            <Pressable
+              onPress={() => navigation.navigate('Clubs')}
+              hitSlop={8}
+              style={styles.searchBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Clubs"
+            >
+              <Icon name="users" size={18} color={colors.textDim} />
+            </Pressable>
+            <Pressable
+              onPress={() => navigation.navigate('UserSearch')}
+              hitSlop={8}
+              style={styles.searchBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Find players"
+            >
+              <Icon name="search" size={18} color={colors.textDim} />
+            </Pressable>
+          </View>
         </View>
         <SegmentedControl
           options={[
