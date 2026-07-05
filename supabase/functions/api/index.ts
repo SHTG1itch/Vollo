@@ -144,7 +144,30 @@ const geocodeLimiterFn = makeLimiter(60_000, 30);
 // from getting Overpass-banned, which would break court discovery for everyone.
 const discoverLimiterFn = makeLimiter(60_000, 40);
 function clientIp(c: Context): string {
-  return (c.req.header('x-forwarded-for')?.split(',')[0]?.trim()) || 'unknown';
+  // Take the LAST x-forwarded-for hop: it's the one appended by Supabase's own
+  // gateway. The first entry is client-controlled — keying limiters on it would
+  // let an attacker rotate a fake header to dodge every IP throttle.
+  const hops = c.req.header('x-forwarded-for')?.split(',') ?? [];
+  return hops.at(-1)?.trim() || 'unknown';
+}
+
+/** Escape ILIKE wildcards in user-supplied search text so `%`/`_` match
+ *  literally (backslash is Postgres's default ESCAPE character). Without this,
+ *  q="%" lists everything and stacked wildcards force expensive scans. */
+function escapeLike(q: string): string {
+  return q.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_');
+}
+
+/** Constant-time string equality for shared-secret checks. */
+function timingSafeEqual(a: string, b: string): boolean {
+  const enc = new TextEncoder();
+  const ab = enc.encode(a);
+  const bb = enc.encode(b);
+  let diff = ab.length ^ bb.length;
+  for (let i = 0; i < Math.max(ab.length, bb.length); i++) {
+    diff |= (ab[i] ?? 0) ^ (bb[i] ?? 0);
+  }
+  return diff === 0;
 }
 
 // Durable brute-force throttle for sign-in: failed attempts are counted in
@@ -298,6 +321,34 @@ function matchVisibilityConditions(viewerParam: string, authorCol: string): stri
 }
 
 /**
+ * Pending (unconfirmed) and rejected (disputed) matches are visible only to
+ * their participants — a disputed "win" must never sit on public feeds. Only
+ * valid against the `match_feed` alias `mf` (needs user_id + opponent_id).
+ */
+function matchStatusCondition(viewerParam: string): string {
+  return `(mf.verification_status IN ('auto','verified')
+            OR mf.user_id = ${viewerParam} OR mf.opponent_id = ${viewerParam})`;
+}
+
+/**
+ * SQL fragments hiding a private/blocked user's leaderboard + territory rows
+ * from viewers who may not see their activity — the same rule
+ * assertCanViewContent applies to profile content. `userCol` is the column
+ * holding the owner's user id; `viewerParam` the (nullable) viewer id param.
+ */
+function userVisibilityConditions(viewerParam: string, userCol: string): string[] {
+  return [
+    `(${userCol} = ${viewerParam} OR NOT EXISTS(
+        SELECT 1 FROM blocks b
+         WHERE (b.blocker_id = ${viewerParam} AND b.blocked_id = ${userCol})
+            OR (b.blocker_id = ${userCol} AND b.blocked_id = ${viewerParam})))`,
+    `(${userCol} = ${viewerParam}
+       OR NOT (SELECT u2.is_private FROM users u2 WHERE u2.id = ${userCol})
+       OR EXISTS(SELECT 1 FROM follows f2 WHERE f2.follower_id = ${viewerParam} AND f2.following_id = ${userCol}))`,
+  ];
+}
+
+/**
  * Apply a (now-counting) match's effects to the logger: recompute their streak,
  * persist the court MatchScore with the current streak modifier, and recompute
  * their Bayesian per-surface ratings from history. Used both for matches that
@@ -392,6 +443,9 @@ app.post('/api/auth/login', async (c) => {
     // Everything else collapses to the generic invalid-credentials message.
     const code = (error as { code?: string }).code;
     if (code === 'email_not_confirmed') {
+      // Still counts toward the throttle: this branch confirms an account
+      // exists, so unlimited probes would be an enumeration channel.
+      await recordLoginFailure(throttleKeys);
       throw new ApiError(403, 'email_not_confirmed', 'Please confirm your email before signing in — check your inbox.');
     }
     throw await invalid();
@@ -423,7 +477,7 @@ app.get('/api/feed', optionalAuth, async (c) => {
   const viewerId = c.get('user')?.sub ?? null;
   if (scope === 'following' && !viewerId) throw ApiError.unauthorized('Sign in to view your following feed');
 
-  const conditions: string[] = [...matchVisibilityConditions('$1', 'mf.user_id')];
+  const conditions: string[] = [...matchVisibilityConditions('$1', 'mf.user_id'), matchStatusCondition('$1')];
   const params: unknown[] = [viewerId];
   let p = params.length;
 
@@ -475,7 +529,7 @@ app.get('/api/feed/user/:userId', optionalAuth, async (c) => {
                  ELSE EXISTS(SELECT 1 FROM kudos k WHERE k.match_id = mf.id AND k.user_id = $1)
             END AS viewer_has_kudos
        FROM match_feed mf
-      WHERE mf.user_id = $2 ${extra}
+      WHERE mf.user_id = $2 AND ${matchStatusCondition('$1')} ${extra}
       ORDER BY mf.played_at DESC, mf.id DESC
       LIMIT $${limitIdx}`,
     params,
@@ -501,6 +555,37 @@ app.post('/api/matches', requireAuth, async (c) => {
     throw ApiError.badRequest('You cannot log a match against yourself');
   }
 
+  if (body.opponent_id) {
+    // A block in either direction makes the players mutually invisible — you
+    // can't tag someone who blocked you (404 so the block is never revealed).
+    if ((await profileAccess(body.opponent_id, userId)).blocked) {
+      throw ApiError.notFound('User not found');
+    }
+    // Cap unanswered tags per opponent: each pending match lands in the
+    // opponent's verify queue and fires a push, so unbounded tagging is a
+    // harassment vector.
+    const pending = await queryOne<{ c: string }>(
+      `SELECT COUNT(*) AS c FROM matches
+        WHERE user_id = $1 AND opponent_id = $2 AND verification_status = 'pending'`,
+      [userId, body.opponent_id],
+    );
+    if (Number(pending?.c ?? 0) >= 3) {
+      throw ApiError.tooManyRequests('You already have matches awaiting this player’s confirmation');
+    }
+  }
+
+  // Client-supplied idempotency key: a timed-out request the app retries must
+  // not double-log (double Elo, double streak). The partial unique index on
+  // (user_id, client_key) makes the second insert collide; we return the
+  // original match instead.
+  if (body.client_key) {
+    const dupe = await queryOne<{ id: string }>(
+      'SELECT id FROM matches WHERE user_id = $1 AND client_key = $2',
+      [userId, body.client_key],
+    );
+    if (dupe) return c.json({ match: await fetchMatchCard(dupe.id, userId) }, 200);
+  }
+
   const playedAt = body.played_at ?? new Date().toISOString();
   const isTiebreak = analysis.isTiebreak;
   // A match against a registered Vollo player must be confirmed by that opponent
@@ -513,14 +598,16 @@ app.post('/api/matches', requireAuth, async (c) => {
   const previousControllerId =
     !needsVerification && body.court_id ? await getCourtController(body.court_id) : null;
 
-  const matchId = await withTransaction(async (client) => {
+  let matchId: string;
+  try {
+    matchId = await withTransaction(async (client) => {
     const inserted = await client.query<{ id: string }>(
       `INSERT INTO matches
          (user_id, opponent_id, opponent_name, court_id, surface, score_array, result,
           sets_won, sets_lost, games_won, games_lost, match_score, streak_modifier,
           rpe_index, duration_minutes, notes, is_tiebreak, played_at, verification_status,
-          title, photo_url)
-       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,0,1,$12,$13,$14,$15,$16,$17,$18,$19)
+          title, photo_url, client_key)
+       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,0,1,$12,$13,$14,$15,$16,$17,$18,$19,$20)
        RETURNING id`,
       [
         userId,
@@ -544,6 +631,7 @@ app.post('/api/matches', requireAuth, async (c) => {
         verificationStatus,
         body.title ?? null,
         body.photo_url ?? null,
+        body.client_key ?? null,
       ],
     );
     const id = inserted.rows[0]!.id;
@@ -568,7 +656,21 @@ app.post('/api/matches', requireAuth, async (c) => {
       });
     }
     return id;
-  });
+    });
+  } catch (err) {
+    // Two identical retries racing past the pre-check: the (user_id, client_key)
+    // unique index stops the second — hand back the first insert's match.
+    const pgCode = (err as { code?: string; constraint_name?: string }).code;
+    const constraint = (err as { constraint_name?: string }).constraint_name ?? '';
+    if (body.client_key && pgCode === '23505' && constraint.includes('client_key')) {
+      const dupe = await queryOne<{ id: string }>(
+        'SELECT id FROM matches WHERE user_id = $1 AND client_key = $2',
+        [userId, body.client_key],
+      );
+      if (dupe) return c.json({ match: await fetchMatchCard(dupe.id, userId) }, 200);
+    }
+    throw err;
+  }
 
   // Post-commit side effects must NOT fail the request (the match is durably
   // committed; a retry would double-log). Each is isolated; the 6-hourly sweep
@@ -731,9 +833,16 @@ async function assertCanViewMatch(
 }
 
 app.get('/api/matches/:id', optionalAuth, async (c) => {
-  const card = await fetchMatchCard(c.req.param('id'), c.get('user')?.sub ?? null);
+  const viewerId = c.get('user')?.sub ?? null;
+  const card = await fetchMatchCard(c.req.param('id'), viewerId);
   if (!card) throw ApiError.notFound('Match not found');
-  await assertCanViewMatch(card, c.get('user')?.sub ?? null);
+  await assertCanViewMatch(card, viewerId);
+  // Pending/rejected matches exist only for their participants — same rule as
+  // the feeds (a disputed "win" must not be shareable by direct link).
+  const isParticipant = viewerId != null && (viewerId === card.user_id || viewerId === card.opponent_id);
+  if (!isParticipant && card.verification_status !== 'auto' && card.verification_status !== 'verified') {
+    throw ApiError.notFound('Match not found');
+  }
   return c.json({ match: card });
 });
 
@@ -922,6 +1031,23 @@ app.post('/api/scheduled-matches', requireAuth, async (c) => {
   const b = createScheduledMatchSchema.parse(await jsonBody(c));
   if (b.opponent_id === userId) throw ApiError.badRequest('You cannot schedule a match against yourself');
 
+  if (b.opponent_id) {
+    // Blocked players are mutually invisible — no proposals, no challenge pushes.
+    if ((await profileAccess(b.opponent_id, userId)).blocked) {
+      throw ApiError.notFound('User not found');
+    }
+    // Cap open proposals per opponent: each one notifies (challenges push) and
+    // sits in the target's list, so unbounded proposing is a spam vector.
+    const open = await queryOne<{ c: string }>(
+      `SELECT COUNT(*) AS c FROM scheduled_matches
+        WHERE creator_id = $1 AND opponent_id = $2 AND status = 'proposed'`,
+      [userId, b.opponent_id],
+    );
+    if (Number(open?.c ?? 0) >= 3) {
+      throw ApiError.tooManyRequests('You already have open proposals with this player — wait for a response');
+    }
+  }
+
   // A proposal to a Vollo player needs their acceptance; an off-app opponent is
   // just a personal plan, so it starts accepted. A challenge only makes sense
   // against a registered player.
@@ -983,7 +1109,19 @@ app.patch('/api/scheduled-matches/:id', requireAuth, async (c) => {
     notifyBody = action === 'accept' ? `${actor} accepted your match. Game on!` : `${actor} declined your match.`;
   }
 
-  await query('UPDATE scheduled_matches SET status = $1 WHERE id = $2', [newStatus, id]);
+  // Status-guarded so concurrent responses (accept vs cancel double-tap) can't
+  // both proceed — only the request that flips the status off its expected
+  // value wins; the loser gets the same "already answered" error as a late tap.
+  const expected = action === 'cancel' ? ['proposed', 'accepted'] : ['proposed'];
+  const updated = await query<{ id: string }>(
+    'UPDATE scheduled_matches SET status = $1 WHERE id = $2 AND status = ANY($3) RETURNING id',
+    [newStatus, id, expected],
+  );
+  if (updated.length === 0) {
+    throw ApiError.badRequest(
+      action === 'cancel' ? 'This match can no longer be cancelled' : 'This proposal has already been answered',
+    );
+  }
   if (notifyUserId) {
     await notify({
       userId: notifyUserId,
@@ -1038,7 +1176,7 @@ app.get('/api/clubs', optionalAuth, async (c) => {
   const params: unknown[] = [viewerId];
   let where = '';
   if (q) {
-    params.push(q);
+    params.push(escapeLike(q));
     where = `WHERE c.name ILIKE '%' || $2 || '%' OR c.city ILIKE '%' || $2 || '%'`;
   }
   params.push(limit);
@@ -1106,48 +1244,60 @@ app.post('/api/clubs/:id/join', requireAuth, async (c) => {
   return c.json({ ok: true }, 201);
 });
 
+/**
+ * Remove a member and keep the club consistent: promote the longest-standing
+ * member if no admin remains, dissolve the club if nobody remains. The
+ * `FOR UPDATE` lock on the club row serialises concurrent leaves — without it,
+ * two admins leaving at once each see the other's uncommitted row and both
+ * skip promotion, stranding the club admin-less.
+ */
+async function leaveClub(client: Queryable, clubId: string, userId: string): Promise<void> {
+  await client.query('SELECT id FROM clubs WHERE id = $1 FOR UPDATE', [clubId]);
+  const removed = await client.query<{ user_id: string }>(
+    'DELETE FROM club_members WHERE club_id = $1 AND user_id = $2 RETURNING user_id',
+    [clubId, userId],
+  );
+  if (removed.rows.length === 0) return; // wasn't a member — nothing to do
+  const remaining = await client.query<{ n: string }>(
+    'SELECT COUNT(*) AS n FROM club_members WHERE club_id = $1',
+    [clubId],
+  );
+  if (Number(remaining.rows[0]!.n) === 0) {
+    await client.query('DELETE FROM clubs WHERE id = $1', [clubId]);
+    return;
+  }
+  const admins = await client.query<{ n: string }>(
+    "SELECT COUNT(*) AS n FROM club_members WHERE club_id = $1 AND role = 'admin'",
+    [clubId],
+  );
+  if (Number(admins.rows[0]!.n) === 0) {
+    await client.query(
+      `UPDATE club_members SET role = 'admin'
+        WHERE club_id = $1 AND user_id = (
+          SELECT user_id FROM club_members WHERE club_id = $1 ORDER BY joined_at ASC LIMIT 1
+        )`,
+      [clubId],
+    );
+  }
+}
+
 app.delete('/api/clubs/:id/join', requireAuth, async (c) => {
   const userId = uid(c);
   const id = c.req.param('id');
-  await withTransaction(async (client) => {
-    const removed = await client.query<{ user_id: string }>(
-      'DELETE FROM club_members WHERE club_id = $1 AND user_id = $2 RETURNING user_id',
-      [id, userId],
-    );
-    if (removed.rows.length === 0) return; // wasn't a member — nothing to do
-    // A club must not be left admin-less: promote the longest-standing member.
-    // If nobody is left at all, the club dissolves.
-    const remaining = await client.query<{ n: string }>(
-      'SELECT COUNT(*) AS n FROM club_members WHERE club_id = $1',
-      [id],
-    );
-    if (Number(remaining.rows[0]!.n) === 0) {
-      await client.query('DELETE FROM clubs WHERE id = $1', [id]);
-      return;
-    }
-    const admins = await client.query<{ n: string }>(
-      "SELECT COUNT(*) AS n FROM club_members WHERE club_id = $1 AND role = 'admin'",
-      [id],
-    );
-    if (Number(admins.rows[0]!.n) === 0) {
-      await client.query(
-        `UPDATE club_members SET role = 'admin'
-          WHERE club_id = $1 AND user_id = (
-            SELECT user_id FROM club_members WHERE club_id = $1 ORDER BY joined_at ASC LIMIT 1
-          )`,
-        [id],
-      );
-    }
-  });
+  await withTransaction((client) => leaveClub(client, id, userId));
   return c.body(null, 204);
 });
 
 // 30-day member leaderboard — same trailing window and counted-only rule as
 // court leaderboards, ranked by summed MatchScore.
-app.get('/api/clubs/:id/leaderboard', async (c) => {
+app.get('/api/clubs/:id/leaderboard', optionalAuth, async (c) => {
   const id = c.req.param('id');
+  const viewerId = c.get('user')?.sub ?? null;
   const club = await queryOne<{ id: string }>('SELECT id FROM clubs WHERE id = $1', [id]);
   if (!club) throw ApiError.notFound('Club not found');
+  // Private members' match activity is followers-only everywhere else — the
+  // club board must not become a side channel for it (same rule for blocks).
+  const visibility = userVisibilityConditions('$2', 'cm.user_id').join(' AND ');
   const rows = await query<Record<string, unknown>>(
     `SELECT u.id AS user_id, u.username, u.display_name, u.avatar_url,
             COUNT(m.id) AS matches_played,
@@ -1158,11 +1308,11 @@ app.get('/api/clubs/:id/leaderboard', async (c) => {
        LEFT JOIN matches m ON m.user_id = cm.user_id
         AND m.verification_status IN ('auto','verified')
         AND m.played_at > now() - interval '30 days'
-      WHERE cm.club_id = $1
+      WHERE cm.club_id = $1 AND ${visibility}
       GROUP BY u.id, u.username, u.display_name, u.avatar_url
       ORDER BY score DESC, matches_played DESC, u.username ASC
       LIMIT 100`,
-    [id],
+    [id, viewerId],
   );
   return c.json({
     leaderboard: rows.map((r, i) => ({
@@ -1190,6 +1340,7 @@ app.get('/api/clubs/:id/feed', optionalAuth, async (c) => {
   const conditions = [
     `mf.user_id IN (SELECT user_id FROM club_members WHERE club_id = $2)`,
     ...matchVisibilityConditions('$1', 'mf.user_id'),
+    matchStatusCondition('$1'),
   ];
   const params: unknown[] = [viewerId, id];
   let p = params.length;
@@ -1395,7 +1546,7 @@ app.get('/api/courts', async (c) => {
       `SELECT ${COURT_COLS} FROM courts
         WHERE name ILIKE '%' || $1 || '%' OR city ILIKE '%' || $1 || '%'
         ORDER BY name ASC LIMIT $2`,
-      [q, limit],
+      [escapeLike(q), limit],
     );
     return c.json({ courts: rows.map(mapCourt) });
   }
@@ -1423,12 +1574,15 @@ app.get('/api/courts/:id', optionalAuth, async (c) => {
   const row = await queryOne<Record<string, unknown>>(`SELECT ${COURT_COLS} FROM courts WHERE id = $1`, [id]);
   if (!row) throw ApiError.notFound('Court not found');
 
+  // The controller banner names a player and implies they play here often —
+  // hide it from viewers who may not see that player's activity.
+  const controllerVisibility = userVisibilityConditions('$2', 'cl.user_id').join(' AND ');
   const controller = await queryOne<{ user_id: string; username: string; display_name: string; score: string }>(
     `SELECT cl.user_id, u.username, u.display_name, cl.score
        FROM court_leaderboard cl JOIN users u ON u.id = cl.user_id
-      WHERE cl.court_id = $1 AND cl.rank = 1
+      WHERE cl.court_id = $1 AND cl.rank = 1 AND ${controllerVisibility}
       ORDER BY cl.score DESC LIMIT 1`,
-    [id],
+    [id, c.get('user')?.sub ?? null],
   );
 
   return c.json({
@@ -1444,16 +1598,19 @@ app.get('/api/courts/:id', optionalAuth, async (c) => {
   });
 });
 
-app.get('/api/courts/:id/leaderboard', async (c) => {
+app.get('/api/courts/:id/leaderboard', optionalAuth, async (c) => {
+  // Rows carry per-user wins and last_played_at — followers-only data for a
+  // private account, so apply the standard visibility rule per entry.
+  const visibility = userVisibilityConditions('$2', 'cl.user_id').join(' AND ');
   const rows = await query<Record<string, unknown>>(
     `SELECT cl.court_id, cl.user_id, cl.score, cl.matches_played, cl.wins, cl.losses,
             cl.games_won, cl.games_lost, cl.rank, cl.last_played_at,
             u.username, u.display_name, u.avatar_url
        FROM court_leaderboard cl JOIN users u ON u.id = cl.user_id
-      WHERE cl.court_id = $1
+      WHERE cl.court_id = $1 AND ${visibility}
       ORDER BY cl.rank ASC, cl.score DESC
       LIMIT 100`,
-    [c.req.param('id')],
+    [c.req.param('id'), c.get('user')?.sub ?? null],
   );
   const leaderboard: LeaderboardEntry[] = rows.map((r) => ({
     court_id: r.court_id as string,
@@ -1474,17 +1631,22 @@ app.get('/api/courts/:id/leaderboard', async (c) => {
 });
 
 // ─── Territories ─────────────────────────────────────────────────────────
-app.get('/api/territories', async (c) => {
+// A territory hull centred on someone's regular courts is a home-location
+// proxy — private accounts' zones are followers-only, like their matches.
+app.get('/api/territories', optionalAuth, async (c) => {
   const b = bboxQuerySchema.parse(c.req.query());
   const hasBbox = b.min_lng != null && b.min_lat != null && b.max_lng != null && b.max_lat != null;
   const territories = await listTerritories(
+    c.get('user')?.sub ?? null,
     hasBbox ? { minLng: b.min_lng!, minLat: b.min_lat!, maxLng: b.max_lng!, maxLat: b.max_lat! } : undefined,
   );
   return c.json({ territories });
 });
 
-app.get('/api/territories/user/:userId', async (c) => {
-  const territories = await getUserTerritories(c.req.param('userId'));
+app.get('/api/territories/user/:userId', optionalAuth, async (c) => {
+  const targetId = c.req.param('userId');
+  await assertCanViewContent(targetId, c.get('user')?.sub ?? null);
+  const territories = await getUserTerritories(targetId);
   return c.json({ territories });
 });
 
@@ -1545,7 +1707,7 @@ app.get('/api/users/search', requireAuth, async (c) => {
                            OR (b.blocker_id = u.id AND b.blocked_id = $1))
       ORDER BY (u.username ILIKE $2 || '%' OR u.display_name ILIKE $2 || '%') DESC, u.username ASC
       LIMIT $3`,
-    [userId, q, limit],
+    [userId, escapeLike(q), limit],
   );
   return c.json({ users });
 });
@@ -1561,8 +1723,27 @@ app.post('/api/users/me/push-token', requireAuth, async (c) => {
   return c.json({ ok: true }, 201);
 });
 
+// Called on logout so a signed-out device stops receiving this account's
+// pushes. Scoped to the caller's own rows — you can't unregister someone
+// else's token.
+app.delete('/api/users/me/push-token', requireAuth, async (c) => {
+  const { token } = pushTokenSchema.parse(await jsonBody(c));
+  await query('DELETE FROM push_tokens WHERE user_id = $1 AND token = $2', [uid(c), token]);
+  return c.body(null, 204);
+});
+
 app.delete('/api/users/me', requireAuth, async (c) => {
   const userId = uid(c);
+  // Leave every club through the normal path first — the raw FK cascade would
+  // strip memberships without promoting a new admin or dissolving empty clubs,
+  // leaving zombie clubs nobody can administer.
+  const memberships = await query<{ club_id: string }>(
+    'SELECT club_id FROM club_members WHERE user_id = $1',
+    [userId],
+  );
+  for (const m of memberships) {
+    await withTransaction((client) => leaveClub(client, m.club_id, userId));
+  }
   const row = await queryOne<{ auth_id: string | null }>('SELECT auth_id FROM users WHERE id = $1', [userId]);
   if (row?.auth_id) {
     // Delete the auth identity first: users.auth_id ON DELETE CASCADE removes the
@@ -1941,7 +2122,7 @@ app.post('/api/notifications/read', requireAuth, async (c) => {
 app.post('/api/internal/sweep', async (c) => {
   const provided = c.req.header('x-internal-secret');
   const expected = await getSecret('internal_secret');
-  if (!provided || provided !== expected) throw ApiError.unauthorized();
+  if (!provided || !expected || !timingSafeEqual(provided, expected)) throw ApiError.unauthorized();
   const type = (await jsonBody<{ type?: string }>(c)).type;
   if (type === 'streak') return c.json({ ok: true, recomputed: await runStreakSweep() });
   if (type === 'territory') return c.json({ ok: true, recomputed: await runTerritorySweep() });

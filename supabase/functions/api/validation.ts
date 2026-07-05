@@ -76,6 +76,9 @@ export const createMatchSchema = z
     // When this match fulfils a scheduled proposal, link it so the result shows
     // on both players' scheduled-match cards.
     scheduled_match_id: z.string().uuid().optional(),
+    // Client-generated idempotency key: a timed-out create the app retries maps
+    // back to the original match instead of double-logging (Elo counts twice).
+    client_key: z.string().uuid().optional(),
     surface: surfaceSchema,
     score_array: scoreArraySchema,
     // Optional short headline for the match, shown on the feed card.

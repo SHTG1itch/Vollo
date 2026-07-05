@@ -126,6 +126,10 @@ export async function recomputeUserTerritories(userId: string): Promise<void> {
   );
 
   await withTransaction(async (client) => {
+    // Serialise per-user recomputes (same pattern as rating.ts): two concurrent
+    // delete-then-insert passes would each miss the other's uncommitted rows
+    // and leave the user with doubled territory polygons until the next sweep.
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1::text, 1::bigint))', [userId]);
     await client.query('DELETE FROM territories WHERE user_id = $1', [userId]);
     for (const t of next) {
       await client.query(
@@ -361,17 +365,30 @@ const OWNER_ZONE_WINS = `COALESCE((
    WHERE cl.user_id = t.user_id AND cl.court_id = ANY(t.court_ids)
 ), 0)`;
 
-/** All territories as GeoJSON-ready rows, optionally limited to a bbox. */
-export async function listTerritories(bbox?: {
-  minLng: number;
-  minLat: number;
-  maxLng: number;
-  maxLat: number;
-}): Promise<Territory[]> {
-  const params: unknown[] = [];
-  let where = '';
+/** All territories as GeoJSON-ready rows, optionally limited to a bbox.
+ *  Private owners' zones are shown only to themselves and their followers, and
+ *  blocked players never see each other's — a hull centred on someone's home
+ *  courts is location data, so it follows the same rule as their matches. */
+export async function listTerritories(
+  viewerId: string | null,
+  bbox?: {
+    minLng: number;
+    minLat: number;
+    maxLng: number;
+    maxLat: number;
+  },
+): Promise<Territory[]> {
+  const params: unknown[] = [viewerId];
+  const conditions = [
+    `(t.user_id = $1 OR NOT EXISTS(
+        SELECT 1 FROM blocks b
+         WHERE (b.blocker_id = $1 AND b.blocked_id = t.user_id)
+            OR (b.blocker_id = t.user_id AND b.blocked_id = $1)))`,
+    `(t.user_id = $1 OR NOT u.is_private
+       OR EXISTS(SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.following_id = t.user_id))`,
+  ];
   if (bbox) {
-    where = 'WHERE t.geom && ST_MakeEnvelope($1, $2, $3, $4, 4326)';
+    conditions.push('t.geom && ST_MakeEnvelope($2, $3, $4, $5, 4326)');
     params.push(bbox.minLng, bbox.minLat, bbox.maxLng, bbox.maxLat);
   }
   const rows = await query<TerritoryRow>(
@@ -382,7 +399,7 @@ export async function listTerritories(bbox?: {
             ${OWNER_ZONE_WINS} AS owner_zone_wins
        FROM territories t
        JOIN users u ON u.id = t.user_id
-       ${where}
+      WHERE ${conditions.join(' AND ')}
        ORDER BY t.area_sqkm DESC
        LIMIT 500`,
     params,
