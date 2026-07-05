@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -28,9 +28,16 @@ export function ClubDetailScreen({ route }: NativeStackScreenProps<RootStackPara
   const [busy, setBusy] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
+  // Adjust state during render when the fetch key changes, so the fetch effect
+  // below never calls setState synchronously.
+  const [prevFetch, setPrevFetch] = useState({ clubId, reloadKey });
+  if (prevFetch.clubId !== clubId || prevFetch.reloadKey !== reloadKey) {
+    setPrevFetch({ clubId, reloadKey });
+    setError(null);
+  }
+
   useEffect(() => {
     let active = true;
-    setError(null);
     void (async () => {
       try {
         const detail = await api.getClub(clubId);
@@ -105,9 +112,13 @@ export function ClubDetailScreen({ route }: NativeStackScreenProps<RootStackPara
     );
   };
 
+  // In-flight guard (per match): rapid double-taps must not race add/remove
+  // calls; the count is reconciled from the server response.
+  const kudosInFlight = useRef<Set<string>>(new Set());
   const toggleKudos = async (matchId: string) => {
     const m = matches.find((x) => x.id === matchId);
-    if (!m) return;
+    if (!m || kudosInFlight.current.has(matchId)) return;
+    kudosInFlight.current.add(matchId);
     const had = !!m.viewer_has_kudos;
     setMatches((list) =>
       list.map((x) =>
@@ -117,16 +128,24 @@ export function ClubDetailScreen({ route }: NativeStackScreenProps<RootStackPara
       ),
     );
     try {
-      if (had) await api.removeKudos(matchId);
-      else await api.addKudos(matchId);
+      const res = had ? await api.removeKudos(matchId) : await api.addKudos(matchId);
+      setMatches((list) =>
+        list.map((x) =>
+          x.id === matchId
+            ? { ...x, viewer_has_kudos: res.viewer_has_kudos, kudos_count: res.kudos_count }
+            : x,
+        ),
+      );
     } catch {
       setMatches((list) =>
         list.map((x) =>
           x.id === matchId
-            ? { ...x, viewer_has_kudos: had, kudos_count: x.kudos_count + (had ? 1 : -1) }
+            ? { ...x, viewer_has_kudos: had, kudos_count: Math.max(0, x.kudos_count + (had ? 1 : -1)) }
             : x,
         ),
       );
+    } finally {
+      kudosInFlight.current.delete(matchId);
     }
   };
 

@@ -4,7 +4,7 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { api } from '../api/client';
-import { Button, Card, EmptyState, Field, Loading, SegmentedControl } from '../components/ui';
+import { Button, Card, EmptyState, ErrorState, Field, Loading, SegmentedControl } from '../components/ui';
 import { colors, font, fonts, radius, spacing } from '../theme';
 import type { Club } from '../types';
 
@@ -44,18 +44,29 @@ export function ClubsScreen() {
   const [q, setQ] = useState('');
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // A failed fetch with nothing loaded shows an error state, not a false
+  // "no clubs" empty state; with data already on screen it keeps the stale list.
+  const [mineError, setMineError] = useState(false);
+  const [foundError, setFoundError] = useState(false);
+
   const loadMine = useCallback(() => {
     void api
       .getMyClubs()
-      .then((r) => setMine(r.clubs))
-      .catch(() => setMine((m) => m ?? []));
+      .then((r) => {
+        setMine(r.clubs);
+        setMineError(false);
+      })
+      .catch(() => setMineError(true));
   }, []);
 
   const search = useCallback((term: string) => {
     void api
       .getClubs(term || undefined)
-      .then((r) => setFound(r.clubs))
-      .catch(() => setFound((f) => f ?? []));
+      .then((r) => {
+        setFound(r.clubs);
+        setFoundError(false);
+      })
+      .catch(() => setFoundError(true));
   }, []);
 
   // Refresh on focus so joins/leaves/creations made deeper in the stack show up.
@@ -77,6 +88,7 @@ export function ClubsScreen() {
   }, [q, scope, search]);
 
   const data = scope === 'mine' ? mine : found;
+  const loadFailed = scope === 'mine' ? mineError : foundError;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
@@ -100,7 +112,12 @@ export function ClubsScreen() {
         ) : null}
       </View>
 
-      {data === null ? (
+      {data === null && loadFailed ? (
+        <ErrorState
+          message="Couldn't load clubs — check your connection."
+          onRetry={() => (scope === 'mine' ? loadMine() : search(q.trim()))}
+        />
+      ) : data === null ? (
         <Loading />
       ) : (
         <FlatList

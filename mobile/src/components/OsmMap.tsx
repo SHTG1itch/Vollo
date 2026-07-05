@@ -1,7 +1,8 @@
-import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
-import type { StyleProp, ViewStyle } from 'react-native';
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import type { Region } from 'react-native-maps';
+import { colors, font, fonts, radius, spacing } from '../theme';
 
 // A keyless OpenStreetMap map for Android, rendered with Leaflet inside a WebView.
 //
@@ -241,6 +242,9 @@ export const OsmMap = forwardRef<OsmMapHandle, Props>(function OsmMap(
 ) {
   const webRef = useRef<WebView>(null);
   const readyRef = useRef(false);
+  // Leaflet couldn't load inside the page (offline / CDN unreachable) — the map
+  // would otherwise just sit blank, so show a visible fallback with a retry.
+  const [failed, setFailed] = useState(false);
 
   // Built once: the initial region only seeds the first camera (subsequent moves
   // come through `animateToRegion`), so rebuilding the HTML on every prop change
@@ -317,6 +321,9 @@ export const OsmMap = forwardRef<OsmMapHandle, Props>(function OsmMap(
         case 'polygon':
           if (msg.id) onPolygonPress?.(msg.id);
           break;
+        case 'error':
+          setFailed(true);
+          break;
         default:
           break;
       }
@@ -324,22 +331,57 @@ export const OsmMap = forwardRef<OsmMapHandle, Props>(function OsmMap(
     [inject, markers, polygons, userLocation, onRegionChange, onRegionChangeComplete, onMarkerPress, onPolygonPress],
   );
 
+  const retry = useCallback(() => {
+    readyRef.current = false;
+    setFailed(false);
+    webRef.current?.reload();
+  }, []);
+
   return (
-    <WebView
-      ref={webRef}
-      style={style}
-      source={{ html }}
-      originWhitelist={['*']}
-      onMessage={onMessage}
-      javaScriptEnabled
-      domStorageEnabled
-      scrollEnabled={false}
-      overScrollMode="never"
-      androidLayerType="hardware"
-      setSupportMultipleWindows={false}
-      // The map fills its container with a flat background; no scroll/zoom chrome.
-      showsHorizontalScrollIndicator={false}
-      showsVerticalScrollIndicator={false}
-    />
+    <View style={style}>
+      <WebView
+        ref={webRef}
+        style={StyleSheet.absoluteFill}
+        source={{ html }}
+        originWhitelist={['*']}
+        onMessage={onMessage}
+        javaScriptEnabled
+        domStorageEnabled
+        scrollEnabled={false}
+        overScrollMode="never"
+        androidLayerType="hardware"
+        setSupportMultipleWindows={false}
+        // The map fills its container with a flat background; no scroll/zoom chrome.
+        showsHorizontalScrollIndicator={false}
+        showsVerticalScrollIndicator={false}
+      />
+      {failed ? (
+        <View style={fallbackStyles.wrap}>
+          <Text style={fallbackStyles.text}>Map failed to load — check your connection</Text>
+          <Pressable onPress={retry} accessibilityRole="button" accessibilityLabel="Reload the map" hitSlop={8} style={fallbackStyles.retry}>
+            <Text style={fallbackStyles.retryText}>Try again</Text>
+          </Pressable>
+        </View>
+      ) : null}
+    </View>
   );
+});
+
+const fallbackStyles = StyleSheet.create({
+  wrap: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.md,
+    padding: spacing.xl,
+    backgroundColor: colors.bg,
+  },
+  text: { color: colors.textDim, fontSize: font.small, fontFamily: fonts.bold, textAlign: 'center' },
+  retry: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+    backgroundColor: colors.primarySoft,
+  },
+  retryText: { color: colors.primary, fontSize: font.small, fontFamily: fonts.bold },
 });

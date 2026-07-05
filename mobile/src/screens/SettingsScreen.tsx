@@ -40,7 +40,10 @@ export function SettingsScreen() {
       const res = await api.updateProfile({ is_private: next });
       setUser(res.user);
     } catch (e) {
-      setUser({ ...user, is_private: !next });
+      // Revert from the store's CURRENT user — the `user` captured above may be
+      // stale if anything else updated the profile while the save was in flight.
+      const current = useAuth.getState().user;
+      if (current) setUser({ ...current, is_private: !next });
       showToast(e instanceof ApiError ? e.message : 'Could not update privacy — please try again.', 'error');
     } finally {
       setPrivateSaving(false);

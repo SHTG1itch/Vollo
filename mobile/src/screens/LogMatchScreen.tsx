@@ -10,7 +10,7 @@ import { useFeed } from '../store/feed';
 import { pickAndUploadMatchPhoto } from '../lib/uploadImage';
 import { showToast } from '../components/Toast';
 import { tapLight } from '../lib/haptics';
-import { Avatar, Button, Card, Field, H2, Muted } from '../components/ui';
+import { Avatar, Button, Card, Field, H2, Muted, SectionHeader } from '../components/ui';
 import { ScoreInput } from '../components/ScoreInput';
 import { Stepper } from '../components/Stepper';
 import { SurfaceBadge } from '../components/SurfaceBadge';
@@ -18,10 +18,31 @@ import { colors, font, fonts, radius, spacing, surfaceColors, surfaceColorsSoft 
 import type { Court, MatchStats, ScoreArray, Surface } from '../types';
 import { analyzeLocal } from '../utils/format';
 
-const DAY_MS = 86_400_000;
-
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 const SURFACES: Surface[] = ['hard', 'clay', 'grass', 'indoor'];
+
+/** Identity of a prefill navigation ("Log result" on a scheduled match), so a
+ *  fresh navigation applies it but a re-focus (params cleared) doesn't. */
+function prefillKeyOf(p: RouteProp<TabParamList, 'Log'>['params']): string | null {
+  if (!p) return null;
+  if (p.scheduledMatchId) return p.scheduledMatchId;
+  if (p.prefillOpponentId || p.prefillOpponentName || p.prefillCourtId || p.prefillSurface) {
+    return `${p.prefillOpponentId ?? ''}|${p.prefillOpponentName ?? ''}|${p.prefillCourtId ?? ''}|${p.prefillSurface ?? ''}`;
+  }
+  return null;
+}
+
+/** UUID v4 for the create-match idempotency key. crypto.randomUUID when the JS
+ *  engine provides it; a Math.random fallback otherwise (collision odds are
+ *  irrelevant here — the key only needs to be unique per user). */
+function newClientKey(): string {
+  const c = globalThis.crypto as { randomUUID?: () => string } | undefined;
+  if (c?.randomUUID) return c.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (ch) => {
+    const r = (Math.random() * 16) | 0;
+    return (ch === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
 
 const emptyStats = (): MatchStats => ({
   first_serve_in: 0, first_serve_total: 0, second_serve_in: 0, second_serve_total: 0,
@@ -64,6 +85,8 @@ export function LogMatchScreen() {
   // a slow background discovery refresh can't clobber a newer list/selection.
   const courtsToken = useRef(0);
   const [submitting, setSubmitting] = useState(false);
+  // Idempotency key for the in-flight/retried submission (see submit()).
+  const clientKeyRef = useRef<string | null>(null);
 
   // Debounced player search for tagging a registered opponent. Typing in the
   // field clears any previously-picked id so a stale opponent_id can't be
@@ -161,19 +184,14 @@ export function LogMatchScreen() {
   }, [route.params?.newCourtId, navigation]);
 
   // Prefill from "Log result" on a scheduled match: seed opponent/court/surface
-  // and remember the schedule id so the result links back. Keyed so a fresh
-  // navigation re-applies, but a re-focus (params cleared) doesn't.
-  useEffect(() => {
-    const p = route.params;
-    if (!p) return;
-    const key =
-      p.scheduledMatchId ??
-      (p.prefillOpponentId || p.prefillOpponentName || p.prefillCourtId || p.prefillSurface
-        ? `${p.prefillOpponentId ?? ''}|${p.prefillOpponentName ?? ''}|${p.prefillCourtId ?? ''}|${p.prefillSurface ?? ''}`
-        : null);
-    if (!key || lastPrefillKey.current === key) return;
-    lastPrefillKey.current = key;
-
+  // and remember the schedule id so the result links back. The synchronous
+  // state seeding happens as a render-phase adjustment keyed on the prefill
+  // (React's sanctioned pattern), never inside an effect.
+  const prefillKey = prefillKeyOf(route.params);
+  const [appliedPrefillKey, setAppliedPrefillKey] = useState<string | null>(null);
+  if (prefillKey && appliedPrefillKey !== prefillKey) {
+    setAppliedPrefillKey(prefillKey);
+    const p = route.params!;
     if (p.prefillOpponentId) {
       setOpponentId(p.prefillOpponentId);
       setOpponentName(p.prefillOpponentName ?? '');
@@ -186,9 +204,19 @@ export function LogMatchScreen() {
       setSurfaceTouched(true);
     }
     if (p.scheduledMatchId) setScheduledMatchId(p.scheduledMatchId);
-    if (p.prefillCourtId) {
+    if (p.prefillCourtId) setCourtId(p.prefillCourtId);
+  }
+
+  // Side effects of the prefill (fetch the court into the picker, clear the
+  // params so a re-focus doesn't re-apply) stay in an effect.
+  useEffect(() => {
+    const p = route.params;
+    const key = prefillKeyOf(p);
+    if (!key || lastPrefillKey.current === key) return;
+    lastPrefillKey.current = key;
+
+    if (p?.prefillCourtId) {
       const cid = p.prefillCourtId;
-      setCourtId(cid);
       void (async () => {
         try {
           const { court } = await api.getCourt(cid);
@@ -242,6 +270,10 @@ export function LogMatchScreen() {
       showToast('Each set needs a winner and the match cannot end in a tie.', 'error');
       return;
     }
+    // One idempotency key per logical match: stable across retries of this
+    // submission (a timed-out create the user retries maps to the same server
+    // row instead of double-logging), regenerated after a successful log.
+    if (!clientKeyRef.current) clientKeyRef.current = newClientKey();
     setSubmitting(true);
     try {
       const payload: CreateMatchPayload = {
@@ -261,11 +293,14 @@ export function LogMatchScreen() {
         ...(rpe ? { rpe_index: rpe } : {}),
         ...(duration > 0 ? { duration_minutes: duration } : {}),
         ...(notes.trim() ? { notes: notes.trim() } : {}),
-        ...(daysAgo > 0 ? { played_at: new Date(Date.now() - daysAgo * DAY_MS).toISOString() } : {}),
+        // Calendar day math (setDate), not ms offsets — a DST change makes a day ≠ 24h.
+        ...(daysAgo > 0 ? { played_at: playedAt(daysAgo).toISOString() } : {}),
         // Don't ship an all-zero stat row just because the section was expanded.
         ...(statsTouched ? { stats } : {}),
+        ...(clientKeyRef.current ? { client_key: clientKeyRef.current } : {}),
       };
       const { match } = await api.createMatch(payload);
+      clientKeyRef.current = null; // next log is a new match, not a retry
       prepend(match);
       showToast('Match logged 🎾', 'success');
       navigation.navigate('Tabs', { screen: 'Feed' });
@@ -334,6 +369,9 @@ export function LogMatchScreen() {
                 styles.surfaceChip,
                 surface === s && { borderColor: surfaceColors[s], backgroundColor: surfaceColorsSoft[s] },
               ]}
+              accessibilityRole="button"
+              accessibilityState={{ selected: surface === s }}
+              accessibilityLabel={`${s} surface`}
             >
               <SurfaceBadge surface={s} small />
             </Pressable>
@@ -423,6 +461,8 @@ export function LogMatchScreen() {
                 setDaysAgo(d);
               }}
               style={[styles.dayChip, daysAgo === d && styles.dayChipActive]}
+              accessibilityRole="button"
+              accessibilityState={{ selected: daysAgo === d }}
             >
               <Text style={[styles.dayChipText, daysAgo === d && { color: colors.onPrimary }]}>
                 {d === 0 ? 'Today' : d === 1 ? 'Yesterday' : `${d}d ago`}
@@ -478,6 +518,9 @@ export function LogMatchScreen() {
                 setRpe(rpe === n ? null : n);
               }}
               style={[styles.rpePill, rpe === n && styles.rpePillActive]}
+              accessibilityRole="button"
+              accessibilityState={{ selected: rpe === n }}
+              accessibilityLabel={`RPE ${n}`}
             >
               <Text style={[styles.rpeText, rpe === n && styles.rpeTextActive]}>{n}</Text>
             </Pressable>
@@ -533,7 +576,12 @@ export function LogMatchScreen() {
       </Section>
 
       {/* Detailed stats */}
-      <Pressable onPress={() => setShowStats((v) => !v)} style={styles.statsToggle}>
+      <Pressable
+        onPress={() => setShowStats((v) => !v)}
+        style={styles.statsToggle}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: showStats }}
+      >
         <Text style={styles.statsToggleText}>{showStats ? '▾' : '▸'} Detailed stats (optional)</Text>
       </Pressable>
       {showStats ? (
@@ -571,10 +619,16 @@ export function LogMatchScreen() {
   );
 }
 
+function playedAt(daysAgo: number): Date {
+  const d = new Date();
+  d.setDate(d.getDate() - daysAgo);
+  return d;
+}
+
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <View style={{ gap: spacing.sm }}>
-      <Text style={styles.sectionTitle}>{title}</Text>
+      <SectionHeader title={title} />
       {children}
     </View>
   );
@@ -606,7 +660,6 @@ const styles = StyleSheet.create({
   preview: { alignItems: 'center', gap: 2 },
   previewResult: { fontSize: font.h1, fontFamily: fonts.display, letterSpacing: 2 },
   previewSets: { color: colors.textDim, fontSize: font.small, fontFamily: fonts.bold, textTransform: 'uppercase', letterSpacing: 0.5 },
-  sectionTitle: { color: colors.textDim, fontSize: font.small, fontFamily: fonts.bold, textTransform: 'uppercase', letterSpacing: 0.5 },
   groupTitle: { color: colors.primary, fontSize: font.small, fontFamily: fonts.bold, textTransform: 'uppercase', letterSpacing: 0.5 },
   surfaceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   surfaceChip: { padding: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border },

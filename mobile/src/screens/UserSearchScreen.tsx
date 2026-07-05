@@ -58,7 +58,12 @@ export function UserSearchScreen() {
   const patchResult = (id: string, patch: Partial<UserSearchResult>) =>
     setResults((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
 
+  // Per-row in-flight guard so a double-tap can't race follow/unfollow calls.
+  const [followBusy, setFollowBusy] = useState<Record<string, boolean>>({});
+
   const toggleFollow = async (u: UserSearchResult) => {
+    if (followBusy[u.id]) return;
+    setFollowBusy((b) => ({ ...b, [u.id]: true }));
     const was = { viewer_is_following: u.viewer_is_following, viewer_has_requested: u.viewer_has_requested };
     try {
       if (u.viewer_is_following || u.viewer_has_requested) {
@@ -74,6 +79,11 @@ export function UserSearchScreen() {
       }
     } catch {
       patchResult(u.id, was);
+    } finally {
+      setFollowBusy((b) => {
+        const { [u.id]: _done, ...rest } = b;
+        return rest;
+      });
     }
   };
 
@@ -113,6 +123,8 @@ export function UserSearchScreen() {
               label={item.viewer_is_following ? 'Following' : item.viewer_has_requested ? 'Requested' : 'Follow'}
               variant={item.viewer_is_following || item.viewer_has_requested ? 'secondary' : 'primary'}
               onPress={() => toggleFollow(item)}
+              loading={!!followBusy[item.id]}
+              disabled={!!followBusy[item.id]}
               style={{ height: 36, paddingHorizontal: spacing.md }}
             />
           </Pressable>

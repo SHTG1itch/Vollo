@@ -34,37 +34,45 @@ export function MatchDetailScreen({ route, navigation }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   // Celebrate your own win once when the match opens (not on every refresh).
+  // The ref stores the matchId already celebrated, so a pull-to-refresh of the
+  // SAME match won't re-fire the confetti but a different match will.
   const [celebrate, setCelebrate] = useState(false);
-  const celebratedRef = useRef(false);
+  const celebratedRef = useRef<string | null>(null);
   // Strava-style "share to story" overlay.
   const [shareOpen, setShareOpen] = useState(false);
 
-  // Reset the one-shot gate when the screen is reused for a DIFFERENT match
-  // (new route params on the same component instance — e.g. a deep link or
-  // navigating between matches without unmounting). Keyed on matchId only, so a
-  // pull-to-refresh of the SAME match still won't re-fire the confetti.
-  useEffect(() => {
-    celebratedRef.current = false;
-    setCelebrate(false);
-  }, [matchId]);
-
-  useEffect(() => {
-    if (!celebratedRef.current && match && match.result === 'win' && match.user_id === user?.id) {
-      celebratedRef.current = true;
-      setCelebrate(true);
+  // Adjust state during render when the fetch key changes (React's sanctioned
+  // pattern), so the fetch effect below never calls setState synchronously.
+  const [prevFetch, setPrevFetch] = useState({ matchId, reloadKey });
+  if (prevFetch.matchId !== matchId || prevFetch.reloadKey !== reloadKey) {
+    const differentMatch = prevFetch.matchId !== matchId;
+    setPrevFetch({ matchId, reloadKey });
+    setError(null);
+    if (differentMatch) {
+      // Screen reused for another match (deep link / match-to-match nav):
+      // drop the stale content and show the loader.
+      setMatch(null);
+      setComments([]);
+      setCelebrate(false);
+      setLoading(true);
+    } else if (!match) {
+      // Retrying a failed load shows the loader again, not "Match not found".
+      setLoading(true);
     }
-  }, [match, user?.id]);
+  }
 
   useEffect(() => {
     let active = true;
-    if (reloadKey === 0) setLoading(true);
-    setError(null);
     void (async () => {
       try {
         const [{ match: m }, { comments: c }] = await Promise.all([api.getMatch(matchId), api.getComments(matchId)]);
         if (!active) return;
         setMatch(m);
         setComments(c);
+        if (celebratedRef.current !== matchId && m.result === 'win' && m.user_id === user?.id) {
+          celebratedRef.current = matchId;
+          setCelebrate(true);
+        }
       } catch (e) {
         if (active) setError(e instanceof Error ? e.message : 'Failed to load match');
       } finally {
@@ -77,7 +85,7 @@ export function MatchDetailScreen({ route, navigation }: Props) {
     return () => {
       active = false;
     };
-  }, [matchId, reloadKey]);
+  }, [matchId, reloadKey, user?.id]);
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -208,24 +216,35 @@ export function MatchDetailScreen({ route, navigation }: Props) {
             <Text style={styles.setsTag}>Sets {match.sets_won}–{match.sets_lost}</Text>
           </View>
           {match.opponent_username ? (
-            <Text style={styles.vs}>
-              vs{' '}
-              <Text style={styles.vsLink} onPress={() => goToUser(match.opponent_username)}>
-                {opponent}
-              </Text>
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Text style={styles.vs}>vs </Text>
+              <Pressable
+                onPress={() => goToUser(match.opponent_username)}
+                accessibilityRole="button"
+                accessibilityLabel={`View ${opponent}'s profile`}
+                hitSlop={8}
+              >
+                <Text style={styles.vsLink}>{opponent}</Text>
+              </Pressable>
+            </View>
           ) : (
             <Muted>vs {opponent}</Muted>
           )}
 
           <View style={styles.metaRow}>
             {match.court_name ? (
-              <Text
-                style={[styles.meta, match.court_id && styles.metaLink]}
-                onPress={match.court_id ? () => navigation.navigate('Court', { courtId: match.court_id! }) : undefined}
-              >
-                📍 {match.court_name}
-              </Text>
+              match.court_id ? (
+                <Pressable
+                  onPress={() => navigation.navigate('Court', { courtId: match.court_id! })}
+                  accessibilityRole="button"
+                  accessibilityLabel={`View ${match.court_name}`}
+                  hitSlop={8}
+                >
+                  <Text style={[styles.meta, styles.metaLink]}>📍 {match.court_name}</Text>
+                </Pressable>
+              ) : (
+                <Text style={styles.meta}>📍 {match.court_name}</Text>
+              )
             ) : null}
             {match.rpe_index ? <Text style={styles.meta}>🔥 RPE {match.rpe_index}</Text> : null}
             {match.duration_minutes ? <Text style={styles.meta}>⏱ {match.duration_minutes}m</Text> : null}
@@ -277,9 +296,25 @@ export function MatchDetailScreen({ route, navigation }: Props) {
         {comments.length === 0 ? <Muted>Be the first to comment.</Muted> : null}
         {comments.map((c) => (
           <View key={c.id} style={styles.comment}>
-            <Avatar name={c.display_name} uri={c.avatar_url} size={32} />
+            <Pressable
+              style={({ pressed }) => [pressed && { opacity: 0.7 }]}
+              onPress={() => goToUser(c.username)}
+              accessibilityRole="button"
+              accessibilityLabel={`View ${c.display_name}'s profile`}
+              hitSlop={8}
+            >
+              <Avatar name={c.display_name} uri={c.avatar_url} size={32} />
+            </Pressable>
             <View style={{ flex: 1 }}>
-              <Text style={styles.commentAuthor}>{c.display_name} <Text style={styles.sub}>· {timeAgo(c.created_at)}</Text></Text>
+              <Pressable
+                style={({ pressed }) => [{ alignSelf: 'flex-start' }, pressed && { opacity: 0.7 }]}
+                onPress={() => goToUser(c.username)}
+                accessibilityRole="button"
+                accessibilityLabel={`View ${c.display_name}'s profile`}
+                hitSlop={8}
+              >
+                <Text style={styles.commentAuthor}>{c.display_name} <Text style={styles.sub}>· {timeAgo(c.created_at)}</Text></Text>
+              </Pressable>
               <Text style={styles.commentBody}>{c.body}</Text>
             </View>
           </View>

@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { api } from '../api/client';
@@ -53,10 +53,31 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
+  // Adjust state during render when the fetch key changes, so the fetch effect
+  // below never calls setState synchronously.
+  const [prevFetch, setPrevFetch] = useState({ username, reloadKey });
+  if (prevFetch.username !== username || prevFetch.reloadKey !== reloadKey) {
+    setPrevFetch({ username, reloadKey });
+    setError(null);
+    if (!profile) setLoading(true); // a pull-to-refresh keeps the screen, not a full loader
+  }
+
+  // Re-fetch when the screen regains focus (e.g. returning from EditProfile) so
+  // header edits show immediately. Skip the first focus — the effect below
+  // already fetches on mount.
+  const focusedOnce = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (!focusedOnce.current) {
+        focusedOnce.current = true;
+        return;
+      }
+      setReloadKey((k) => k + 1);
+    }, []),
+  );
+
   useEffect(() => {
     let active = true;
-    if (!profile) setLoading(true); // a pull-to-refresh keeps the screen, not a full loader
-    setError(null);
     void (async () => {
       try {
         const prof = await api.getProfile(username);
@@ -579,7 +600,6 @@ const styles = StyleSheet.create({
   miniLabel: { color: colors.textFaint, fontSize: font.tiny, fontFamily: fonts.bold, letterSpacing: 0.5 },
   miniValue: { color: colors.text, fontSize: font.h1, fontFamily: fonts.display },
   miniSub: { color: colors.primary, fontSize: font.tiny, fontFamily: fonts.bold },
-  sectionTitle: { color: colors.textDim, fontFamily: fonts.bold, fontSize: font.small, textTransform: 'uppercase', letterSpacing: 0.5 },
   subhead: { color: colors.textDim, fontFamily: fonts.bold, fontSize: font.small },
   winRate: { color: colors.onAccent, fontFamily: fonts.bold, fontSize: font.small, backgroundColor: colors.accent, paddingHorizontal: spacing.sm, paddingVertical: 2, borderRadius: radius.pill, overflow: 'hidden' },
   ratingRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },

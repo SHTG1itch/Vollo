@@ -22,16 +22,18 @@ function FollowRequestsCard({
   onResolved,
 }: {
   requests: FollowRequest[];
-  onResolved: (userId: string) => void;
+  onResolved: (requestId: string) => void;
 }) {
   const navigation = useNavigation<Nav>();
-  const [busy, setBusy] = useState<string | null>(null);
+  // Track which request AND which button is in flight, so Accept and Decline
+  // each get their own loading spinner.
+  const [busy, setBusy] = useState<{ id: string; action: 'accept' | 'decline' } | null>(null);
 
   if (requests.length === 0) return null;
 
   const respond = async (r: FollowRequest, action: 'accept' | 'decline') => {
     tapMedium();
-    setBusy(r.id);
+    setBusy({ id: r.id, action });
     try {
       await api.respondFollowRequest(r.id, action);
       onResolved(r.id);
@@ -62,7 +64,7 @@ function FollowRequestsCard({
           <Button
             label="Accept"
             onPress={() => respond(r, 'accept')}
-            loading={busy === r.id}
+            loading={busy?.id === r.id && busy.action === 'accept'}
             disabled={busy !== null}
             style={styles.requestBtn}
           />
@@ -70,6 +72,7 @@ function FollowRequestsCard({
             label="Decline"
             variant="ghost"
             onPress={() => respond(r, 'decline')}
+            loading={busy?.id === r.id && busy.action === 'decline'}
             disabled={busy !== null}
             style={styles.requestBtn}
           />
@@ -137,7 +140,7 @@ export function NotificationsScreen() {
           ListHeaderComponent={
             <FollowRequestsCard
               requests={requests}
-              onResolved={(userId) => setRequests((list) => list.filter((r) => r.id !== userId))}
+              onResolved={(requestId) => setRequests((list) => list.filter((r) => r.id !== requestId))}
             />
           }
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => fetch(true)} tintColor={colors.primary} />}

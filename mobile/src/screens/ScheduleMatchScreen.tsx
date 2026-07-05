@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -16,7 +16,6 @@ type Props = NativeStackScreenProps<RootStackParamList, 'ScheduleMatch'>;
 const SURFACES: Surface[] = ['hard', 'clay', 'grass', 'indoor'];
 // Hourly slots a typical player might book a court (7am–9pm).
 const HOURS = Array.from({ length: 15 }, (_, i) => i + 7);
-const DAY_MS = 86_400_000;
 
 function startOfToday(): Date {
   const d = new Date();
@@ -24,11 +23,17 @@ function startOfToday(): Date {
   return d;
 }
 
+/** Calendar day math (setDate), not ms offsets — a DST change makes a day ≠ 24h. */
+function addDays(base: Date, offset: number): Date {
+  const d = new Date(base);
+  d.setDate(d.getDate() + offset);
+  return d;
+}
+
 function dayLabel(offset: number, base: Date): string {
   if (offset === 0) return 'Today';
   if (offset === 1) return 'Tomorrow';
-  const d = new Date(base.getTime() + offset * DAY_MS);
-  return d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' });
+  return addDays(base, offset).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' });
 }
 
 function hourLabel(h: number): string {
@@ -54,7 +59,13 @@ export function ScheduleMatchScreen({ navigation, route }: Props) {
   const [saving, setSaving] = useState(false);
 
   const base = useMemo(() => startOfToday(), []);
-  const now = Date.now();
+  // A minute tick keeps "which slots are still ahead of now" fresh while the
+  // screen stays open, without calling Date.now() during render.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   // For "today" only offer hours still ahead of now.
   const availableHours = useMemo(
@@ -63,7 +74,7 @@ export function ScheduleMatchScreen({ navigation, route }: Props) {
   );
 
   const scheduledAt = useMemo(() => {
-    const d = new Date(base.getTime() + dayOffset * DAY_MS);
+    const d = addDays(base, dayOffset);
     d.setHours(hour, 0, 0, 0);
     return d;
   }, [base, dayOffset, hour]);
@@ -76,7 +87,8 @@ export function ScheduleMatchScreen({ navigation, route }: Props) {
       showToast('Choose who you want to play.', 'error');
       return;
     }
-    if (inPast) {
+    // Validate against a fresh clock — the render-time tick can be a minute stale.
+    if (scheduledAt.getTime() < Date.now()) {
       showToast('That slot is already in the past — pick a future time.', 'error');
       return;
     }
@@ -151,6 +163,8 @@ export function ScheduleMatchScreen({ navigation, route }: Props) {
                 }
               }}
               style={[styles.chip, dayOffset === d && styles.chipActive]}
+              accessibilityRole="button"
+              accessibilityState={{ selected: dayOffset === d }}
             >
               <Text style={[styles.chipText, dayOffset === d && styles.chipTextActive]}>{dayLabel(d, base)}</Text>
             </Pressable>
@@ -165,6 +179,8 @@ export function ScheduleMatchScreen({ navigation, route }: Props) {
                 setHour(h);
               }}
               style={[styles.chip, hour === h && styles.chipActive]}
+              accessibilityRole="button"
+              accessibilityState={{ selected: hour === h }}
             >
               <Text style={[styles.chipText, hour === h && styles.chipTextActive]}>{hourLabel(h)}</Text>
             </Pressable>
@@ -185,6 +201,9 @@ export function ScheduleMatchScreen({ navigation, route }: Props) {
                 setSurface(surface === s ? null : s);
               }}
               style={[styles.surfaceChip, surface === s && { borderColor: surfaceColors[s], backgroundColor: surfaceColorsSoft[s] }]}
+              accessibilityRole="button"
+              accessibilityState={{ selected: surface === s }}
+              accessibilityLabel={`${s} surface`}
             >
               <SurfaceBadge surface={s} small />
             </Pressable>

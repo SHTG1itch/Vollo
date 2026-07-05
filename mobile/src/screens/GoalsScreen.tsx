@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { api, ApiError } from '../api/client';
-import { Button, Card, EmptyState, Loading, Muted, SectionHeader, SegmentedControl } from '../components/ui';
+import { Button, Card, EmptyState, ErrorState, Loading, Muted, SectionHeader, SegmentedControl } from '../components/ui';
 import { ProgressBar } from '../components/charts';
 import { Stepper } from '../components/Stepper';
 import { showToast } from '../components/Toast';
@@ -30,14 +30,25 @@ export function GoalsScreen() {
   const [period, setPeriod] = useState<GoalPeriod>('weekly');
   const [target, setTarget] = useState(3);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(() => {
     void api
       .getGoals()
-      .then((r) => setGoals(r.goals))
-      .catch(() => setGoals((g) => g ?? []));
+      .then((r) => {
+        setGoals(r.goals);
+        setError(null);
+      })
+      .catch((e) => setError(e instanceof ApiError ? e.message : 'Failed to load your goals'))
+      .finally(() => setRefreshing(false));
   }, []);
   useEffect(load, [load]);
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    load();
+  };
 
   // Hours goals move in half-hour steps; count goals in whole ones.
   const step = metric === 'hours' ? 0.5 : 1;
@@ -77,10 +88,27 @@ export function GoalsScreen() {
       },
     ]);
 
+  // A network failure with nothing loaded gets a real error state, not a
+  // false "no goals yet" empty state.
+  if (goals === null && error) {
+    return (
+      <ErrorState
+        message={error}
+        onRetry={() => {
+          setError(null);
+          load();
+        }}
+      />
+    );
+  }
   if (goals === null) return <Loading />;
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: colors.bg }} contentContainerStyle={styles.content}>
+    <ScrollView
+      style={{ flex: 1, backgroundColor: colors.bg }}
+      contentContainerStyle={styles.content}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+    >
       <Card style={{ gap: spacing.md }}>
         <SectionHeader title="Set a goal" />
         <SegmentedControl
@@ -141,9 +169,9 @@ export function GoalsScreen() {
                       : `${Math.max(0, g.target - g.current)} to go`}
                   </Muted>
                 )}
-                <Text style={styles.remove} onPress={() => confirmRemove(g)}>
-                  Remove
-                </Text>
+                <Pressable onPress={() => confirmRemove(g)} accessibilityRole="button" accessibilityLabel={`Remove ${goalTitle(g)} goal`} hitSlop={8}>
+                  <Text style={styles.remove}>Remove</Text>
+                </Pressable>
               </View>
             </View>
           ))}
