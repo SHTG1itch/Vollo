@@ -23,6 +23,7 @@ import { ClubDetailScreen } from '../screens/ClubDetailScreen';
 import { CreateClubScreen } from '../screens/CreateClubScreen';
 import { ScheduledMatchesScreen } from '../screens/ScheduledMatchesScreen';
 import { ScheduleMatchScreen } from '../screens/ScheduleMatchScreen';
+import { QuickstartScreen } from '../screens/QuickstartScreen';
 import { colors, fonts } from '../theme';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -61,6 +62,11 @@ export function RootNavigator() {
           <Stack.Screen name="CreateClub" component={CreateClubScreen} options={{ title: 'Start a club' }} />
           <Stack.Screen name="ScheduledMatches" component={ScheduledMatchesScreen} options={{ title: 'Matches & challenges' }} />
           <Stack.Screen name="ScheduleMatch" component={ScheduleMatchScreen} options={{ title: 'Challenge' }} />
+          <Stack.Screen
+            name="Quickstart"
+            component={QuickstartScreen}
+            options={{ headerShown: false, presentation: 'fullScreenModal', animation: 'slide_from_bottom' }}
+          />
         </Stack.Group>
       ) : (
         <Stack.Group screenOptions={{ headerShown: false }}>

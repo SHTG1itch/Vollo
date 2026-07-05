@@ -141,6 +141,12 @@ export function SettingsScreen() {
       </Card>
 
       <Card style={{ gap: spacing.sm }}>
+        <SectionHeader title="Help" />
+        <Muted style={{ textAlign: 'left' }}>New to Vollo? Replay the quickstart tour of every feature.</Muted>
+        <Button label="How Vollo works" variant="secondary" onPress={() => navigation.navigate('Quickstart')} />
+      </Card>
+
+      <Card style={{ gap: spacing.sm }}>
         <SectionHeader title="Session" />
         <Button label="Log out" variant="ghost" onPress={confirmLogout} />
       </Card>

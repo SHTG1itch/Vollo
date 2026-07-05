@@ -16,7 +16,10 @@ export type IconName =
   | 'search'
   | 'locate'
   | 'users'
-  | 'chevron-left';
+  | 'chevron-left'
+  | 'trophy'
+  | 'target'
+  | 'shield';
 
 export function Icon({
   name,
@@ -101,6 +104,26 @@ export function Icon({
         </>
       )}
       {name === 'chevron-left' && <Polyline points="15 18 9 12 15 6" {...common} />}
+      {name === 'trophy' && (
+        <>
+          <Path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" {...common} />
+          <Path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" {...common} />
+          <Line x1="4" y1="22" x2="20" y2="22" {...common} />
+          <Path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22" {...common} />
+          <Path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22" {...common} />
+          <Path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" {...common} />
+        </>
+      )}
+      {name === 'target' && (
+        <>
+          <Circle cx="12" cy="12" r="10" {...common} />
+          <Circle cx="12" cy="12" r="6" {...common} />
+          <Circle cx="12" cy="12" r="2" {...common} />
+        </>
+      )}
+      {name === 'shield' && (
+        <Path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" {...common} />
+      )}
     </Svg>
   );
 }

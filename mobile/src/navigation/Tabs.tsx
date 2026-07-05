@@ -1,6 +1,9 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import type { TabParamList } from './types';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { RootStackParamList, TabParamList } from './types';
+import { hasSeenQuickstart } from '../screens/QuickstartScreen';
 import { FeedScreen } from '../screens/FeedScreen';
 import { MapScreen } from '../screens/MapScreen';
 import { LogMatchScreen } from '../screens/LogMatchScreen';
@@ -37,6 +40,21 @@ function icon(name: keyof TabParamList) {
 
 export function Tabs() {
   const unread = useNotifications((s) => s.unread);
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+
+  // First launch on this device: open the quickstart guide over the tabs so a
+  // brand-new player learns the app before their first session. One-shot — the
+  // guide marks itself seen on open and stays reopenable from Settings.
+  useEffect(() => {
+    let active = true;
+    void hasSeenQuickstart().then((seen) => {
+      if (active && !seen) navigation.navigate('Quickstart');
+    });
+    return () => {
+      active = false;
+    };
+  }, [navigation]);
+
   return (
     <Tab.Navigator
       screenOptions={{

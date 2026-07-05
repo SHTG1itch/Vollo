@@ -49,6 +49,7 @@ export type RootStackParamList = {
   ScheduleMatch:
     | { opponentId?: string; opponentName?: string; opponentUsername?: string; challenge?: boolean }
     | undefined;
+  Quickstart: undefined;
 };
 
 declare global {
