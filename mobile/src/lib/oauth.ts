@@ -25,10 +25,15 @@ type GoogleModule = typeof import('@react-native-google-signin/google-signin');
 type AppleModule = typeof import('expo-apple-authentication');
 
 // Deferred loads — only run the native bootstrap when a provider is actually used.
+// Deliberate lazy require()s: the callers need a SYNCHRONOUS load (a dynamic
+// import() is async), and a top-level import would crash binaries lacking the
+// native modules (see the header comment).
 function loadGoogle(): GoogleModule {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   return require('@react-native-google-signin/google-signin') as GoogleModule;
 }
 function loadApple(): AppleModule {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   return require('expo-apple-authentication') as AppleModule;
 }
 

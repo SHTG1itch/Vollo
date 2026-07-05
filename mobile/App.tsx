@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Linking, StyleSheet, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -43,6 +43,30 @@ const linking: LinkingOptions<RootStackParamList> = {
   },
 };
 
+// Replay a vollo:// deep link that arrived while signed out. React Navigation's
+// linking config silently drops links to detail screens while the auth stack is
+// mounted (MatchDetail/Court/UserProfile only exist when authed), so App parks
+// the URL and routes it here once the token exists and the authed stack is up.
+// navigateFromPush also validates the ids, exactly as it does for push payloads.
+function replayDeepLink(url: string): void {
+  let segments: string[];
+  try {
+    segments = url
+      .replace(/^[a-z][a-z0-9+.-]*:\/\//i, '') // strip "vollo://"
+      .split(/[?#]/)[0]
+      .split('/')
+      .filter(Boolean)
+      .map(decodeURIComponent);
+  } catch {
+    return; // malformed percent-encoding — drop it
+  }
+  const [head, param] = segments;
+  if (head === 'match' && param) navigateFromPush({ matchId: param });
+  else if (head === 'court' && param) navigateFromPush({ courtId: param });
+  else if (head === 'player' && param) navigateFromPush({ username: param });
+  else if (head === 'challenges' && navigationRef.isReady()) navigationRef.navigate('ScheduledMatches');
+}
+
 const navTheme: Theme = {
   ...DefaultTheme,
   colors: {
@@ -63,6 +87,10 @@ export default function App() {
   // push, tear down listeners) each time — only on actual sign-in/out.
   const isAuthed = useAuth((s) => s.token != null);
   const coldStartHandled = useRef(false);
+  // A deep link that landed while signed out, parked until sign-in (the linking
+  // config can't route it — the detail screens aren't mounted yet).
+  const pendingLink = useRef<string | null>(null);
+  const initialUrlChecked = useRef(false);
   // Gate render on fonts, but never hang on a load failure — RN simply falls
   // back to the system font for an unresolved family, so proceed on error too.
   const [fontsLoaded, fontError] = useFonts(FONT_ASSETS);
@@ -96,6 +124,30 @@ export default function App() {
       tapSub.remove();
       recvSub.remove();
     };
+  }, [isAuthed]);
+
+  // While signed out, park any incoming vollo:// link instead of losing it.
+  useEffect(() => {
+    if (isAuthed) return;
+    // The launch URL is only relevant once — don't re-park it after a logout.
+    if (!initialUrlChecked.current) {
+      initialUrlChecked.current = true;
+      void Linking.getInitialURL().then((url) => {
+        if (url && !useAuth.getState().token) pendingLink.current = url;
+      });
+    }
+    const sub = Linking.addEventListener('url', ({ url }) => {
+      pendingLink.current = url;
+    });
+    return () => sub.remove();
+  }, [isAuthed]);
+
+  // …and replay it as soon as the user is signed in and the authed stack exists.
+  useEffect(() => {
+    if (!isAuthed || !pendingLink.current) return;
+    const url = pendingLink.current;
+    pendingLink.current = null;
+    replayDeepLink(url);
   }, [isAuthed]);
 
   if (!hydrated || !fontsReady) {

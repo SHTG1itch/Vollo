@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { ApiError, api, setAuthToken, setSessionRefresher, setUnauthorizedHandler } from '../api/client';
 import { supabase } from '../lib/supabase';
 import { getAppleCredential, getGoogleIdToken, OAuthCancelled } from '../lib/oauth';
+import { getRegisteredPushToken } from '../services/push';
 import { useFeed } from './feed';
 import { useNotifications } from './notifications';
 import type { User } from '../types';
@@ -119,6 +120,19 @@ export const useAuth = create<AuthState>()((set, get) => ({
   },
 
   logout: async () => {
+    // Idempotent: the client's unauthorized handler may already have torn the
+    // session down — a second call must not re-run the sign-out side effects.
+    if (!get().token) return;
+    // Best-effort: stop pushes to this device before the token is revoked.
+    // Failure never blocks logout (the request has its own 15s timeout).
+    const pushToken = getRegisteredPushToken();
+    if (pushToken) {
+      try {
+        await api.unregisterPushToken(pushToken);
+      } catch {
+        /* best-effort */
+      }
+    }
     await supabase.auth.signOut().catch(() => {});
     // onAuthStateChange clears token/user and per-user caches.
   },
@@ -130,10 +144,11 @@ export const useAuth = create<AuthState>()((set, get) => ({
     try {
       const { user } = await api.me();
       set({ user });
-    } catch (err) {
-      // Only sign out when the token is actually rejected — a network blip on
-      // cold start must NOT nuke a valid session.
-      if (err instanceof ApiError && err.status === 401) await get().logout();
+    } catch {
+      // Swallow everything: a network blip on cold start must NOT nuke a valid
+      // session, and a real 401 has already been handled by the client's
+      // setUnauthorizedHandler (which owns the sign-out path) — calling
+      // logout() here too would duplicate the teardown.
     }
   },
 }));

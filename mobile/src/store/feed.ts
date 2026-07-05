@@ -38,6 +38,8 @@ export const useFeed = create<FeedState>((set, get) => ({
 
   setScope: (scope) => {
     if (scope === get().scope) return;
+    // Invalidate any in-flight fetch/loadMore for the old scope immediately.
+    fetchToken++;
     // Show the loader (not the empty state) while the new scope loads.
     set({ scope, matches: [], cursor: null, loading: true, error: null });
     void get().fetch(false);
@@ -60,16 +62,21 @@ export const useFeed = create<FeedState>((set, get) => ({
   },
 
   loadMore: async () => {
-    const { cursor, loadingMore, scope, matches } = get();
+    const { cursor, loadingMore, scope } = get();
     if (!cursor || loadingMore) return;
+    // Capture the token so a slow page for a superseded scope (or a logged-out
+    // session, via reset) is discarded instead of clobbering the newer feed.
+    const token = fetchToken;
     set({ loadingMore: true });
     try {
       const res = await api.getFeed({ scope, before: cursor, limit: 20 });
-      set({ matches: [...matches, ...res.matches], cursor: res.next_cursor });
+      if (token !== fetchToken) return; // scope changed / reset while in flight
+      // Append onto the CURRENT list, not the one captured before the await.
+      set({ matches: [...get().matches, ...res.matches], cursor: res.next_cursor });
     } catch {
       /* keep what we have */
     } finally {
-      set({ loadingMore: false });
+      if (token === fetchToken) set({ loadingMore: false });
     }
   },
 
@@ -112,5 +119,11 @@ export const useFeed = create<FeedState>((set, get) => ({
     }
   },
 
-  reset: () => set({ matches: [], scope: 'global', loading: false, refreshing: false, loadingMore: false, cursor: null, error: null }),
+  reset: () => {
+    // Invalidate in-flight requests so a late page can't repopulate the feed
+    // (e.g. the previous user's matches after logout), and drop stale kudos locks.
+    fetchToken++;
+    kudosInFlight.clear();
+    set({ matches: [], scope: 'global', loading: false, refreshing: false, loadingMore: false, cursor: null, error: null });
+  },
 }));

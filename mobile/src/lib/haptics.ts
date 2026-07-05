@@ -10,6 +10,9 @@ let mod: HapticsModule | null | undefined;
 function load(): HapticsModule | null {
   if (mod !== undefined) return mod;
   try {
+    // Deliberate lazy require: a synchronous dynamic import() isn't possible,
+    // and this must not run the native bootstrap at module-evaluation time.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     mod = require('expo-haptics') as HapticsModule;
   } catch {
     mod = null;

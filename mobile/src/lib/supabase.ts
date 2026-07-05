@@ -5,6 +5,7 @@
 // Function API. The session is persisted in AsyncStorage and auto-refreshed, so
 // users stay signed in across launches without us hand-rolling token storage.
 import 'react-native-url-polyfill/auto';
+import { AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
 import Constants from 'expo-constants';
@@ -30,4 +31,16 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     // Mobile uses native deep links, not URL-based session detection.
     detectSessionInUrl: false,
   },
+});
+
+// The documented React Native pattern: the auto-refresh timer should only run
+// while the app is foregrounded. Backgrounded JS timers are unreliable anyway;
+// on return to 'active', startAutoRefresh immediately refreshes an expired
+// session instead of waiting for the next tick.
+AppState.addEventListener('change', (state) => {
+  if (state === 'active') {
+    void supabase.auth.startAutoRefresh();
+  } else {
+    void supabase.auth.stopAutoRefresh();
+  }
 });

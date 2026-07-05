@@ -143,6 +143,10 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return json as T;
 }
 
+/** Encode a URL path segment — user-supplied ids/usernames must never be able
+ *  to inject extra path segments or query strings into the request path. */
+const seg = (value: string): string => encodeURIComponent(value);
+
 const qs = (params: Record<string, string | number | undefined>): string => {
   const entries = Object.entries(params).filter(([, v]) => v !== undefined && v !== '');
   return entries.length ? `?${entries.map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join('&')}` : '';
@@ -184,6 +188,8 @@ export interface CreateMatchPayload {
   notes?: string;
   played_at?: string;
   stats?: Partial<MatchCard['stats']>;
+  /** Client-generated idempotency key — the server dedupes retried submissions on it. */
+  client_key?: string;
 }
 
 /** Session returned by the server-side sign-in proxy; fed straight into
@@ -226,26 +232,26 @@ export const api = {
   getFeed: (params: { scope?: 'global' | 'following'; before?: string; limit?: number }) =>
     request<{ matches: MatchCard[]; next_cursor: string | null }>(`/feed${qs(params)}`),
   getUserFeed: (userId: string, params: { before?: string; limit?: number } = {}) =>
-    request<{ matches: MatchCard[]; next_cursor: string | null }>(`/feed/user/${userId}${qs(params)}`),
+    request<{ matches: MatchCard[]; next_cursor: string | null }>(`/feed/user/${seg(userId)}${qs(params)}`),
 
   // ── Matches ──
   createMatch: (body: CreateMatchPayload) =>
     request<{ match: MatchCard }>('/matches', { method: 'POST', body: JSON.stringify(body) }),
-  getMatch: (id: string) => request<{ match: MatchCard }>(`/matches/${id}`),
-  deleteMatch: (id: string) => request<void>(`/matches/${id}`, { method: 'DELETE' }),
+  getMatch: (id: string) => request<{ match: MatchCard }>(`/matches/${seg(id)}`),
+  deleteMatch: (id: string) => request<void>(`/matches/${seg(id)}`, { method: 'DELETE' }),
   // Matches awaiting my confirmation (I'm the tagged opponent).
   getPendingMatches: () => request<{ matches: MatchCard[] }>('/matches/pending'),
   // The tagged opponent confirms (it counts) or rejects (it never counts).
   verifyMatch: (id: string, action: 'confirm' | 'reject') =>
-    request<{ match: MatchCard }>(`/matches/${id}/verify`, { method: 'POST', body: JSON.stringify({ action }) }),
+    request<{ match: MatchCard }>(`/matches/${seg(id)}/verify`, { method: 'POST', body: JSON.stringify({ action }) }),
   addKudos: (id: string) =>
-    request<{ kudos_count: number; viewer_has_kudos: boolean }>(`/matches/${id}/kudos`, { method: 'POST' }),
+    request<{ kudos_count: number; viewer_has_kudos: boolean }>(`/matches/${seg(id)}/kudos`, { method: 'POST' }),
   removeKudos: (id: string) =>
-    request<{ kudos_count: number; viewer_has_kudos: boolean }>(`/matches/${id}/kudos`, { method: 'DELETE' }),
+    request<{ kudos_count: number; viewer_has_kudos: boolean }>(`/matches/${seg(id)}/kudos`, { method: 'DELETE' }),
   getComments: (id: string) =>
-    request<{ comments: CommentItem[] }>(`/matches/${id}/comments`),
+    request<{ comments: CommentItem[] }>(`/matches/${seg(id)}/comments`),
   addComment: (id: string, body: string) =>
-    request<{ comment: CommentItem }>(`/matches/${id}/comments`, { method: 'POST', body: JSON.stringify({ body }) }),
+    request<{ comment: CommentItem }>(`/matches/${seg(id)}/comments`, { method: 'POST', body: JSON.stringify({ body }) }),
 
   // ── Courts ──
   getCourts: (params: { lat?: number; lng?: number; radius_km?: number; q?: string; limit?: number }) =>
@@ -266,10 +272,10 @@ export const api = {
     request<{ result: ReverseGeocodeResult | null }>(`/courts/reverse-geocode${qs({ lat, lng })}`),
   getCourt: (id: string) =>
     request<{ court: Court; controller: { user_id: string; username: string; display_name: string; score: number } | null }>(
-      `/courts/${id}`,
+      `/courts/${seg(id)}`,
     ),
   getCourtLeaderboard: (id: string) =>
-    request<{ leaderboard: LeaderboardEntry[] }>(`/courts/${id}/leaderboard`),
+    request<{ leaderboard: LeaderboardEntry[] }>(`/courts/${seg(id)}/leaderboard`),
   createCourt: (body: { name: string; surface: Surface; lat: number; lng: number; city?: string; address?: string; description?: string; court_count?: number }) =>
     request<{ court: Court }>('/courts', { method: 'POST', body: JSON.stringify(body) }),
   geocode: (q: string, limit = 5) => request<{ results: GeocodeResult[] }>(`/courts/geocode${qs({ q, limit })}`),
@@ -280,42 +286,42 @@ export const api = {
   createScheduledMatch: (body: CreateScheduledMatchPayload) =>
     request<{ scheduled_match: ScheduledMatchCard }>('/scheduled-matches', { method: 'POST', body: JSON.stringify(body) }),
   respondToScheduledMatch: (id: string, action: 'accept' | 'decline' | 'cancel') =>
-    request<{ scheduled_match: ScheduledMatchCard }>(`/scheduled-matches/${id}`, { method: 'PATCH', body: JSON.stringify({ action }) }),
+    request<{ scheduled_match: ScheduledMatchCard }>(`/scheduled-matches/${seg(id)}`, { method: 'PATCH', body: JSON.stringify({ action }) }),
 
   // ── Clubs ──
   getClubs: (q?: string, limit = 50) => request<{ clubs: Club[] }>(`/clubs${qs({ q, limit })}`),
   getMyClubs: () => request<{ clubs: Club[] }>('/clubs/mine'),
   createClub: (body: { name: string; description?: string; city?: string }) =>
     request<{ club: Club }>('/clubs', { method: 'POST', body: JSON.stringify(body) }),
-  getClub: (id: string) => request<{ club: Club; members: ClubMember[] }>(`/clubs/${id}`),
-  joinClub: (id: string) => request<{ ok: boolean }>(`/clubs/${id}/join`, { method: 'POST' }),
-  leaveClub: (id: string) => request<void>(`/clubs/${id}/join`, { method: 'DELETE' }),
+  getClub: (id: string) => request<{ club: Club; members: ClubMember[] }>(`/clubs/${seg(id)}`),
+  joinClub: (id: string) => request<{ ok: boolean }>(`/clubs/${seg(id)}/join`, { method: 'POST' }),
+  leaveClub: (id: string) => request<void>(`/clubs/${seg(id)}/join`, { method: 'DELETE' }),
   getClubLeaderboard: (id: string) =>
-    request<{ leaderboard: ClubLeaderboardEntry[] }>(`/clubs/${id}/leaderboard`),
+    request<{ leaderboard: ClubLeaderboardEntry[] }>(`/clubs/${seg(id)}/leaderboard`),
   getClubFeed: (id: string, params: { before?: string; limit?: number } = {}) =>
-    request<{ matches: MatchCard[]; next_cursor: string | null }>(`/clubs/${id}/feed${qs(params)}`),
+    request<{ matches: MatchCard[]; next_cursor: string | null }>(`/clubs/${seg(id)}/feed${qs(params)}`),
 
   // ── Territories ──
   getTerritories: (bbox?: { min_lng: number; min_lat: number; max_lng: number; max_lat: number }) =>
     request<{ territories: Territory[] }>(`/territories${bbox ? qs(bbox) : ''}`),
   getUserTerritories: (userId: string) =>
-    request<{ territories: Territory[] }>(`/territories/user/${userId}`),
+    request<{ territories: Territory[] }>(`/territories/user/${seg(userId)}`),
 
   // ── Users / profiles ──
   searchUsers: (q: string, limit = 20) =>
     request<{ users: UserSearchResult[] }>(`/users/search${qs({ q, limit })}`),
   deleteAccount: () => request<void>('/users/me', { method: 'DELETE' }),
-  getProfile: (username: string) => request<ProfileResponse>(`/users/${username}`),
+  getProfile: (username: string) => request<ProfileResponse>(`/users/${seg(username)}`),
   updateProfile: (body: Record<string, unknown>) =>
     request<{ user: AuthResponse['user'] }>('/users/me', { method: 'PATCH', body: JSON.stringify(body) }),
   // Following a private account yields status 'requested' until approved.
   follow: (username: string) =>
-    request<{ ok: boolean; status: 'following' | 'requested' }>(`/users/${username}/follow`, { method: 'POST' }),
+    request<{ ok: boolean; status: 'following' | 'requested' }>(`/users/${seg(username)}/follow`, { method: 'POST' }),
   // Also withdraws a pending follow request.
-  unfollow: (username: string) => request<void>(`/users/${username}/follow`, { method: 'DELETE' }),
+  unfollow: (username: string) => request<void>(`/users/${seg(username)}/follow`, { method: 'DELETE' }),
   getFollowRequests: () => request<{ requests: FollowRequest[] }>('/users/me/follow-requests'),
   respondFollowRequest: (userId: string, action: 'accept' | 'decline') =>
-    request<{ ok: boolean }>(`/users/me/follow-requests/${userId}`, {
+    request<{ ok: boolean }>(`/users/me/follow-requests/${seg(userId)}`, {
       method: 'POST',
       body: JSON.stringify({ action }),
     }),
@@ -323,28 +329,31 @@ export const api = {
   getGoals: () => request<{ goals: Goal[] }>('/users/me/goals'),
   setGoal: (body: { metric: GoalMetric; period: GoalPeriod; target: number }) =>
     request<{ ok: boolean }>('/users/me/goals', { method: 'POST', body: JSON.stringify(body) }),
-  deleteGoal: (id: string) => request<void>(`/users/me/goals/${id}`, { method: 'DELETE' }),
+  deleteGoal: (id: string) => request<void>(`/users/me/goals/${seg(id)}`, { method: 'DELETE' }),
 
-  blockUser: (username: string) => request<{ ok: boolean }>(`/users/${username}/block`, { method: 'POST' }),
-  unblockUser: (username: string) => request<void>(`/users/${username}/block`, { method: 'DELETE' }),
+  blockUser: (username: string) => request<{ ok: boolean }>(`/users/${seg(username)}/block`, { method: 'POST' }),
+  unblockUser: (username: string) => request<void>(`/users/${seg(username)}/block`, { method: 'DELETE' }),
   getBlockedUsers: () => request<{ users: BlockedUser[] }>('/users/me/blocks'),
-  getAnalytics: (username: string) => request<{ analytics: ProfileAnalytics }>(`/users/${username}/analytics`),
-  getRatings: (username: string) => request<{ ratings: SurfaceRating[] }>(`/users/${username}/ratings`),
-  getAchievements: (username: string) => request<{ achievements: Achievement[] }>(`/users/${username}/achievements`),
-  getStreak: (username: string) => request<{ streak: StreakState }>(`/users/${username}/streak`),
-  getHeadToHead: (username: string) => request<{ head_to_head: HeadToHead[] }>(`/users/${username}/head-to-head`),
-  getRecords: (username: string) => request<{ records: PersonalRecords }>(`/users/${username}/records`),
+  getAnalytics: (username: string) => request<{ analytics: ProfileAnalytics }>(`/users/${seg(username)}/analytics`),
+  getRatings: (username: string) => request<{ ratings: SurfaceRating[] }>(`/users/${seg(username)}/ratings`),
+  getAchievements: (username: string) => request<{ achievements: Achievement[] }>(`/users/${seg(username)}/achievements`),
+  getStreak: (username: string) => request<{ streak: StreakState }>(`/users/${seg(username)}/streak`),
+  getHeadToHead: (username: string) => request<{ head_to_head: HeadToHead[] }>(`/users/${seg(username)}/head-to-head`),
+  getRecords: (username: string) => request<{ records: PersonalRecords }>(`/users/${seg(username)}/records`),
   getYearInReview: (username: string, year: number) =>
     request<{ review: YearInReview }>(
-      `/users/${username}/year-in-review${qs({ year, tz_offset: new Date().getTimezoneOffset() })}`,
+      `/users/${seg(username)}/year-in-review${qs({ year, tz_offset: new Date().getTimezoneOffset() })}`,
     ),
   // tz_offset buckets days in the viewer's local time.
   getCalendar: (username: string, year: number, month: number) =>
     request<CalendarMonth>(
-      `/users/${username}/calendar${qs({ year, month, tz_offset: new Date().getTimezoneOffset() })}`,
+      `/users/${seg(username)}/calendar${qs({ year, month, tz_offset: new Date().getTimezoneOffset() })}`,
     ),
   registerPushToken: (token: string, platform: string) =>
     request<{ ok: boolean }>('/users/me/push-token', { method: 'POST', body: JSON.stringify({ token, platform }) }),
+  // Best-effort on logout so a signed-out device stops receiving pushes.
+  unregisterPushToken: (token: string) =>
+    request<{ ok: boolean }>('/users/me/push-token', { method: 'DELETE', body: JSON.stringify({ token }) }),
 
   // ── Notifications ──
   getNotifications: () =>

@@ -11,6 +11,23 @@ import { supabase } from './supabase';
 
 const BUCKET = 'user-media';
 
+/** Reject absurdly large picks up front — the bucket/CDN shouldn't be fed
+ *  multi-hundred-MB originals, and mobile uploads of them mostly time out. */
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
+
+/** supabase-js storage has no abort hook, so cap the wall-clock time ourselves —
+ *  the underlying request keeps going, but the UI gets a clear error instead of
+ *  spinning forever on a dead connection. */
+const UPLOAD_TIMEOUT_MS = 30_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer!));
+}
+
 /** Profile media lives at a stable key so re-uploads overwrite (no orphan files). */
 export type ProfileMediaKind = 'avatar' | 'cover';
 
@@ -40,11 +57,18 @@ async function uploadAsset(
   { upsert }: { upsert: boolean },
 ): Promise<string> {
   const bytes = await new File(asset.uri).bytes();
-  const { error } = await supabase.storage.from(BUCKET).upload(path, bytes, {
-    contentType: asset.mimeType ?? 'image/jpeg', // RN can't infer; without it you get octet-stream
-    upsert,
-    cacheControl: '3600',
-  });
+  if (bytes.byteLength > MAX_UPLOAD_BYTES) {
+    throw new Error('That photo is too large — please pick an image under 10 MB.');
+  }
+  const { error } = await withTimeout(
+    supabase.storage.from(BUCKET).upload(path, bytes, {
+      contentType: asset.mimeType ?? 'image/jpeg', // RN can't infer; without it you get octet-stream
+      upsert,
+      cacheControl: '3600',
+    }),
+    UPLOAD_TIMEOUT_MS,
+    'The upload took too long. Check your connection and try again.',
+  );
   if (error) throw error;
   const {
     data: { publicUrl },

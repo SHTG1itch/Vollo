@@ -19,6 +19,16 @@ function projectId(): string | undefined {
   return Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId ?? undefined;
 }
 
+// The Expo push token most recently registered with the server, so logout can
+// best-effort unregister it (the server stops pushing to a signed-out device).
+let lastRegisteredToken: string | null = null;
+
+/** The Expo push token registered this session, or null if registration never
+ *  succeeded (Expo Go, denied permission, simulator…). */
+export function getRegisteredPushToken(): string | null {
+  return lastRegisteredToken;
+}
+
 /**
  * Best-effort Expo push registration. Expo's free push service relays to APNs
  * and FCM at no cost. Any failure (Expo Go limitations, denied permission,
@@ -48,6 +58,7 @@ export async function registerForPush(): Promise<void> {
     const tokenResponse = await Notifications.getExpoPushTokenAsync(pid ? { projectId: pid } : undefined);
     if (tokenResponse?.data) {
       await api.registerPushToken(tokenResponse.data, Platform.OS);
+      lastRegisteredToken = tokenResponse.data;
     }
   } catch {
     /* push is optional */

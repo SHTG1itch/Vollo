@@ -1,6 +1,13 @@
 import { create } from 'zustand';
+import * as Notifications from 'expo-notifications';
 import { api } from '../api/client';
 import type { NotificationItem } from '../types';
+
+/** Best-effort: keep the app-icon badge in sync when everything is read.
+ *  Badge APIs can throw in Expo Go / on denied permissions — never a blocker. */
+function clearBadge(): void {
+  void Notifications.setBadgeCountAsync(0).catch(() => {});
+}
 
 interface NotificationState {
   items: NotificationItem[];
@@ -27,6 +34,7 @@ export const useNotifications = create<NotificationState>((set, get) => ({
     try {
       const { notifications, unread_count } = await api.getNotifications();
       set({ items: notifications, unread: unread_count });
+      if (unread_count === 0) clearBadge();
     } catch (e) {
       set({ error: e instanceof Error ? e.message : 'Failed to load notifications' });
     } finally {
@@ -37,6 +45,7 @@ export const useNotifications = create<NotificationState>((set, get) => ({
   markAllRead: async () => {
     if (get().unread === 0) return;
     set({ items: get().items.map((n) => ({ ...n, read: true })), unread: 0 });
+    clearBadge();
     try {
       await api.markNotificationsRead();
     } catch {
