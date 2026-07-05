@@ -9,7 +9,7 @@
 // The on-screen preview is sized to fit the sheet, but the capture targets a
 // SEPARATE, off-screen card rendered at story resolution so the exported image
 // is crisp at 1080-wide stories regardless of how small the preview is.
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -56,14 +56,14 @@ export function ShareStorySheet({
   const [photoReady, setPhotoReady] = useState(!needsPhoto);
   const canCapture = photoReady;
 
-  // Reset readiness whenever the photo target changes or the sheet (re)opens, and
-  // clear any stale "copied" note on open.
-  useEffect(() => {
-    setPhotoReady(!(variant === 'photo' && hasPhoto));
-  }, [visible, variant, hasPhoto]);
-  useEffect(() => {
-    if (visible) setNote(null);
-  }, [visible]);
+  // Readiness resets in event handlers (Modal onShow / variant tap), not in an
+  // effect: the sheet (re)opening and the photo target changing are the only
+  // ways it can change, and both are user-driven events.
+  const resetForVariant = (v: ShareVariant) => setPhotoReady(!(v === 'photo' && hasPhoto));
+  const onModalShow = () => {
+    resetForVariant(variant);
+    setNote(null); // clear any stale "copied" note from the last open
+  };
 
   // Size the preview to fit between the header and the controls, keeping 9:16.
   const chromeH = 320 + insets.top + insets.bottom; // header + toggle + buttons
@@ -131,7 +131,7 @@ export function ShareStorySheet({
   };
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={handleClose} statusBarTranslucent>
+    <Modal visible={visible} animationType="slide" transparent onShow={onModalShow} onRequestClose={handleClose} statusBarTranslucent>
       {/* The sheet backdrop is near-black — flip to light status icons while
           it's open (reverts automatically when the modal unmounts this). */}
       <StatusBar style="light" />
@@ -180,8 +180,13 @@ export function ShareStorySheet({
               return (
                 <Pressable
                   key={opt.value}
-                  onPress={() => setVariant(opt.value)}
+                  onPress={() => {
+                    setVariant(opt.value);
+                    resetForVariant(opt.value);
+                  }}
                   style={[styles.toggleItem, active && styles.toggleItemActive]}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
                 >
                   <Text style={[styles.toggleText, active && styles.toggleTextActive]}>{opt.label}</Text>
                 </Pressable>

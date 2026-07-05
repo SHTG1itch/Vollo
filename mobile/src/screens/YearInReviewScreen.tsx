@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { api, ApiError } from '../api/client';
@@ -11,6 +11,8 @@ import { colors, font, fonts, radius, spacing } from '../theme';
 import type { YearInReview } from '../types';
 
 const MONTHS = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'];
+// Vollo launched in 2024 — no recap exists for earlier years.
+const MIN_YEAR = 2024;
 
 export function YearInReviewScreen({
   route,
@@ -20,32 +22,55 @@ export function YearInReviewScreen({
   const [year, setYear] = useState(route.params.year ?? thisYear);
   const [review, setReview] = useState<YearInReview | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+
+  // Adjust state during render when the fetch key changes, so the fetch effect
+  // below never calls setState synchronously. Only a year/user change clears
+  // the recap — a pull-to-refresh keeps it on screen while it reloads.
+  const [prevFetch, setPrevFetch] = useState({ username, year, reloadKey });
+  if (prevFetch.username !== username || prevFetch.year !== year || prevFetch.reloadKey !== reloadKey) {
+    const yearChanged = prevFetch.username !== username || prevFetch.year !== year;
+    setPrevFetch({ username, year, reloadKey });
+    setError(null);
+    if (yearChanged) setReview(null);
+  }
 
   useEffect(() => {
     let active = true;
-    setReview(null);
-    setError(null);
     void api
       .getYearInReview(username, year)
       .then((r) => active && setReview(r.review))
-      .catch((e) => active && setError(e instanceof ApiError ? e.message : 'Failed to load the recap'));
+      .catch((e) => active && setError(e instanceof ApiError ? e.message : 'Failed to load the recap'))
+      .finally(() => active && setRefreshing(false));
     return () => {
       active = false;
     };
   }, [username, year, reloadKey]);
 
+  const onRefresh = () => {
+    setRefreshing(true);
+    setReloadKey((k) => k + 1);
+  };
+
   const shiftYear = (delta: number) => {
     tapLight();
-    setYear((y) => Math.min(thisYear, y + delta));
+    setYear((y) => Math.max(MIN_YEAR, Math.min(thisYear, y + delta)));
   };
 
   if (error) return <ErrorState message={error} onRetry={() => setReloadKey((k) => k + 1)} />;
 
+  const atMinYear = year <= MIN_YEAR;
   const header = (
     <View style={styles.yearRow}>
-      <Pressable onPress={() => shiftYear(-1)} hitSlop={10} accessibilityRole="button" accessibilityLabel="Previous year">
-        <Text style={styles.chev}>‹</Text>
+      <Pressable
+        onPress={() => shiftYear(-1)}
+        hitSlop={10}
+        disabled={atMinYear}
+        accessibilityRole="button"
+        accessibilityLabel="Previous year"
+      >
+        <Text style={[styles.chev, atMinYear && { opacity: 0.25 }]}>‹</Text>
       </Pressable>
       <Text style={styles.yearTitle}>{year} on the court</Text>
       <Pressable
@@ -84,7 +109,11 @@ export function YearInReviewScreen({
   }
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: colors.bg }} contentContainerStyle={styles.content}>
+    <ScrollView
+      style={{ flex: 1, backgroundColor: colors.bg }}
+      contentContainerStyle={styles.content}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+    >
       {header}
 
       {/* The headline number */}

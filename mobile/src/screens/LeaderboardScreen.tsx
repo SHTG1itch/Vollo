@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { api } from '../api/client';
@@ -15,13 +15,21 @@ export function LeaderboardScreen({ route, navigation }: Props) {
   const user = useAuth((s) => s.user);
   const [board, setBoard] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
+  // Adjust state during render when the fetch key changes, so the fetch effect
+  // below never calls setState synchronously.
+  const [prevFetch, setPrevFetch] = useState({ courtId, reloadKey });
+  if (prevFetch.courtId !== courtId || prevFetch.reloadKey !== reloadKey) {
+    setPrevFetch({ courtId, reloadKey });
+    setError(null);
+    if (!refreshing) setLoading(true); // a pull-to-refresh keeps the list, not a full loader
+  }
+
   useEffect(() => {
     let active = true;
-    setLoading(true);
-    setError(null);
     void (async () => {
       try {
         const { leaderboard } = await api.getCourtLeaderboard(courtId);
@@ -29,13 +37,21 @@ export function LeaderboardScreen({ route, navigation }: Props) {
       } catch (e) {
         if (active) setError(e instanceof Error ? e.message : 'Failed to load leaderboard');
       } finally {
-        if (active) setLoading(false);
+        if (active) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     })();
     return () => {
       active = false;
     };
   }, [courtId, reloadKey]);
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    setReloadKey((k) => k + 1);
+  };
 
   if (loading) return <Loading />;
   if (error) return <ErrorState message={error} onRetry={() => setReloadKey((k) => k + 1)} />;
@@ -44,6 +60,7 @@ export function LeaderboardScreen({ route, navigation }: Props) {
     <FlatList
       style={{ flex: 1, backgroundColor: colors.bg }}
       contentContainerStyle={{ padding: spacing.lg, gap: spacing.sm }}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
       data={board}
       keyExtractor={(e) => e.user_id}
       ListHeaderComponent={<Text style={styles.title}>Court leaderboard · last 30 days</Text>}

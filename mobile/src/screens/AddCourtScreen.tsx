@@ -245,6 +245,9 @@ export function AddCourtScreen({ route, navigation }: Props) {
                   setSurface(s);
                 }}
                 style={[styles.surfaceChip, surface === s && { borderColor: surfaceColors[s], backgroundColor: surfaceColorsSoft[s] }]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: surface === s }}
+                accessibilityLabel={`${s} surface`}
               >
                 <SurfaceBadge surface={s} small />
               </Pressable>

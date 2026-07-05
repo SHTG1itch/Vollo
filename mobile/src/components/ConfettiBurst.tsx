@@ -111,7 +111,9 @@ export function ConfettiBurst({ play, onDone }: { play: boolean; onDone?: () => 
   // (usually inline) callback's identity — otherwise an unrelated re-render of
   // the host screen during the ~1.5s burst would restart it from the origin.
   const onDoneRef = useRef(onDone);
-  onDoneRef.current = onDone;
+  useEffect(() => {
+    onDoneRef.current = onDone;
+  });
   const notifyDone = useCallback(() => onDoneRef.current?.(), []);
 
   useEffect(() => {

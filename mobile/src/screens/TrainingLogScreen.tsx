@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
@@ -13,6 +13,8 @@ import { formatScoreLine } from '../utils/format';
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 const WEEKDAYS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+// Vollo launched in 2024 — nothing to see in earlier months.
+const MIN_YEAR = 2024;
 
 /** Build the Monday-start grid for a month: leading nulls, then day numbers. */
 function monthGrid(year: number, month: number): (number | null)[] {
@@ -38,21 +40,45 @@ export function TrainingLogScreen({ route }: NativeStackScreenProps<RootStackPar
   const [data, setData] = useState<CalendarMonth | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+
+  // Adjust state during render when the fetch key changes, so the fetch effect
+  // below never calls setState synchronously. Only a month/user change clears
+  // the grid — a pull-to-refresh keeps it on screen while it reloads.
+  const [prevFetch, setPrevFetch] = useState({ username, year, month, reloadKey });
+  if (
+    prevFetch.username !== username ||
+    prevFetch.year !== year ||
+    prevFetch.month !== month ||
+    prevFetch.reloadKey !== reloadKey
+  ) {
+    const monthChanged =
+      prevFetch.username !== username || prevFetch.year !== year || prevFetch.month !== month;
+    setPrevFetch({ username, year, month, reloadKey });
+    setError(null);
+    if (monthChanged) {
+      setData(null);
+      setSelected(null);
+    }
+  }
 
   useEffect(() => {
     let active = true;
-    setData(null);
-    setSelected(null);
-    setError(null);
     void api
       .getCalendar(username, year, month)
       .then((r) => active && setData(r))
-      .catch((e) => active && setError(e instanceof ApiError ? e.message : 'Failed to load the training log'));
+      .catch((e) => active && setError(e instanceof ApiError ? e.message : 'Failed to load the training log'))
+      .finally(() => active && setRefreshing(false));
     return () => {
       active = false;
     };
   }, [username, year, month, reloadKey]);
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    setReloadKey((k) => k + 1);
+  };
 
   const shiftMonth = (delta: number) => {
     tapLight();
@@ -63,6 +89,8 @@ export function TrainingLogScreen({ route }: NativeStackScreenProps<RootStackPar
 
   // Never navigate past the current month — there's nothing to show there.
   const atCurrentMonth = year === today.getFullYear() && month === today.getMonth() + 1;
+  // …and never before launch, so you can't page back to year 1900.
+  const atMinMonth = year < MIN_YEAR || (year === MIN_YEAR && month === 1);
 
   const byDate = useMemo(() => {
     const m = new Map<string, CalendarDay>();
@@ -80,11 +108,21 @@ export function TrainingLogScreen({ route }: NativeStackScreenProps<RootStackPar
   if (error) return <ErrorState message={error} onRetry={() => setReloadKey((k) => k + 1)} />;
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: colors.bg }} contentContainerStyle={styles.content}>
+    <ScrollView
+      style={{ flex: 1, backgroundColor: colors.bg }}
+      contentContainerStyle={styles.content}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+    >
       <Card style={{ gap: spacing.md }}>
         <View style={styles.headerRow}>
-          <Pressable onPress={() => shiftMonth(-1)} hitSlop={10} accessibilityRole="button" accessibilityLabel="Previous month">
-            <Text style={styles.chev}>‹</Text>
+          <Pressable
+            onPress={() => shiftMonth(-1)}
+            hitSlop={10}
+            disabled={atMinMonth}
+            accessibilityRole="button"
+            accessibilityLabel="Previous month"
+          >
+            <Text style={[styles.chev, atMinMonth && { opacity: 0.25 }]}>‹</Text>
           </Pressable>
           <Text style={styles.monthTitle}>{monthTitle}</Text>
           <Pressable

@@ -181,7 +181,14 @@ export function ScheduledMatchesScreen() {
             ) : null}
 
             {awaiting ? (
-              <Pressable onPress={() => respond(s, 'cancel')} disabled={busy} style={{ alignSelf: 'flex-start' }}>
+              <Pressable
+                onPress={() => respond(s, 'cancel')}
+                disabled={busy}
+                style={{ alignSelf: 'flex-start' }}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel proposal"
+                hitSlop={8}
+              >
                 <Text style={styles.cancelLink}>Cancel proposal</Text>
               </Pressable>
             ) : null}

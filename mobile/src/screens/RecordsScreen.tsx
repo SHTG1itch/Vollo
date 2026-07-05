@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
@@ -26,19 +26,33 @@ export function RecordsScreen({ route }: NativeStackScreenProps<RootStackParamLi
   const { username } = route.params;
   const [records, setRecords] = useState<PersonalRecords | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+
+  // Adjust state during render when the fetch key changes, so the fetch effect
+  // below never calls setState synchronously.
+  const [prevFetch, setPrevFetch] = useState({ username, reloadKey });
+  if (prevFetch.username !== username || prevFetch.reloadKey !== reloadKey) {
+    setPrevFetch({ username, reloadKey });
+    setError(null);
+  }
 
   useEffect(() => {
     let active = true;
-    setError(null);
     void api
       .getRecords(username)
       .then((r) => active && setRecords(r.records))
-      .catch((e) => active && setError(e instanceof ApiError ? e.message : 'Failed to load records'));
+      .catch((e) => active && setError(e instanceof ApiError ? e.message : 'Failed to load records'))
+      .finally(() => active && setRefreshing(false));
     return () => {
       active = false;
     };
   }, [username, reloadKey]);
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    setReloadKey((k) => k + 1);
+  };
 
   if (error) return <ErrorState message={error} onRetry={() => setReloadKey((k) => k + 1)} />;
   if (!records) return <Loading />;
@@ -130,7 +144,11 @@ export function RecordsScreen({ route }: NativeStackScreenProps<RootStackParamLi
   }
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: colors.bg }} contentContainerStyle={styles.content}>
+    <ScrollView
+      style={{ flex: 1, backgroundColor: colors.bg }}
+      contentContainerStyle={styles.content}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+    >
       <Pressable
         onPress={() => navigation.navigate('YearInReview', { username })}
         accessibilityRole="button"

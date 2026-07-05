@@ -22,10 +22,17 @@ export function CourtDetailScreen({ route, navigation }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
+  // Adjust state during render when the fetch key changes, so the fetch effect
+  // below never calls setState synchronously.
+  const [prevFetch, setPrevFetch] = useState({ courtId, reloadKey });
+  if (prevFetch.courtId !== courtId || prevFetch.reloadKey !== reloadKey) {
+    setPrevFetch({ courtId, reloadKey });
+    setError(null);
+    if (!court) setLoading(true); // a pull-to-refresh keeps the screen, not a full loader
+  }
+
   useEffect(() => {
     let active = true;
-    if (!court) setLoading(true);
-    setError(null);
     void (async () => {
       try {
         const [{ court: c, controller: ctrl }, { leaderboard }] = await Promise.all([
@@ -48,7 +55,6 @@ export function CourtDetailScreen({ route, navigation }: Props) {
     return () => {
       active = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [courtId, reloadKey]);
 
   const onRefresh = () => {
