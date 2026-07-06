@@ -111,10 +111,10 @@ const PAGES: Page[] = [
     key: 'privacy',
     icon: 'user',
     title: 'You are in control',
-    body: 'Prefer to fly under the radar? Make your account private in Settings — new followers then need your approval, and only followers see your matches and stats. You can block anyone, and reopen this guide from Settings anytime.',
+    body: 'Prefer to fly under the radar? Make your account private in Settings — new followers then need your approval, and only followers see your matches and stats. Your territory and leaderboard spots stay on the public game board unless you flip their own switch off. You can block anyone, and reopen this guide from Settings anytime.',
     bullets: [
       { icon: 'shield', text: 'Private account — followers only, approval required' },
-      { icon: 'bell', text: 'Notifications keep you on top of kudos and challenges' },
+      { icon: 'map', text: 'Territory & leaderboards have their own visibility switch' },
       { icon: 'plus-circle', text: 'Ready? Log your first match and claim a court' },
     ],
   },

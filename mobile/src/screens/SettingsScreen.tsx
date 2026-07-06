@@ -20,6 +20,7 @@ export function SettingsScreen() {
   const setUser = useAuth((s) => s.setUser);
   const [deleting, setDeleting] = useState(false);
   const [privateSaving, setPrivateSaving] = useState(false);
+  const [competitiveSaving, setCompetitiveSaving] = useState(false);
   const [blocked, setBlocked] = useState<BlockedUser[]>([]);
   const [unblocking, setUnblocking] = useState<string | null>(null);
 
@@ -47,6 +48,24 @@ export function SettingsScreen() {
       showToast(e instanceof ApiError ? e.message : 'Could not update privacy — please try again.', 'error');
     } finally {
       setPrivateSaving(false);
+    }
+  };
+
+  const toggleCompetitive = async (next: boolean) => {
+    if (!user || competitiveSaving) return;
+    tapLight();
+    setCompetitiveSaving(true);
+    // Optimistic: flip locally, revert from the store's current user on failure.
+    setUser({ ...user, show_competitive: next });
+    try {
+      const res = await api.updateProfile({ show_competitive: next });
+      setUser(res.user);
+    } catch (e) {
+      const current = useAuth.getState().user;
+      if (current) setUser({ ...current, show_competitive: !next });
+      showToast(e instanceof ApiError ? e.message : 'Could not update visibility — please try again.', 'error');
+    } finally {
+      setCompetitiveSaving(false);
     }
   };
 
@@ -115,6 +134,23 @@ export function SettingsScreen() {
             value={user?.is_private ?? false}
             onValueChange={togglePrivate}
             disabled={privateSaving}
+            trackColor={{ true: colors.primary, false: colors.border }}
+            thumbColor={colors.white}
+          />
+        </View>
+
+        <View style={styles.switchRow}>
+          <View style={{ flex: 1, gap: 2 }}>
+            <Text style={styles.switchLabel}>Territory & leaderboards</Text>
+            <Muted style={{ textAlign: 'left' }}>
+              Show your territory on the map and your court and club leaderboard entries to everyone —
+              even with a private account. Turn off to hide them from all players.
+            </Muted>
+          </View>
+          <Switch
+            value={user?.show_competitive ?? true}
+            onValueChange={toggleCompetitive}
+            disabled={competitiveSaving}
             trackColor={{ true: colors.primary, false: colors.border }}
             thumbColor={colors.white}
           />

@@ -33,6 +33,9 @@ export function mapUser(r: Record<string, unknown>): User {
     home_label: (r.home_label as string | null) ?? null,
     equipment: normalizeEquipment(r.equipment),
     is_private: Boolean(r.is_private),
+    // Default true: the column ships with DEFAULT true and older SELECTs that
+    // omit it must not read as "hidden".
+    show_competitive: r.show_competitive == null ? true : Boolean(r.show_competitive),
     created_at: toIso(r.created_at),
   };
 }

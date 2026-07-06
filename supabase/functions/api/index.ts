@@ -42,7 +42,8 @@ type Env = { Variables: { user?: AuthClaims } };
 
 const USER_SELECT = `
   id, username, email, display_name, avatar_url, cover_url, bio, dominant_hand, color,
-  ST_Y(home_geom) AS home_lat, ST_X(home_geom) AS home_lng, home_label, equipment, is_private, created_at
+  ST_Y(home_geom) AS home_lat, ST_X(home_geom) AS home_lng, home_label, equipment, is_private,
+  show_competitive, created_at
 `;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -331,10 +332,13 @@ function matchStatusCondition(viewerParam: string): string {
 }
 
 /**
- * SQL fragments hiding a private/blocked user's leaderboard + territory rows
- * from viewers who may not see their activity — the same rule
- * assertCanViewContent applies to profile content. `userCol` is the column
- * holding the owner's user id; `viewerParam` the (nullable) viewer id param.
+ * SQL fragments for the COMPETITIVE surfaces — territory polygons, court/club
+ * leaderboards, the court-controller banner. These are governed by the owner's
+ * own `show_competitive` toggle, NOT by private-account/follower rules: with it
+ * on they're visible to everybody (the Turf War map is a public game board),
+ * with it off they're hidden from everyone but the owner. Blocks still make
+ * two players mutually invisible. `userCol` holds the owner's user id;
+ * `viewerParam` the (nullable) viewer id param.
  */
 function userVisibilityConditions(viewerParam: string, userCol: string): string[] {
   return [
@@ -343,8 +347,7 @@ function userVisibilityConditions(viewerParam: string, userCol: string): string[
          WHERE (b.blocker_id = ${viewerParam} AND b.blocked_id = ${userCol})
             OR (b.blocker_id = ${userCol} AND b.blocked_id = ${viewerParam})))`,
     `(${userCol} = ${viewerParam}
-       OR NOT (SELECT u2.is_private FROM users u2 WHERE u2.id = ${userCol})
-       OR EXISTS(SELECT 1 FROM follows f2 WHERE f2.follower_id = ${viewerParam} AND f2.following_id = ${userCol}))`,
+       OR (SELECT u2.show_competitive FROM users u2 WHERE u2.id = ${userCol}))`,
   ];
 }
 
@@ -1645,7 +1648,19 @@ app.get('/api/territories', optionalAuth, async (c) => {
 
 app.get('/api/territories/user/:userId', optionalAuth, async (c) => {
   const targetId = c.req.param('userId');
-  await assertCanViewContent(targetId, c.get('user')?.sub ?? null);
+  const viewerId = c.get('user')?.sub ?? null;
+  if (viewerId !== targetId) {
+    // Same rule as listTerritories: the owner's show_competitive toggle decides
+    // (public game board when on, hidden from everyone when off) — never
+    // follower-gated. Blocks still 404 so they're not disclosed.
+    const access = await profileAccess(targetId, viewerId);
+    if (access.blocked) throw ApiError.notFound('User not found');
+    const row = await queryOne<{ show_competitive: boolean }>(
+      'SELECT show_competitive FROM users WHERE id = $1',
+      [targetId],
+    );
+    if (!row?.show_competitive) return c.json({ territories: [] });
+  }
   const territories = await getUserTerritories(targetId);
   return c.json({ territories });
 });
@@ -1664,6 +1679,7 @@ app.patch('/api/users/me', requireAuth, async (c) => {
   if (b.cover_url !== undefined) { sets.push(`cover_url = $${i++}`); params.push(b.cover_url); }
   if (b.dominant_hand !== undefined) { sets.push(`dominant_hand = $${i++}`); params.push(b.dominant_hand); }
   if (b.is_private !== undefined) { sets.push(`is_private = $${i++}`); params.push(b.is_private); }
+  if (b.show_competitive !== undefined) { sets.push(`show_competitive = $${i++}`); params.push(b.show_competitive); }
   if (b.color !== undefined) { sets.push(`color = $${i++}`); params.push(b.color); }
   if (b.home !== undefined) {
     sets.push(`home_geom = ST_SetSRID(ST_MakePoint($${i++}, $${i++}), 4326)`);

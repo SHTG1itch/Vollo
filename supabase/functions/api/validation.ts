@@ -222,6 +222,11 @@ export const updateProfileSchema = z.object({
   equipment: equipmentSchema.optional(),
   // Private account: matches/stats visible only to followers (see 021).
   is_private: z.boolean().optional(),
+  // Competitive visibility (see 027): territory polygons, court/club
+  // leaderboard rows and the controller banner are public when on, hidden from
+  // everyone when off — deliberately independent of is_private (never
+  // follower-gated, the Turf War map is a public game board).
+  show_competitive: z.boolean().optional(),
 });
 
 // The private-account owner answers a pending follow request.

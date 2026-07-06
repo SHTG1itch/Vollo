@@ -68,6 +68,9 @@ export interface User {
   equipment: Equipment;
   /** Private account: matches/stats visible only to followers. */
   is_private: boolean;
+  /** Competitive visibility: territories + court/club leaderboards are public
+   *  when true, hidden from everyone (never follower-gated) when false. */
+  show_competitive: boolean;
   created_at: string;
 }
 

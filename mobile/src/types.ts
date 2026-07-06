@@ -35,6 +35,9 @@ export interface User {
   equipment: Equipment;
   /** Private account: matches/stats visible only to followers. */
   is_private: boolean;
+  /** Turf War visibility: territories + court/club leaderboard entries are
+   *  public when true, hidden from everyone (never follower-gated) when false. */
+  show_competitive: boolean;
   created_at: string;
 }
 

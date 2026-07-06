@@ -366,9 +366,10 @@ const OWNER_ZONE_WINS = `COALESCE((
 ), 0)`;
 
 /** All territories as GeoJSON-ready rows, optionally limited to a bbox.
- *  Private owners' zones are shown only to themselves and their followers, and
- *  blocked players never see each other's — a hull centred on someone's home
- *  courts is location data, so it follows the same rule as their matches. */
+ *  Visibility follows the owner's own `show_competitive` toggle: on → the zone
+ *  is on the public game board for everybody; off → hidden from everyone but
+ *  the owner. Deliberately NOT follower-gated (independent of is_private).
+ *  Blocked players still never see each other's zones. */
 export async function listTerritories(
   viewerId: string | null,
   bbox?: {
@@ -384,8 +385,7 @@ export async function listTerritories(
         SELECT 1 FROM blocks b
          WHERE (b.blocker_id = $1 AND b.blocked_id = t.user_id)
             OR (b.blocker_id = t.user_id AND b.blocked_id = $1)))`,
-    `(t.user_id = $1 OR NOT u.is_private
-       OR EXISTS(SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.following_id = t.user_id))`,
+    `(t.user_id = $1 OR u.show_competitive)`,
   ];
   if (bbox) {
     conditions.push('t.geom && ST_MakeEnvelope($2, $3, $4, $5, 4326)');
