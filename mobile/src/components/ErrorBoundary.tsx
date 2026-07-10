@@ -30,7 +30,11 @@ export class ErrorBoundary extends React.Component<Props, State> {
       return (
         <ErrorState
           title="Something broke"
-          message={this.state.error.message || 'An unexpected error occurred.'}
+          message={
+            __DEV__
+              ? this.state.error.message || 'An unexpected error occurred.'
+              : 'An unexpected error occurred. Please try again.'
+          }
           onRetry={this.reset}
         />
       );

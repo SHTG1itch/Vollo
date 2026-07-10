@@ -120,6 +120,7 @@ export function MatchDetailScreen({ route, navigation }: Props) {
   // feed store has the same guard); the result is mirrored back into any feed
   // card already on screen so the list isn't stale after navigating back.
   const kudosInFlight = useRef(false);
+  const commentInFlight = useRef(false);
   const syncFeedKudos = (kudosCount: number, viewerHas: boolean) => {
     useFeed.setState((s) => ({
       matches: s.matches.map((m) => (m.id === matchId ? { ...m, kudos_count: kudosCount, viewer_has_kudos: viewerHas } : m)),
@@ -143,7 +144,8 @@ export function MatchDetailScreen({ route, navigation }: Props) {
   };
 
   const postComment = async () => {
-    if (!draft.trim() || !user) return;
+    if (!draft.trim() || !user || commentInFlight.current) return;
+    commentInFlight.current = true;
     setPosting(true);
     try {
       const { comment } = await api.addComment(matchId, draft.trim());
@@ -161,6 +163,7 @@ export function MatchDetailScreen({ route, navigation }: Props) {
     } catch (e) {
       showToast(e instanceof ApiError ? e.message : 'Could not post your comment — try again.', 'error');
     } finally {
+      commentInFlight.current = false;
       setPosting(false);
     }
   };

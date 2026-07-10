@@ -5,6 +5,7 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
+import { navigateFromPush } from '../navigation/ref';
 import { api } from '../api/client';
 import { useNotifications } from '../store/notifications';
 import { Avatar, Button, EmptyState, ErrorState, Loading } from '../components/ui';
@@ -83,7 +84,6 @@ function FollowRequestsCard({
 }
 
 export function NotificationsScreen() {
-  const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
   const { items, loading, refreshing, error, fetch, markAllRead } = useNotifications();
   const [requests, setRequests] = useState<FollowRequest[]>([]);
@@ -116,12 +116,7 @@ export function NotificationsScreen() {
 
   // Route a tapped notification to the relevant screen using its data payload.
   const openTarget = (data: Record<string, unknown> | null | undefined) => {
-    const matchId = typeof data?.matchId === 'string' ? data.matchId : null;
-    const courtId = typeof data?.courtId === 'string' ? data.courtId : null;
-    const scheduledMatchId = typeof data?.scheduledMatchId === 'string' ? data.scheduledMatchId : null;
-    if (matchId) navigation.navigate('MatchDetail', { matchId });
-    else if (courtId) navigation.navigate('Court', { courtId });
-    else if (scheduledMatchId) navigation.navigate('ScheduledMatches');
+    navigateFromPush(data);
   };
 
   return (
@@ -149,7 +144,8 @@ export function NotificationsScreen() {
             const tappable =
               typeof data?.matchId === 'string' ||
               typeof data?.courtId === 'string' ||
-              typeof data?.scheduledMatchId === 'string';
+              typeof data?.scheduledMatchId === 'string' ||
+              typeof data?.username === 'string';
             return (
               <Pressable
                 disabled={!tappable}

@@ -53,10 +53,33 @@ export function Button({
 }) {
   const isPrimary = variant === 'primary';
   const isDanger = variant === 'danger';
+  // React state that sets `loading` lands on the next render. Gate the current
+  // event window too, so two accessibility/physical taps cannot dispatch the
+  // same mutation before the disabled prop reaches the native view.
+  const pressLocked = React.useRef(false);
+  const unlockTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  React.useEffect(() => () => {
+    if (unlockTimer.current) clearTimeout(unlockTimer.current);
+  }, []);
+  const guardedPress = () => {
+    if (pressLocked.current || disabled || loading) return;
+    pressLocked.current = true;
+    try {
+      onPress();
+    } finally {
+      unlockTimer.current = setTimeout(() => {
+        pressLocked.current = false;
+        unlockTimer.current = null;
+      }, 400);
+    }
+  };
   return (
     <PressableBounce
-      onPress={onPress}
+      onPress={guardedPress}
       disabled={disabled || loading}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled: Boolean(disabled || loading), busy: Boolean(loading) }}
       style={[
         styles.btn,
         isPrimary && styles.btnPrimary,
@@ -86,11 +109,14 @@ export function Button({
 }
 
 export function Field(props: TextInputProps & { label?: string }) {
-  const { label, style, ...rest } = props;
+  const { label, style, accessibilityLabel, ...rest } = props;
+  const labelId = React.useId().replace(/:/g, '');
   return (
     <View style={{ gap: spacing.xs }}>
-      {label ? <Text style={styles.label}>{label}</Text> : null}
+      {label ? <Text nativeID={labelId} style={styles.label}>{label}</Text> : null}
       <TextInput
+        accessibilityLabel={accessibilityLabel ?? label}
+        accessibilityLabelledBy={label ? labelId : undefined}
         placeholderTextColor={colors.textFaint}
         style={[styles.input, style]}
         {...rest}
@@ -182,7 +208,13 @@ export function SegmentedControl<T extends string>({
 
 export function Loading({ label }: { label?: string }) {
   return (
-    <View style={styles.center}>
+    <View
+      style={styles.center}
+      accessible
+      accessibilityRole="progressbar"
+      accessibilityLabel={label ?? 'Loading'}
+      accessibilityLiveRegion="polite"
+    >
       <ActivityIndicator color={colors.primary} size="large" />
       {label ? <Text style={styles.dim}>{label}</Text> : null}
     </View>
@@ -201,7 +233,7 @@ export function EmptyState({
   action?: { label: string; onPress: () => void };
 }) {
   return (
-    <View style={styles.center}>
+    <View style={styles.center} accessibilityLiveRegion="polite">
       <Text style={{ fontSize: 48, marginBottom: spacing.md }}>{icon}</Text>
       <Text style={styles.emptyTitle}>{title}</Text>
       {subtitle ? <Text style={styles.dim}>{subtitle}</Text> : null}
@@ -222,7 +254,7 @@ export function ErrorState({
   onRetry?: () => void;
 }) {
   return (
-    <View style={styles.center}>
+    <View style={styles.center} accessibilityLiveRegion="assertive">
       <Text style={{ fontSize: 48, marginBottom: spacing.md }}>⚠️</Text>
       <Text style={styles.emptyTitle}>{title}</Text>
       {message ? <Text style={styles.dim}>{message}</Text> : null}
@@ -292,6 +324,7 @@ const styles = StyleSheet.create({
   },
   btn: {
     height: 50,
+    minHeight: 44,
     borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
@@ -325,7 +358,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     padding: 3,
   },
-  segmentItem: { flex: 1, paddingVertical: spacing.sm, alignItems: 'center', borderRadius: radius.sm },
+  segmentItem: { flex: 1, minHeight: 44, paddingVertical: spacing.sm, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm },
   segmentItemActive: { backgroundColor: colors.primary },
   segmentText: { color: colors.textDim, fontFamily: fonts.bold, fontSize: font.small },
   segmentTextActive: { color: colors.onPrimary, fontFamily: fonts.bold },
