@@ -26,6 +26,25 @@ export interface AnalyzeOptions {
   finalSetTiebreak?: boolean;
 }
 
+function assertRegularSet(me: number, opp: number): void {
+  const winner = Math.max(me, opp);
+  const loser = Math.min(me, opp);
+  const valid =
+    (winner === 6 && loser <= 4) ||
+    (winner === 7 && (loser === 5 || loser === 6)) ||
+    (winner >= 8 && winner - loser === 2);
+  if (!valid) {
+    throw new Error(`invalid completed set ${me}-${opp}`);
+  }
+}
+
+function assertMatchTiebreak(me: number, opp: number): void {
+  const winner = Math.max(me, opp);
+  if (winner < SUPER_TIEBREAK_TARGET || Math.abs(me - opp) < 2) {
+    throw new Error('a match tie-break must reach 10 and be won by two');
+  }
+}
+
 /**
  * Analyse a score array from the logging player's perspective.
  *
@@ -59,9 +78,10 @@ export function analyzeScore(score: ScoreArray, opts: AnalyzeOptions = {}): Scor
     let setIsTiebreak: boolean;
     if (opts.finalSetTiebreak === true) setIsTiebreak = i === lastIdx;
     else if (opts.finalSetTiebreak === false) setIsTiebreak = false;
-    else setIsTiebreak = me >= SUPER_TIEBREAK_TARGET || opp >= SUPER_TIEBREAK_TARGET;
+    else setIsTiebreak = i === lastIdx && (me >= SUPER_TIEBREAK_TARGET || opp >= SUPER_TIEBREAK_TARGET);
 
     if (setIsTiebreak) {
+      assertMatchTiebreak(me, opp);
       // A deciding super/match tiebreak: counts as one game-equivalent.
       isTiebreak = true;
       if (me > opp) {
@@ -74,6 +94,7 @@ export function analyzeScore(score: ScoreArray, opts: AnalyzeOptions = {}): Scor
       continue;
     }
 
+    assertRegularSet(me, opp);
     gamesWon += me;
     gamesLost += opp;
     if (me > opp) setsWon += 1;
@@ -81,7 +102,7 @@ export function analyzeScore(score: ScoreArray, opts: AnalyzeOptions = {}): Scor
   }
 
   return {
-    result: decideResult(setsWon, setsLost, gamesWon, gamesLost),
+    result: decideResult(setsWon, setsLost),
     setsWon,
     setsLost,
     gamesWon,
@@ -91,18 +112,15 @@ export function analyzeScore(score: ScoreArray, opts: AnalyzeOptions = {}): Scor
 }
 
 /**
- * Decide the match result. Sets decide it; if sets are even, fall back to games;
- * if everything ties, the match has no winner and is rejected.
+ * A completed tennis match must have a winner by sets. Falling back to total
+ * games lets an unfinished split-set match affect ratings and leaderboards.
  */
 function decideResult(
   setsWon: number,
   setsLost: number,
-  gamesWon: number,
-  gamesLost: number,
 ): MatchResult {
   if (setsWon !== setsLost) return setsWon > setsLost ? 'win' : 'loss';
-  if (gamesWon !== gamesLost) return gamesWon > gamesLost ? 'win' : 'loss';
-  throw new Error('match has no decisive winner');
+  throw new Error('match must have a decisive winner by sets');
 }
 
 /**

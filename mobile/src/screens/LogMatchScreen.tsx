@@ -16,7 +16,7 @@ import { Stepper } from '../components/Stepper';
 import { SurfaceBadge } from '../components/SurfaceBadge';
 import { colors, font, fonts, radius, spacing, surfaceColors, surfaceColorsSoft } from '../theme';
 import type { Court, MatchStats, ScoreArray, Surface } from '../types';
-import { analyzeLocal } from '../utils/format';
+import { analyzeLocal, scoreValidationError } from '../utils/format';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 const SURFACES: Surface[] = ['hard', 'clay', 'grass', 'indoor'];
@@ -238,9 +238,8 @@ export function LogMatchScreen() {
 
   const preview = useMemo(() => analyzeLocal(score, tiebreakFinal), [score, tiebreakFinal]);
   const result = preview.result;
-  // Mirror the backend: valid when every set has a winner and the match isn't a
-  // dead tie (games-decided matches with even sets are allowed).
-  const scoreValid = score.every(([a, b]) => a !== b) && result !== 'tie';
+  const scoreError = scoreValidationError(score, tiebreakFinal);
+  const scoreValid = scoreError === null;
 
   const openAddCourt = useCallback(() => {
     navigation.navigate('AddCourt', {
@@ -267,7 +266,7 @@ export function LogMatchScreen() {
 
   const submit = async () => {
     if (!scoreValid) {
-      showToast('Each set needs a winner and the match cannot end in a tie.', 'error');
+      showToast(scoreError ?? 'Enter a valid completed tennis score.', 'error');
       return;
     }
     // One idempotency key per logical match: stable across retries of this
