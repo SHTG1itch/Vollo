@@ -131,7 +131,7 @@ test('the authenticated navigation tree is isolated per account', async () => {
     read('mobile/src/screens/SettingsScreen.tsx'),
   ]);
   assert.match(auth, /accountId: string \| null/);
-  assert.match(auth, /useAuth\.setState\(\{ token, accountId, user: null \}\)/);
+  assert.match(auth, /useAuth\.setState\(\{ token, accountId, user: null, meError: false \}\)/);
   assert.match(navigator, /navigationKey=\{accountId \?\? 'authenticated'\}/);
   assert.match(settings, /label="Edit profile"[^>]*disabled=\{!user\}/);
 });
