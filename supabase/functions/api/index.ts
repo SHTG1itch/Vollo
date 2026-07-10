@@ -198,11 +198,14 @@ const geocodeLimiterFn = makeLimiter(60_000, 30);
 // from getting Overpass-banned, which would break court discovery for everyone.
 const discoverLimiterFn = makeLimiter(60_000, 40);
 function clientIp(c: Context): string {
-  // Supabase documents the first X-Forwarded-For entry as the original client
-  // address. Using the final proxy hop would collapse unrelated callers behind
-  // the edge gateway into one throttle bucket.
+  // Take the LAST x-forwarded-for hop: it is the one appended by Supabase's own
+  // gateway. The first entry is client-controlled — every proxy APPENDS the
+  // address it received from, so an attacker who sends their own X-Forwarded-For
+  // owns hops[0]. Keying anti-abuse throttles on that lets a spray rotate a fake
+  // header for a fresh bucket per request (and churn the LRU maps, evicting
+  // legitimate callers). The trusted rightmost hop cannot be forged this way.
   const hops = c.req.header('x-forwarded-for')?.split(',') ?? [];
-  return hops[0]?.trim().slice(0, 128) || 'unknown';
+  return hops.at(-1)?.trim().slice(0, 128) || 'unknown';
 }
 
 async function opaqueThrottleKey(prefix: string, value: string): Promise<string> {
@@ -706,6 +709,11 @@ app.get('/api/feed/user/:userId', optionalAuth, async (c) => {
   }
   params.push(limit + 1);
   const limitIdx = ++p;
+  // assertCanViewContent gates the profile *author* above, but a card also names
+  // a verified registered opponent — so apply the same opponent block/privacy
+  // fragments the global and club feeds use, or a private (or blocking) opponent
+  // leaks onto a third party via this route while staying hidden everywhere else.
+  const visibility = matchVisibilityConditions('$1', 'mf.user_id').join(' AND ');
   const rows = await query<Record<string, unknown>>(
     `SELECT mf.*,
             ${visibleMatchSocialColumns('$1')},
@@ -713,7 +721,7 @@ app.get('/api/feed/user/:userId', optionalAuth, async (c) => {
                  ELSE EXISTS(SELECT 1 FROM kudos k WHERE k.match_id = mf.id AND k.user_id = $1)
             END AS viewer_has_kudos
        FROM match_feed mf
-      WHERE mf.user_id = $2 AND ${matchStatusCondition('$1')} ${extra}
+      WHERE mf.user_id = $2 AND ${matchStatusCondition('$1')} AND ${visibility} ${extra}
       ORDER BY mf.played_at DESC, mf.id DESC
       LIMIT $${limitIdx}`,
     params,
@@ -1676,6 +1684,25 @@ app.get('/api/clubs', optionalAuth, async (c) => {
   return c.json({ clubs: rows.map(mapClub) });
 });
 
+// Anti-abuse backstop for user-generated public entities (clubs, courts). Both
+// rank in search / render on everyone's map, so one scripted account must not be
+// able to flood them — the global IP limiter alone is not enough (an account can
+// pace itself under it). Idempotent client_key replays are counted, so a retrying
+// client never trips this; only genuinely distinct creations do.
+async function assertUnderDailyCreationCap(
+  table: 'clubs' | 'courts',
+  creatorCol: 'creator_id' | 'created_by',
+  userId: string,
+  cap: number,
+  message: string,
+): Promise<void> {
+  const recent = await queryOne<{ c: string }>(
+    `SELECT COUNT(*) AS c FROM ${table} WHERE ${creatorCol} = $1 AND created_at > now() - interval '24 hours'`,
+    [userId],
+  );
+  if (Number(recent?.c ?? 0) >= cap) throw ApiError.tooManyRequests(message);
+}
+
 app.post('/api/clubs', requireAuth, async (c) => {
   const userId = uid(c);
   const b = createClubSchema.parse(await jsonBody(c));
@@ -1689,6 +1716,7 @@ app.post('/api/clubs', requireAuth, async (c) => {
     const row = await queryOne<Record<string, unknown>>(`${CLUB_SELECT} WHERE c.id = $2`, [userId, existing.id]);
     return c.json({ club: mapClub(row!) });
   }
+  await assertUnderDailyCreationCap('clubs', 'creator_id', userId, 20, 'You have created too many clubs today; try again tomorrow');
 
   let clubId: string;
   let created = true;
@@ -2161,6 +2189,7 @@ app.post('/api/courts', requireAuth, async (c) => {
     );
     if (existing) return c.json({ court: mapCourt(existing) }, 200);
   }
+  await assertUnderDailyCreationCap('courts', 'created_by', userId, 50, 'You have added too many courts today; try again tomorrow');
 
   try {
     const row = await queryOne<Record<string, unknown>>(
@@ -2806,14 +2835,27 @@ app.get('/api/notifications', requireAuth, async (c) => {
 
 app.post('/api/notifications/read', requireAuth, async (c) => {
   const userId = uid(c);
-  const body = await jsonBody<{ ids?: unknown }>(c);
-  if (body?.ids !== undefined) {
-    const parsed = notificationIdsSchema.safeParse(body);
-    if (!parsed.success) throw ApiError.badRequest('ids must be a non-empty array of UUIDs');
-    await query('UPDATE notifications SET read = true WHERE user_id = $1 AND id = ANY($2::uuid[])', [userId, parsed.data.ids]);
-  } else {
-    await query('UPDATE notifications SET read = true WHERE user_id = $1', [userId]);
+  // Mark-all is an explicit action (empty/absent body). A body that was *meant*
+  // to scope specific ids but arrived truncated or unparseable must 400, not
+  // silently fall through to wiping the user's entire unread state — so read the
+  // raw body and tell "no body" apart from "bad body" instead of coalescing both
+  // to {} via jsonBody.
+  const raw = (await c.req.text()).trim();
+  if (raw.length > 0) {
+    let body: { ids?: unknown };
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      throw ApiError.badRequest('Request body must be valid JSON');
+    }
+    if (body?.ids !== undefined) {
+      const parsed = notificationIdsSchema.safeParse(body);
+      if (!parsed.success) throw ApiError.badRequest('ids must be a non-empty array of UUIDs');
+      await query('UPDATE notifications SET read = true WHERE user_id = $1 AND id = ANY($2::uuid[])', [userId, parsed.data.ids]);
+      return c.json({ ok: true });
+    }
   }
+  await query('UPDATE notifications SET read = true WHERE user_id = $1', [userId]);
   return c.json({ ok: true });
 });
 

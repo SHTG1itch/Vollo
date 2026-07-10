@@ -49,9 +49,12 @@ test('in-memory limiter is bounded and durable unknown-account keys are opaque',
   assert.match(opaque, /SHA-256/);
   assert.match(opaque, /return `\$\{prefix\}:\$\{hex\}`/);
 
+  // Anti-abuse throttles must key on the LAST x-forwarded-for hop (appended by
+  // Supabase's gateway); the first entry is client-forgeable, so keying on it
+  // lets a spoofed header mint a fresh bucket per request.
   const clientIp = section('function clientIp', 'async function opaqueThrottleKey');
-  assert.match(clientIp, /return hops\[0\]/);
-  assert.doesNotMatch(clientIp, /\.at\(-1\)/);
+  assert.match(clientIp, /return hops\.at\(-1\)/);
+  assert.doesNotMatch(clientIp, /return hops\[0\]/);
 });
 
 test('rate-limited responses advertise when the client may retry', () => {
