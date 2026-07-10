@@ -13,6 +13,7 @@ import React, { useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
+  PixelRatio,
   Pressable,
   StyleSheet,
   Text,
@@ -28,10 +29,7 @@ import { MatchShareCard, SHARE_ASPECT, type ShareVariant } from './MatchShareCar
 import { Button } from './ui';
 import { colors, fonts, radius, spacing } from '../theme';
 import type { MatchCard } from '../types';
-
-// Off-screen capture width (logical px). At a 2x–3x device scale this rasterises
-// to ~1080–1620px wide — crisp for a 1080-wide Instagram/Snapchat story.
-const CAPTURE_W = 540;
+import { asFileUri, captureIsReady, storyCaptureSize } from '../utils/shareStory';
 
 export function ShareStorySheet({
   match,
@@ -49,26 +47,29 @@ export function ShareStorySheet({
   const [variant, setVariant] = useState<ShareVariant>(hasPhoto ? 'photo' : 'court');
   const [busy, setBusy] = useState<null | 'share' | 'copy'>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [generation, setGeneration] = useState(0);
+  const [laidOutKey, setLaidOutKey] = useState<string | null>(null);
+  const [photoReadyKey, setPhotoReadyKey] = useState<string | null>(null);
+  const [photoFailedKey, setPhotoFailedKey] = useState<string | null>(null);
 
   const needsPhoto = variant === 'photo' && hasPhoto;
-  // Capture must wait for the background photo to decode, else view-shot snapshots
-  // an empty photo region. Non-photo variants are ready immediately.
-  const [photoReady, setPhotoReady] = useState(!needsPhoto);
-  const canCapture = photoReady;
+  const captureKey = `${match.id}|${match.photo_url ?? ''}|${variant}|${generation}`;
+  const canCapture = captureIsReady({ key: captureKey, laidOutKey, photoReadyKey, photoFailedKey, needsPhoto });
+  const captureSize = storyCaptureSize(PixelRatio.get());
 
-  // Readiness resets in event handlers (Modal onShow / variant tap), not in an
-  // effect: the sheet (re)opening and the photo target changing are the only
-  // ways it can change, and both are user-driven events.
-  const resetForVariant = (v: ShareVariant) => setPhotoReady(!(v === 'photo' && hasPhoto));
+  // A new generation remounts the capture target on every open, so cached-image
+  // callbacks cannot race the readiness reset and leave sharing disabled.
   const onModalShow = () => {
-    resetForVariant(variant);
-    setNote(null); // clear any stale "copied" note from the last open
+    setGeneration((g) => g + 1);
+    setNote(null);
   };
 
   // Size the preview to fit between the header and the controls, keeping 9:16.
   const chromeH = 320 + insets.top + insets.bottom; // header + toggle + buttons
   const maxByHeight = (winH - chromeH) / SHARE_ASPECT;
-  const previewW = Math.max(180, Math.min(winW - spacing.xl * 2, maxByHeight, 340));
+  // 112pt keeps the controls reachable on compact phones (the old 180pt floor
+  // overflowed a 568pt-tall screen) while still leaving a useful preview.
+  const previewW = Math.max(112, Math.min(winW - spacing.xl * 2, maxByHeight, 340));
   const isPng = variant === 'sticker';
 
   const options = ([
@@ -78,10 +79,13 @@ export function ShareStorySheet({
   ].filter(Boolean)) as { label: string; value: ShareVariant }[];
 
   async function rasterize(result: 'tmpfile' | 'base64') {
+    if (!canCapture || !cardRef.current) throw new Error('The story image is still being prepared.');
     return captureRef(cardRef, {
       format: isPng ? 'png' : 'jpg',
       quality: 0.95,
       result,
+      width: captureSize.width,
+      height: captureSize.height,
     });
   }
 
@@ -97,7 +101,7 @@ export function ShareStorySheet({
         setNote('This device can’t open the share sheet.');
         return;
       }
-      await Sharing.shareAsync(uri, {
+      await Sharing.shareAsync(asFileUri(uri), {
         mimeType: isPng ? 'image/png' : 'image/jpeg',
         UTI: isPng ? 'public.png' : 'public.jpeg',
         dialogTitle: 'Share your match to a story',
@@ -130,6 +134,10 @@ export function ShareStorySheet({
     onClose();
   };
 
+  // Do not leave this sheet's light StatusBar override mounted behind the match
+  // screen when the native modal is closed.
+  if (!visible) return null;
+
   return (
     <Modal visible={visible} animationType="slide" transparent onShow={onModalShow} onRequestClose={handleClose} statusBarTranslucent>
       {/* The sheet backdrop is near-black — flip to light status icons while
@@ -160,16 +168,22 @@ export function ShareStorySheet({
             so it's laid out and view-shot can rasterise it; collapsable=false keeps
             it a real native view on Android. */}
         <View
+          key={captureKey}
           ref={cardRef}
           collapsable={false}
           pointerEvents="none"
           style={styles.captureHost}
+          onLayout={() => setLaidOutKey(captureKey)}
         >
           <MatchShareCard
             match={match}
-            width={CAPTURE_W}
+            width={captureSize.width}
             variant={variant}
-            onPhotoLoad={() => setPhotoReady(true)}
+            onPhotoLoad={() => setPhotoReadyKey(captureKey)}
+            onPhotoError={() => {
+              setPhotoFailedKey(captureKey);
+              setNote('The match photo could not be loaded. Choose Court or Sticker to continue.');
+            }}
           />
         </View>
 
@@ -182,7 +196,8 @@ export function ShareStorySheet({
                   key={opt.value}
                   onPress={() => {
                     setVariant(opt.value);
-                    resetForVariant(opt.value);
+                    setGeneration((g) => g + 1);
+                    setNote(null);
                   }}
                   style={[styles.toggleItem, active && styles.toggleItemActive]}
                   accessibilityRole="button"

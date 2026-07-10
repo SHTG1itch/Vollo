@@ -42,7 +42,9 @@ function buildStats(match: MatchCard): StatItem[] {
   ];
   if (match.duration_minutes) items.push({ label: 'Duration', value: formatDuration(match.duration_minutes) });
   if (match.rpe_index) items.push({ label: 'Intensity', value: `RPE ${match.rpe_index}` });
-  items.push({ label: 'Vollo pts', value: `${match.match_score > 0 ? '+' : ''}${match.match_score}` });
+  if (match.verification_status === 'auto' || match.verification_status === 'verified') {
+    items.push({ label: 'Vollo pts', value: `${match.match_score > 0 ? '+' : ''}${match.match_score}` });
+  }
   return items;
 }
 
@@ -57,13 +59,15 @@ export function MatchShareCard({
   width,
   variant = 'photo',
   onPhotoLoad,
+  onPhotoError,
 }: {
   match: MatchCard;
   width: number;
   variant?: ShareVariant;
-  /** Fired when the background photo finishes (or fails) loading — used to gate
-   *  the capture so we never rasterise a half-loaded photo. */
+  /** Fired only when the background photo decodes successfully. */
   onPhotoLoad?: () => void;
+  /** A failed remote image must not be treated as capture-ready. */
+  onPhotoError?: () => void;
 }) {
   const uid = useId().replace(/:/g, '');
   const height = Math.round(width * SHARE_ASPECT);
@@ -89,7 +93,10 @@ export function MatchShareCard({
     ball: width * 0.05,
     gap: width * 0.045,
   };
-  const resultColor = win ? colors.primary : colors.loss;
+  const pending = match.verification_status === 'pending';
+  const rejected = match.verification_status === 'rejected';
+  const resultColor = pending ? colors.warning : win ? colors.primary : colors.loss;
+  const resultLabel = pending ? 'PENDING' : rejected ? 'DISPUTED' : win ? 'WIN' : 'LOSS';
   const shadow = sticker
     ? undefined
     : { textShadowColor: 'rgba(0,0,0,0.45)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: width * 0.02 };
@@ -114,8 +121,14 @@ export function MatchShareCard({
           },
         ]}
       >
-        <Text allowFontScaling={false} style={[styles.pillText, { fontSize: s.pill, fontFamily: fonts.display }]}>
-          {win ? 'WIN' : 'LOSS'}
+        <Text
+          allowFontScaling={false}
+          style={[styles.pillText, { fontSize: s.pill, fontFamily: fonts.display }]}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.65}
+        >
+          {resultLabel}
         </Text>
       </View>
     </View>
@@ -205,7 +218,13 @@ export function MatchShareCard({
   return (
     <View style={{ width, height, backgroundColor: colors.black, overflow: 'hidden' }}>
       {usePhoto ? (
-        <Image source={{ uri: match.photo_url! }} style={StyleSheet.absoluteFill} resizeMode="cover" onLoadEnd={onPhotoLoad} />
+        <Image
+          source={{ uri: match.photo_url! }}
+          style={StyleSheet.absoluteFill}
+          resizeMode="cover"
+          onLoad={onPhotoLoad}
+          onError={onPhotoError}
+        />
       ) : (
         <Svg width={width} height={height} style={StyleSheet.absoluteFill}>
           <Defs>
