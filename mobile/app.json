@@ -20,10 +20,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "app.vollo.mobile",
-      "usesAppleSignIn": true,
-      "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Vollo uses your location to find courts near you and map your territories."
-      }
+      "usesAppleSignIn": true
     },
     "android": {
       "package": "app.vollo.mobile",
@@ -34,6 +31,10 @@
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION"
+      ],
+      "blockedPermissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "web": {
@@ -41,7 +42,15 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-location",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Vollo uses your location to find courts near you and map your territories.",
+          "isIosBackgroundLocationEnabled": false,
+          "isAndroidBackgroundLocationEnabled": false,
+          "isAndroidForegroundServiceEnabled": false
+        }
+      ],
       "expo-notifications",
       "expo-asset",
       "expo-font",
@@ -55,7 +64,8 @@
         "expo-image-picker",
         {
           "photosPermission": "Vollo needs access to your photos so you can set a profile or cover photo and add photos to a match.",
-          "cameraPermission": "Vollo needs camera access so you can take a photo for your profile or a match."
+          "cameraPermission": false,
+          "microphonePermission": false
         }
       ]
     ],
