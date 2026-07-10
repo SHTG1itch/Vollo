@@ -72,11 +72,12 @@ interface AuthResult {
 
 async function authFromHeader(c: Context): Promise<AuthResult> {
   const header = c.req.header('Authorization') ?? c.req.header('authorization');
-  if (!header) return { claims: null, hadToken: false, transient: false };
-  const parts = header.trim().split(/ +/);
-  if (parts[0]?.toLowerCase() !== 'bearer') return { claims: null, hadToken: false, transient: false };
-  const token = parts.slice(1).join(' ').trim();
-  if (!token) return { claims: null, hadToken: false, transient: false };
+  if (header === undefined) return { claims: null, hadToken: false, transient: false };
+  // Once a caller supplies Authorization, malformed credentials must not be
+  // silently downgraded to an anonymous request on optional-auth routes.
+  const bearer = header.match(/^\s*Bearer\s+(\S+)\s*$/i);
+  if (!bearer) return { claims: null, hadToken: true, transient: false };
+  const token = bearer[1]!;
   try {
     // Validate the Supabase Auth access token, then resolve it to our profile.
     // We keep claims.sub = users.id (NOT the auth id) so every existing FK
@@ -102,20 +103,25 @@ async function authFromHeader(c: Context): Promise<AuthResult> {
   }
 }
 
+function throwAuthFailure(hadToken: boolean, transient: boolean): never {
+  if (transient) {
+    throw new ApiError(503, 'auth_unavailable', 'Sign-in check is temporarily unavailable, please retry');
+  }
+  throw hadToken ? ApiError.unauthorized('Invalid or expired token') : ApiError.unauthorized();
+}
+
 const requireAuth: MiddlewareHandler<Env> = async (c, next) => {
   const { claims, hadToken, transient } = await authFromHeader(c);
-  if (!claims) {
-    if (transient) throw new ApiError(503, 'auth_unavailable', 'Sign-in check is temporarily unavailable, please retry');
-    throw hadToken ? ApiError.unauthorized('Invalid or expired token') : ApiError.unauthorized();
-  }
+  if (!claims) throwAuthFailure(hadToken, transient);
   c.set('user', claims);
   await next();
 };
 
 const optionalAuth: MiddlewareHandler<Env> = async (c, next) => {
-  // A transient failure here just means we treat the request as unauthenticated
-  // (these routes are public) rather than failing it.
-  const { claims } = await authFromHeader(c);
+  const { claims, hadToken, transient } = await authFromHeader(c);
+  // No header is genuinely anonymous. A supplied bad token is a 401, while an
+  // auth-provider/DB blip is retryable and must not accidentally broaden access.
+  if (!claims && (hadToken || transient)) throwAuthFailure(hadToken, transient);
   if (claims) c.set('user', claims);
   await next();
 };
@@ -177,6 +183,12 @@ function timingSafeEqual(a: string, b: string): boolean {
 const LOGIN_FAILURE_WINDOW = "15 minutes";
 const LOGIN_MAX_FAILURES = 10;
 
+function rateLimitError(message: string, retryAfterSeconds: number): ApiError {
+  const error = ApiError.tooManyRequests(message) as ApiError & { retryAfterSeconds: number };
+  error.retryAfterSeconds = retryAfterSeconds;
+  return error;
+}
+
 async function assertLoginNotThrottled(keys: string[]): Promise<void> {
   // Per-key max, NOT a combined count — every failure inserts one row per key
   // (ip + identifier), so summing across keys would halve the effective limit.
@@ -189,7 +201,7 @@ async function assertLoginNotThrottled(keys: string[]): Promise<void> {
     [keys, LOGIN_FAILURE_WINDOW],
   );
   if (Number(row?.c ?? 0) >= LOGIN_MAX_FAILURES) {
-    throw ApiError.tooManyRequests('Too many sign-in attempts, please try again later');
+    throw rateLimitError('Too many sign-in attempts, please try again later', 15 * 60);
   }
 }
 
@@ -202,10 +214,11 @@ async function recordLoginFailure(keys: string[]): Promise<void> {
   }
 }
 
-/** A successful sign-in proves the actor owns the account — clear their
- *  counters so an honest user's earlier typos don't linger toward a lockout. */
-function clearLoginFailures(keys: string[]): void {
-  void query('DELETE FROM login_attempts WHERE key = ANY($1)', [keys]).catch(() => {});
+/** A successful sign-in proves ownership of the target account, but says
+ *  nothing about other attempts from that IP. Clear only the canonical account
+ *  bucket and await it so a following request cannot observe stale failures. */
+async function clearLoginFailures(accountKey: string): Promise<void> {
+  await query('DELETE FROM login_attempts WHERE key = $1', [accountKey]).catch(() => {});
 }
 
 // Opaque keyset cursor (last seen played_at + id). Content is ASCII (ISO + uuid).
@@ -383,7 +396,7 @@ async function applyMatchEffects(
 // ════════════════════════════════════════════════════════════════════════
 const app = new Hono<Env>();
 
-app.use('*', cors());
+app.use('*', cors({ exposeHeaders: ['Retry-After'] }));
 
 // Global request ceiling — a cheap abuse backstop.
 const globalLimiter = makeLimiter(60_000, 200);
@@ -420,19 +433,28 @@ app.get('/api/auth/username-available', async (c) => {
 // and "no such account" and "wrong password" fail identically so the endpoint
 // can't be used to enumerate accounts.
 app.post('/api/auth/login', async (c) => {
-  if (!loginLimiter(clientIp(c))) throw ApiError.tooManyRequests('Too many sign-in attempts, please try again shortly');
+  if (!loginLimiter(clientIp(c))) {
+    throw rateLimitError('Too many sign-in attempts, please try again shortly', 60);
+  }
   const { identifier, password } = loginSchema.parse(await jsonBody(c));
 
-  // Throttle on both the source IP and the targeted account, so neither a
-  // single-IP spray nor a distributed attack on one identifier gets free tries.
-  const throttleKeys = [`ip:${clientIp(c)}`, `id:${identifier.toLowerCase()}`];
+  // Resolve both usernames and emails to the same durable account bucket. This
+  // prevents alternating a user's username/email from doubling the guess quota.
+  const normalizedIdentifier = identifier.toLowerCase();
+  const isEmailIdentifier = identifier.includes('@');
+  const account = await queryOne<{ id: string; email: string }>(
+    isEmailIdentifier
+      ? 'SELECT id, email FROM users WHERE email = $1'
+      : 'SELECT id, email FROM users WHERE username = $1',
+    [identifier],
+  );
+  const accountKey = account ? `account:${account.id}` : `id:${normalizedIdentifier}`;
+  // Throttle on both source IP and canonical target account, so neither a
+  // single-IP spray nor a distributed attack on one account gets free tries.
+  const throttleKeys = [`ip:${clientIp(c)}`, accountKey];
   await assertLoginNotThrottled(throttleKeys);
 
-  let email: string | null = identifier.includes('@') ? identifier : null;
-  if (!email) {
-    const row = await queryOne<{ email: string }>('SELECT email FROM users WHERE lower(username) = lower($1)', [identifier]);
-    email = row?.email ?? null;
-  }
+  const email: string | null = account?.email ?? (isEmailIdentifier ? identifier : null);
   const invalid = async () => {
     await recordLoginFailure(throttleKeys);
     return new ApiError(401, 'invalid_credentials', 'Invalid username or password');
@@ -455,7 +477,9 @@ app.post('/api/auth/login', async (c) => {
   }
   if (!data.session) throw await invalid();
 
-  clearLoginFailures(throttleKeys);
+  // A valid login may forgive failures against this account, never the shared
+  // IP bucket (otherwise one known credential resets an attacker's IP quota).
+  await clearLoginFailures(accountKey);
   const s = data.session;
   return c.json({
     session: {
@@ -825,13 +849,21 @@ app.post('/api/matches/:id/verify', requireAuth, async (c) => {
   return c.json({ match: await fetchMatchCard(id, userId) });
 });
 
-/** The match's participants always see it; everyone else is subject to the
- *  author's privacy + blocks. Throws (404/403) when the viewer may not see it. */
+type ViewableMatch = Pick<MatchCard, 'user_id' | 'opponent_id' | 'verification_status'>;
+
+/** The match's participants always see it. Everyone else may see only a
+ *  counted match and remains subject to the author's privacy + blocks. Keep
+ *  this as the single guard for match details and all interaction routes. */
 async function assertCanViewMatch(
-  match: { user_id: string; opponent_id?: string | null },
+  match: ViewableMatch,
   viewerId: string | null,
 ): Promise<void> {
   if (viewerId && (viewerId === match.user_id || viewerId === match.opponent_id)) return;
+  // Pending/rejected matches exist only for their participants. Return 404
+  // before profile checks so neither direct links nor interactions disclose one.
+  if (match.verification_status !== 'auto' && match.verification_status !== 'verified') {
+    throw ApiError.notFound('Match not found');
+  }
   await assertCanViewContent(match.user_id, viewerId);
 }
 
@@ -840,12 +872,6 @@ app.get('/api/matches/:id', optionalAuth, async (c) => {
   const card = await fetchMatchCard(c.req.param('id'), viewerId);
   if (!card) throw ApiError.notFound('Match not found');
   await assertCanViewMatch(card, viewerId);
-  // Pending/rejected matches exist only for their participants — same rule as
-  // the feeds (a disputed "win" must not be shareable by direct link).
-  const isParticipant = viewerId != null && (viewerId === card.user_id || viewerId === card.opponent_id);
-  if (!isParticipant && card.verification_status !== 'auto' && card.verification_status !== 'verified') {
-    throw ApiError.notFound('Match not found');
-  }
   return c.json({ match: card });
 });
 
@@ -900,8 +926,8 @@ app.delete('/api/matches/:id', requireAuth, async (c) => {
 app.post('/api/matches/:id/kudos', requireAuth, async (c) => {
   const userId = uid(c);
   const id = c.req.param('id');
-  const match = await queryOne<{ user_id: string; opponent_id: string | null }>(
-    'SELECT user_id, opponent_id FROM matches WHERE id = $1', [id]);
+  const match = await queryOne<ViewableMatch>(
+    'SELECT user_id, opponent_id, verification_status FROM matches WHERE id = $1', [id]);
   if (!match) throw ApiError.notFound('Match not found');
   await assertCanViewMatch(match, userId);
 
@@ -927,18 +953,22 @@ app.post('/api/matches/:id/kudos', requireAuth, async (c) => {
 app.delete('/api/matches/:id/kudos', requireAuth, async (c) => {
   const userId = uid(c);
   const id = c.req.param('id');
+  const match = await queryOne<ViewableMatch>(
+    'SELECT user_id, opponent_id, verification_status FROM matches WHERE id = $1', [id]);
+  if (!match) throw ApiError.notFound('Match not found');
+  await assertCanViewMatch(match, userId);
   await query('DELETE FROM kudos WHERE match_id = $1 AND user_id = $2', [id, userId]);
   const countRow = await queryOne<{ c: string }>('SELECT COUNT(*) AS c FROM kudos WHERE match_id = $1', [id]);
   return c.json({ kudos_count: Number(countRow?.c ?? 0), viewer_has_kudos: false });
 });
 
 app.get('/api/matches/:id/comments', optionalAuth, async (c) => {
-  const { limit, before } = commentsQuerySchema.parse(c.req.query());
   const id = c.req.param('id');
-  const parent = await queryOne<{ user_id: string; opponent_id: string | null }>(
-    'SELECT user_id, opponent_id FROM matches WHERE id = $1', [id]);
+  const parent = await queryOne<ViewableMatch>(
+    'SELECT user_id, opponent_id, verification_status FROM matches WHERE id = $1', [id]);
   if (!parent) throw ApiError.notFound('Match not found');
   await assertCanViewMatch(parent, c.get('user')?.sub ?? null);
+  const { limit, before } = commentsQuerySchema.parse(c.req.query());
   const params: unknown[] = [id];
   let extra = '';
   if (before) {
@@ -973,11 +1003,11 @@ app.get('/api/matches/:id/comments', optionalAuth, async (c) => {
 app.post('/api/matches/:id/comments', requireAuth, async (c) => {
   const userId = uid(c);
   const id = c.req.param('id');
-  const { body } = commentSchema.parse(await jsonBody(c));
-  const match = await queryOne<{ user_id: string; opponent_id: string | null }>(
-    'SELECT user_id, opponent_id FROM matches WHERE id = $1', [id]);
+  const match = await queryOne<ViewableMatch>(
+    'SELECT user_id, opponent_id, verification_status FROM matches WHERE id = $1', [id]);
   if (!match) throw ApiError.notFound('Match not found');
   await assertCanViewMatch(match, userId);
+  const { body } = commentSchema.parse(await jsonBody(c));
 
   const comment = await queryOne(
     `WITH inserted AS (
@@ -2154,6 +2184,10 @@ app.notFound(() => {
 
 app.onError((err, c) => {
   if (err instanceof ApiError) {
+    if (err.status === 429) {
+      const retryAfter = (err as ApiError & { retryAfterSeconds?: number }).retryAfterSeconds ?? 60;
+      c.header('Retry-After', String(retryAfter));
+    }
     return c.json({ error: { code: err.code, message: err.message, details: err.details } }, err.status as 400);
   }
   if (err instanceof ZodError) {
