@@ -1,15 +1,24 @@
-import React, { useState } from 'react';
-import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useRef, useState } from 'react';
+import { ActivityIndicator, Image, KeyboardAvoidingView, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import type { ImagePickerAsset } from 'expo-image-picker';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
-import { api, ApiError } from '../api/client';
+import { api, ApiError, getAuthGeneration, isAuthGenerationCurrent } from '../api/client';
 import { useAuth } from '../store/auth';
 import { Avatar, Button, Card, Field, Muted } from '../components/ui';
-import { pickAndUploadProfileImage } from '../lib/uploadImage';
+import {
+  getProfileMediaOwnerId,
+  pickProfileImage,
+  discardProfileImageDraft,
+  removeProfileImageUrl,
+  uploadProfileImage,
+  type UploadedProfileImage,
+} from '../lib/uploadImage';
 import { showToast } from '../components/Toast';
 import { tapLight } from '../lib/haptics';
 import { colors, font, fonts, radius, spacing } from '../theme';
 import type { GeocodeResult } from '../types';
+import { hasPersistedHome, mediaPatchValue } from '../utils/profileDraft';
 
 // Curated signature-colour palette. A player's territories render in a 40%
 // wash of their pick, so rivals can tell zones apart at a glance. `null` = unset
@@ -43,7 +52,14 @@ function GearPicks({ options, value, onPick }: { options: string[]; value: strin
       {options.map((o) => {
         const active = value.trim().toLowerCase() === o.toLowerCase();
         return (
-          <Pressable key={o} onPress={() => onPick(active ? '' : o)} style={[styles.pick, active && styles.pickActive]}>
+          <Pressable
+            key={o}
+            onPress={() => onPick(active ? '' : o)}
+            style={[styles.pick, active && styles.pickActive]}
+            accessibilityRole="button"
+            accessibilityLabel={`${active ? 'Clear' : 'Choose'} ${o}`}
+            accessibilityState={{ selected: active }}
+          >
             <Text style={[styles.pickText, active && styles.pickTextActive]}>{o}</Text>
           </Pressable>
         );
@@ -59,14 +75,19 @@ export function EditProfileScreen({ navigation }: Props) {
   const [displayName, setDisplayName] = useState(user?.display_name ?? '');
   const [bio, setBio] = useState(user?.bio ?? '');
   const [avatarUrl, setAvatarUrl] = useState(user?.avatar_url ?? '');
-  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [avatarDraft, setAvatarDraft] = useState<ImagePickerAsset | null>(null);
+  const [pickingAvatar, setPickingAvatar] = useState(false);
   const [coverUrl, setCoverUrl] = useState(user?.cover_url ?? '');
-  const [uploadingCover, setUploadingCover] = useState(false);
+  const [coverDraft, setCoverDraft] = useState<ImagePickerAsset | null>(null);
+  const [pickingCover, setPickingCover] = useState(false);
   const [hand, setHand] = useState<'right' | 'left'>(user?.dominant_hand ?? 'right');
   const [color, setColor] = useState<string | null>(user?.color ?? null);
   const [homeQuery, setHomeQuery] = useState(user?.home_label ?? '');
   const [home, setHome] = useState<GeocodeResult | null>(null);
+  const [homeCleared, setHomeCleared] = useState(false);
   const [results, setResults] = useState<GeocodeResult[]>([]);
+  const [searchingHome, setSearchingHome] = useState(false);
+  const homeSearchGeneration = useRef(0);
   const [saving, setSaving] = useState(false);
 
   const eq = user?.equipment ?? {};
@@ -75,43 +96,58 @@ export function EditProfileScreen({ navigation }: Props) {
   const [tension, setTension] = useState(eq.string_tension ?? '');
   const [shoes, setShoes] = useState(eq.shoes ?? '');
 
+  const avatarPreview = avatarDraft?.uri ?? avatarUrl.trim();
+  const coverPreview = coverDraft?.uri ?? coverUrl.trim();
+
   const onPickAvatar = async () => {
-    if (uploadingAvatar) return;
-    setUploadingAvatar(true);
+    if (pickingAvatar || saving) return;
+    setPickingAvatar(true);
     try {
-      const url = await pickAndUploadProfileImage('avatar');
-      if (url) setAvatarUrl(url); // save() persists it via api.updateProfile
+      const asset = await pickProfileImage('avatar');
+      if (asset) setAvatarDraft(asset);
     } catch (e) {
-      showToast(e instanceof Error ? e.message : 'Upload failed — please try again.', 'error');
+      showToast(e instanceof Error ? e.message : 'Could not open that photo — please try again.', 'error');
     } finally {
-      setUploadingAvatar(false);
+      setPickingAvatar(false);
     }
   };
 
   const onPickCover = async () => {
-    if (uploadingCover) return;
-    setUploadingCover(true);
+    if (pickingCover || saving) return;
+    setPickingCover(true);
     try {
-      const url = await pickAndUploadProfileImage('cover');
-      if (url) setCoverUrl(url);
+      const asset = await pickProfileImage('cover');
+      if (asset) setCoverDraft(asset);
     } catch (e) {
-      showToast(e instanceof Error ? e.message : 'Upload failed — please try again.', 'error');
+      showToast(e instanceof Error ? e.message : 'Could not open that photo — please try again.', 'error');
     } finally {
-      setUploadingCover(false);
+      setPickingCover(false);
     }
   };
 
   const findHome = async () => {
-    if (!homeQuery.trim()) return;
+    if (!homeQuery.trim() || searchingHome || saving) return;
+    const requestGeneration = ++homeSearchGeneration.current;
+    setSearchingHome(true);
     try {
       const { results: r } = await api.geocode(homeQuery.trim());
+      if (requestGeneration !== homeSearchGeneration.current) return;
       setResults(r);
+      if (!r.length) showToast('No matching location found — try a nearby city.', 'error');
     } catch {
-      showToast('Location search failed — please try again.', 'error');
+      if (requestGeneration === homeSearchGeneration.current) {
+        showToast('Location search failed — please try again.', 'error');
+      }
+    } finally {
+      if (requestGeneration === homeSearchGeneration.current) setSearchingHome(false);
     }
   };
 
   const save = async () => {
+    if (saving || pickingAvatar || pickingCover || searchingHome) return;
+    const sessionGeneration = getAuthGeneration();
+    const stagedMedia: UploadedProfileImage[] = [];
+    let profilePatchStarted = false;
     setSaving(true);
     try {
       // Resolve a typed-but-unconfirmed home base: if the query doesn't match a
@@ -132,17 +168,40 @@ export function EditProfileScreen({ navigation }: Props) {
           return;
         }
       }
+
+      // The picker only created local previews. Upload after all validation has
+      // passed and only because the user explicitly committed the form.
+      if (!isAuthGenerationCurrent(sessionGeneration)) throw new Error('Your sign-in changed while saving.');
+      const mediaOwnerId = await getProfileMediaOwnerId();
+      if (!isAuthGenerationCurrent(sessionGeneration)) throw new Error('Your sign-in changed while saving.');
+      const [avatarUpload, coverUpload] = await Promise.allSettled([
+        avatarDraft
+          ? uploadProfileImage('avatar', avatarDraft, mediaOwnerId)
+          : Promise.resolve(undefined),
+        coverDraft
+          ? uploadProfileImage('cover', coverDraft, mediaOwnerId)
+          : Promise.resolve(undefined),
+      ]);
+      if (avatarUpload.status === 'fulfilled' && avatarUpload.value) stagedMedia.push(avatarUpload.value);
+      if (coverUpload.status === 'fulfilled' && coverUpload.value) stagedMedia.push(coverUpload.value);
+      const failedUpload = [avatarUpload, coverUpload].find((result) => result.status === 'rejected');
+      if (failedUpload?.status === 'rejected') throw failedUpload.reason;
+      const uploadedAvatar = avatarUpload.status === 'fulfilled' ? avatarUpload.value : undefined;
+      const uploadedCover = coverUpload.status === 'fulfilled' ? coverUpload.value : undefined;
+      if (!isAuthGenerationCurrent(sessionGeneration)) throw new Error('Your sign-in changed while saving.');
+
       const body: Record<string, unknown> = { display_name: displayName.trim(), bio: bio.trim(), dominant_hand: hand };
       // Send '' to clear back to the default hashed hue; a hex sets the signature.
       body.color = color ?? '';
-      // Only send media URLs the user actually changed this session. Re-sending
-      // the stored value verbatim would subject an old (pre-validation) URL to
-      // the server's storage-origin check and block the whole save.
-      const trimmedAvatar = avatarUrl.trim();
-      if (trimmedAvatar && trimmedAvatar !== (user?.avatar_url ?? '')) body.avatar_url = trimmedAvatar;
-      const trimmedCover = coverUrl.trim();
-      if (trimmedCover && trimmedCover !== (user?.cover_url ?? '')) body.cover_url = trimmedCover;
-      if (resolvedHome) body.home = { lat: resolvedHome.lat, lng: resolvedHome.lng, label: resolvedHome.label };
+      const avatarPatch = mediaPatchValue(user?.avatar_url, avatarUrl, uploadedAvatar?.url);
+      const coverPatch = mediaPatchValue(user?.cover_url, coverUrl, uploadedCover?.url);
+      if (avatarPatch !== undefined) body.avatar_url = avatarPatch;
+      if (coverPatch !== undefined) body.cover_url = coverPatch;
+      if (resolvedHome) {
+        body.home = { lat: resolvedHome.lat, lng: resolvedHome.lng, label: resolvedHome.label };
+      } else if (homeCleared && hasPersistedHome(user)) {
+        body.home = null;
+      }
       // Public gear loadout — send the full object so clearing a field persists.
       body.equipment = {
         ...(racquet.trim() ? { racquet: racquet.trim() } : {}),
@@ -150,11 +209,35 @@ export function EditProfileScreen({ navigation }: Props) {
         ...(tension.trim() ? { string_tension: tension.trim() } : {}),
         ...(shoes.trim() ? { shoes: shoes.trim() } : {}),
       };
+      profilePatchStarted = true;
       const { user: updated } = await api.updateProfile(body);
+      // A successful response proves the staged URLs are committed. Clear this
+      // before checking session state so rapid account churn cannot delete media
+      // that the previous account's profile now references.
+      stagedMedia.length = 0;
+      if (!isAuthGenerationCurrent(sessionGeneration)) throw new Error('Your sign-in changed while saving.');
       setUser(updated);
-      showToast('Profile saved', 'success');
+      // Clear storage only after the profile no longer points at the object.
+      // Deletion failure is surfaced, but does not undo the successful profile
+      // update or strand the UI on this screen.
+      const removals = await Promise.allSettled([
+        ...(avatarPatch !== undefined ? [removeProfileImageUrl(user?.avatar_url, mediaOwnerId, 'avatar')] : []),
+        ...(coverPatch !== undefined ? [removeProfileImageUrl(user?.cover_url, mediaOwnerId, 'cover')] : []),
+      ]);
+      const cleanupFailed = removals.some((result) => result.status === 'rejected');
+      showToast(cleanupFailed ? 'Profile saved; old photo cleanup will need another try.' : 'Profile saved', cleanupFailed ? 'error' : 'success');
       navigation.goBack();
     } catch (e) {
+      // A network/timeout failure after dispatch is ambiguous: the server may
+      // have committed before the response was lost, so retaining a possible
+      // orphan is safer than deleting an object the profile could reference.
+      const cleanupIsSafe = !profilePatchStarted
+        || (e instanceof ApiError && e.status >= 400 && e.status < 500);
+      if (cleanupIsSafe) {
+        await Promise.allSettled(
+          stagedMedia.map((uploaded) => discardProfileImageDraft(uploaded)),
+        );
+      }
       showToast(e instanceof ApiError ? e.message : 'Save failed — try again', 'error');
     } finally {
       setSaving(false);
@@ -167,34 +250,47 @@ export function EditProfileScreen({ navigation }: Props) {
       <Card style={{ gap: spacing.md }}>
         <Pressable
           onPress={onPickCover}
-          disabled={uploadingCover}
+          disabled={pickingCover || saving}
           style={[styles.cover, { backgroundColor: color ?? colors.primarySoft }]}
           accessibilityRole="button"
-          accessibilityLabel="Change cover photo"
+          accessibilityLabel={coverPreview ? 'Change cover photo' : 'Add cover photo'}
+          accessibilityState={{ disabled: pickingCover || saving, busy: pickingCover }}
         >
-          {coverUrl.trim() ? (
-            <Image source={{ uri: coverUrl.trim() }} style={styles.coverImg} resizeMode="cover" />
+          {coverPreview ? (
+            <Image source={{ uri: coverPreview }} style={styles.coverImg} resizeMode="cover" />
           ) : null}
           <View style={styles.coverPill}>
-            {uploadingCover ? (
+            {pickingCover ? (
               <ActivityIndicator size="small" color={colors.white} />
             ) : (
-              <Text style={styles.coverPillText}>{coverUrl.trim() ? '📷 Change cover' : '📷 Add cover photo'}</Text>
+              <Text style={styles.coverPillText}>{coverPreview ? '📷 Change cover' : '📷 Add cover photo'}</Text>
             )}
           </View>
         </Pressable>
+        {coverPreview ? (
+          <Button
+            label="Remove cover photo"
+            variant="ghost"
+            disabled={saving}
+            onPress={() => {
+              setCoverDraft(null);
+              setCoverUrl('');
+            }}
+          />
+        ) : null}
 
         <View style={styles.avatarRow}>
           <Pressable
             onPress={onPickAvatar}
-            disabled={uploadingAvatar}
+            disabled={pickingAvatar || saving}
             style={styles.avatarPick}
             accessibilityRole="button"
-            accessibilityLabel="Change profile photo"
+            accessibilityLabel={avatarPreview ? 'Change profile photo' : 'Add profile photo'}
+            accessibilityState={{ disabled: pickingAvatar || saving, busy: pickingAvatar }}
           >
-            <Avatar name={displayName || user?.username || '🎾'} uri={avatarUrl.trim() || null} size={76} />
+            <Avatar name={displayName || user?.username || '🎾'} uri={avatarPreview || null} size={76} />
             <View style={styles.avatarBadge}>
-              {uploadingAvatar ? (
+              {pickingAvatar ? (
                 <ActivityIndicator size="small" color={colors.onPrimary} />
               ) : (
                 <Text style={styles.avatarBadgeIcon}>📷</Text>
@@ -203,17 +299,30 @@ export function EditProfileScreen({ navigation }: Props) {
           </Pressable>
           <View style={{ flex: 1, gap: spacing.xs }}>
             <Text style={styles.photoTitle}>Profile photo</Text>
-            <Muted>Tap your photo to upload a new one from your library.</Muted>
+            <Muted>Choose a preview now; it uploads only when you save.</Muted>
             <Button
-              label={uploadingAvatar ? 'Uploading…' : avatarUrl.trim() ? 'Change photo' : 'Add photo'}
+              label={pickingAvatar ? 'Opening photos…' : avatarPreview ? 'Change photo' : 'Add photo'}
               variant="secondary"
-              loading={uploadingAvatar}
+              loading={pickingAvatar}
+              disabled={saving}
               onPress={onPickAvatar}
-              style={{ height: 40, alignSelf: 'flex-start', paddingHorizontal: spacing.lg, marginTop: spacing.xs }}
+              style={{ height: 44, alignSelf: 'flex-start', paddingHorizontal: spacing.lg, marginTop: spacing.xs }}
             />
+            {avatarPreview ? (
+              <Button
+                label="Remove photo"
+                variant="ghost"
+                disabled={saving}
+                onPress={() => {
+                  setAvatarDraft(null);
+                  setAvatarUrl('');
+                }}
+                style={{ height: 44, alignSelf: 'flex-start' }}
+              />
+            ) : null}
           </View>
         </View>
-        <Field label="Display name" value={displayName} onChangeText={setDisplayName} />
+        <Field label="Display name" value={displayName} onChangeText={setDisplayName} maxLength={60} autoComplete="name" />
         <Field label="Bio" value={bio} onChangeText={setBio} placeholder="Tell players about your game" multiline maxLength={280} style={{ height: 80, paddingTop: spacing.sm }} />
         <View style={{ gap: spacing.xs }}>
           <Text style={styles.label}>Dominant hand</Text>
@@ -226,6 +335,9 @@ export function EditProfileScreen({ navigation }: Props) {
                   setHand(h);
                 }}
                 style={[styles.handChip, hand === h && styles.handChipActive]}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: hand === h }}
+                accessibilityLabel={`${h === 'right' ? 'Right' : 'Left'}-handed`}
               >
                 <Text style={[styles.handText, hand === h && styles.handTextActive]}>{h === 'right' ? 'Right' : 'Left'}-handed</Text>
               </Pressable>
@@ -249,6 +361,7 @@ export function EditProfileScreen({ navigation }: Props) {
                   ]}
                   accessibilityRole="button"
                   accessibilityLabel={opt ? `Colour ${opt}` : 'Default colour'}
+                  accessibilityState={{ selected: active }}
                 >
                   {opt == null ? <Text style={styles.swatchDefaultText}>—</Text> : null}
                   {active && opt != null ? <Text style={styles.swatchCheck}>✓</Text> : null}
@@ -263,21 +376,67 @@ export function EditProfileScreen({ navigation }: Props) {
             label="Home base"
             value={homeQuery}
             onChangeText={(t) => {
+              homeSearchGeneration.current += 1;
+              setSearchingHome(false);
               setHomeQuery(t);
+              setHomeCleared(!t.trim() && hasPersistedHome(user));
               // Clear a previously-picked location so edited-but-unconfirmed text
               // can't be saved with stale coordinates.
               setHome(null);
+              setResults([]);
             }}
             placeholder="Your city"
             onSubmitEditing={findHome}
           />
-          <Button label="Find" variant="secondary" onPress={findHome} style={{ height: 40 }} />
+          <Button
+            label="Find home base"
+            variant="secondary"
+            onPress={findHome}
+            loading={searchingHome}
+            disabled={!homeQuery.trim() || saving}
+            style={{ height: 44 }}
+          />
           {results.map((r, i) => (
-            <Pressable key={i} onPress={() => { setHome(r); setHomeQuery(r.label); setResults([]); }} style={styles.result}>
+            <Pressable
+              key={`${r.lat}:${r.lng}:${i}`}
+              onPress={() => {
+                setHome(r);
+                setHomeQuery(r.label);
+                setHomeCleared(false);
+                setResults([]);
+              }}
+              style={styles.result}
+              accessibilityRole="button"
+              accessibilityLabel={`Set home base to ${r.label}`}
+            >
               <Text style={styles.resultText} numberOfLines={2}>{r.label}</Text>
             </Pressable>
           ))}
           {home ? <Muted>Home set to {home.city ?? home.label}</Muted> : null}
+          {homeQuery.trim() || hasPersistedHome(user) ? (
+            <Button
+              label="Clear home base"
+              variant="ghost"
+              disabled={saving}
+              onPress={() => {
+                homeSearchGeneration.current += 1;
+                setSearchingHome(false);
+                setHomeQuery('');
+                setHome(null);
+                setHomeCleared(true);
+                setResults([]);
+              }}
+            />
+          ) : null}
+          <Pressable
+            onPress={() => void Linking.openURL('https://www.openstreetmap.org/copyright')}
+            accessibilityRole="link"
+            accessibilityLabel="Search data © OpenStreetMap contributors"
+            hitSlop={8}
+            style={styles.osmAttribution}
+          >
+            <Text style={styles.osmAttributionText}>Search data © OpenStreetMap contributors</Text>
+          </Pressable>
         </View>
       </Card>
 
@@ -305,7 +464,12 @@ export function EditProfileScreen({ navigation }: Props) {
         </View>
       </Card>
 
-      <Button label="Save" onPress={save} loading={saving} disabled={!displayName.trim()} />
+      <Button
+        label="Save profile"
+        onPress={save}
+        loading={saving}
+        disabled={!displayName.trim() || pickingAvatar || pickingCover || searchingHome}
+      />
     </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -352,9 +516,11 @@ const styles = StyleSheet.create({
   handTextActive: { color: colors.onPrimary, fontFamily: fonts.bold },
   result: { backgroundColor: colors.surfaceAlt, borderRadius: radius.sm, padding: spacing.md, borderWidth: 1, borderColor: colors.border },
   resultText: { color: colors.textDim, fontSize: font.small },
+  osmAttribution: { minHeight: 44, alignSelf: 'center', justifyContent: 'center', paddingHorizontal: spacing.sm },
+  osmAttributionText: { color: '#245D8A', fontSize: font.tiny, textDecorationLine: 'underline', textAlign: 'center' },
   swatchRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.xs },
   swatch: {
-    width: 38, height: 38, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center',
+    width: 44, height: 44, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center',
     borderWidth: 2, borderColor: 'transparent',
   },
   swatchDefault: { backgroundColor: colors.surfaceAlt, borderColor: colors.border },
@@ -363,7 +529,7 @@ const styles = StyleSheet.create({
   swatchCheck: { position: 'absolute', color: colors.white, fontFamily: fonts.bold, fontSize: 16 },
   cardTitle: { color: colors.text, fontFamily: fonts.heading, fontSize: font.h3 },
   pickRow: { gap: spacing.sm, paddingVertical: 2 },
-  pick: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.pill, backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border },
+  pick: { minHeight: 44, justifyContent: 'center', paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.pill, backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border },
   pickActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   pickText: { color: colors.textDim, fontSize: font.small, fontFamily: fonts.bold },
   pickTextActive: { color: colors.onPrimary, fontFamily: fonts.bold },

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { api, ApiError } from '../api/client';
 import { Button, Card, EmptyState, ErrorState, Loading, Muted, SectionHeader, SegmentedControl } from '../components/ui';
@@ -30,6 +30,7 @@ export function GoalsScreen() {
   const [period, setPeriod] = useState<GoalPeriod>('weekly');
   const [target, setTarget] = useState(3);
   const [saving, setSaving] = useState(false);
+  const saveActive = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -58,6 +59,8 @@ export function GoalsScreen() {
   };
 
   const save = async () => {
+    if (saveActive.current || saving) return;
+    saveActive.current = true;
     setSaving(true);
     try {
       await api.setGoal({ metric, period, target });
@@ -67,6 +70,7 @@ export function GoalsScreen() {
     } catch (e) {
       showToast(e instanceof ApiError ? e.message : 'Could not save the goal — please try again.', 'error');
     } finally {
+      saveActive.current = false;
       setSaving(false);
     }
   };

@@ -57,7 +57,6 @@ export interface Court {
   sector_key: string | null;
   /** Number of physical courts this facility holds (a "sector"). */
   court_count: number;
-  created_by: string | null;
   created_at: string;
   distance_km?: number;
 }

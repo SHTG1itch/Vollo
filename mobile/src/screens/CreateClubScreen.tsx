@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -8,6 +8,7 @@ import { Button, Card, Field, Muted } from '../components/ui';
 import { showToast } from '../components/Toast';
 import { notifySuccess } from '../lib/haptics';
 import { colors, spacing } from '../theme';
+import { newClientKey } from '../utils/idempotency';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -17,14 +18,18 @@ export function CreateClubScreen() {
   const [description, setDescription] = useState('');
   const [city, setCity] = useState('');
   const [saving, setSaving] = useState(false);
+  const saveActive = useRef(false);
+  const requestKey = useRef(newClientKey()).current;
 
   const canSave = name.trim().length >= 3;
 
   const save = async () => {
-    if (!canSave || saving) return;
+    if (!canSave || saveActive.current || saving) return;
+    saveActive.current = true;
     setSaving(true);
     try {
       const res = await api.createClub({
+        client_key: requestKey,
         name: name.trim(),
         description: description.trim() || undefined,
         city: city.trim() || undefined,
@@ -35,6 +40,7 @@ export function CreateClubScreen() {
     } catch (e) {
       showToast(e instanceof ApiError ? e.message : 'Could not create the club — please try again.', 'error');
     } finally {
+      saveActive.current = false;
       setSaving(false);
     }
   };

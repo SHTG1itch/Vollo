@@ -7,7 +7,14 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList, TabParamList } from '../navigation/types';
 import { api, ApiError, type CreateMatchPayload, type UserSearchResult } from '../api/client';
 import { useFeed } from '../store/feed';
-import { pickAndUploadMatchPhoto } from '../lib/uploadImage';
+import {
+  pickMatchPhotoDraft,
+  matchPhotoObjectPath,
+  removeMatchPhotoObject,
+  uploadMatchPhoto,
+  type MatchPhotoDraft,
+  type UploadedMatchPhoto,
+} from '../lib/uploadImage';
 import { showToast } from '../components/Toast';
 import { tapLight } from '../lib/haptics';
 import { Avatar, Button, Card, Field, H2, Muted, SectionHeader } from '../components/ui';
@@ -23,20 +30,16 @@ import {
   logMatchPrefillKey,
   PhotoUploadGuard,
 } from '../utils/logMatchState';
+import { newClientKey } from '../utils/idempotency';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 const SURFACES: Surface[] = ['hard', 'clay', 'grass', 'indoor'];
 
-/** UUID v4 for the create-match idempotency key. crypto.randomUUID when the JS
- *  engine provides it; a Math.random fallback otherwise (collision odds are
- *  irrelevant here — the key only needs to be unique per user). */
-function newClientKey(): string {
-  const c = globalThis.crypto as { randomUUID?: () => string } | undefined;
-  if (c?.randomUUID) return c.randomUUID();
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (ch) => {
-    const r = (Math.random() * 16) | 0;
-    return (ch === 'x' ? r : (r & 0x3) | 0x8).toString(16);
-  });
+async function discardStagedMatchPhoto(uploaded: UploadedMatchPhoto): Promise<void> {
+  await removeMatchPhotoObject(uploaded);
+  // If this request fails, the durable draft registration remains and the
+  // maintenance worker harmlessly removes the already-missing object later.
+  await api.discardMatchPhotoDraft(uploaded.path);
 }
 
 const emptyStats = (): MatchStats => ({
@@ -71,9 +74,16 @@ export function LogMatchScreen() {
   const [duration, setDuration] = useState(0);
   const [title, setTitle] = useState('');
   const [notes, setNotes] = useState('');
-  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const [photoDraft, setPhotoDraft] = useState<MatchPhotoDraft | null>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const photoUploadGuard = useRef(new PhotoUploadGuard());
+  const stagedPhoto = useRef<UploadedMatchPhoto | null>(null);
+  const mounted = useRef(true);
+  const submitActive = useRef(false);
+  const submissionInFlight = useRef(false);
+  // Once a request leaves the device, a transport/5xx failure cannot prove the
+  // server did not commit it. Preserve the object for an idempotent retry.
+  const photoMayBeCommitted = useRef(false);
   const [showStats, setShowStats] = useState(false);
   const [stats, setStats] = useState<MatchStats>(emptyStats);
   const [courts, setCourts] = useState<Court[]>([]);
@@ -107,13 +117,20 @@ export function LogMatchScreen() {
     }, 300);
   };
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    const uploadGuard = photoUploadGuard.current;
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
       if (oppDebounce.current) clearTimeout(oppDebounce.current);
-      photoUploadGuard.current.invalidate();
-    },
-    [],
-  );
+      uploadGuard.invalidate();
+      const staged = stagedPhoto.current;
+      if (staged && !submissionInFlight.current && !photoMayBeCommitted.current) {
+        stagedPhoto.current = null;
+        void discardStagedMatchPhoto(staged).catch(() => {});
+      }
+    };
+  }, []);
 
   // Load courts to tie a match to. Discovers real-world OSM courts near the
   // player first (so the picker isn't empty), then lists them distance-sorted.
@@ -268,8 +285,8 @@ export function LogMatchScreen() {
     if (uploadToken === null) return;
     setUploadingPhoto(true);
     try {
-      const url = await pickAndUploadMatchPhoto();
-      if (url && photoUploadGuard.current.accepts(uploadToken)) setPhotoUrl(url);
+      const draft = await pickMatchPhotoDraft();
+      if (draft && photoUploadGuard.current.accepts(uploadToken)) setPhotoDraft(draft);
     } catch (e) {
       if (photoUploadGuard.current.accepts(uploadToken)) {
         showToast(e instanceof Error ? e.message : 'Upload failed — please try again.', 'error');
@@ -279,8 +296,23 @@ export function LogMatchScreen() {
     }
   };
 
+  const removePhoto = () => {
+    if (photoMayBeCommitted.current) {
+      showToast('Retry logging first so Vollo can confirm whether this photo is already attached.', 'error');
+      return;
+    }
+    setPhotoDraft(null);
+    const staged = stagedPhoto.current;
+    stagedPhoto.current = null;
+    if (staged) {
+      void discardStagedMatchPhoto(staged).catch(() => {
+        showToast('The photo was removed from this match, but cloud cleanup could not be confirmed.', 'error');
+      });
+    }
+  };
+
   const submit = async () => {
-    if (submitting) return;
+    if (submitActive.current || submitting) return;
     if (photoUploadGuard.current.active) {
       showToast('Wait for the photo upload to finish before logging.', 'error');
       return;
@@ -292,15 +324,33 @@ export function LogMatchScreen() {
     // One idempotency key per logical match: stable across retries of this
     // submission (a timed-out create the user retries maps to the same server
     // row instead of double-logging), regenerated after a successful log.
-    if (!clientKeyRef.current) clientKeyRef.current = newClientKey();
+    const clientKey = clientKeyRef.current ?? newClientKey();
+    clientKeyRef.current = clientKey;
+    submitActive.current = true;
     setSubmitting(true);
+    let requestWasSent = false;
     try {
+      let uploaded = stagedPhoto.current;
+      if (photoDraft && !uploaded) {
+        setUploadingPhoto(true);
+        try {
+          await api.registerMatchPhotoDraft(matchPhotoObjectPath(photoDraft, clientKey));
+          uploaded = await uploadMatchPhoto(photoDraft, clientKey);
+        } finally {
+          if (mounted.current) setUploadingPhoto(false);
+        }
+        if (!mounted.current) {
+          await discardStagedMatchPhoto(uploaded).catch(() => {});
+          return;
+        }
+        stagedPhoto.current = uploaded;
+      }
       const payload: CreateMatchPayload = {
         surface,
         score_array: score,
         is_tiebreak: tiebreakFinal,
         ...(title.trim() ? { title: title.trim() } : {}),
-        ...(photoUrl ? { photo_url: photoUrl } : {}),
+        ...(photoDraft && uploaded ? { photo_url: uploaded.url } : {}),
         ...(courtId ? { court_id: courtId } : {}),
         ...(scheduledMatchId ? { scheduled_match_id: scheduledMatchId } : {}),
         // A tagged registered player takes precedence over a free-text name.
@@ -316,9 +366,16 @@ export function LogMatchScreen() {
         ...(daysAgo > 0 ? { played_at: playedAt(daysAgo).toISOString() } : {}),
         // Don't ship an all-zero stat row just because the section was expanded.
         ...(statsTouched ? { stats } : {}),
-        ...(clientKeyRef.current ? { client_key: clientKeyRef.current } : {}),
+        client_key: clientKey,
       };
+      submissionInFlight.current = true;
+      photoMayBeCommitted.current = Boolean(uploaded);
+      requestWasSent = true;
       const { match } = await api.createMatch(payload);
+      submissionInFlight.current = false;
+      photoMayBeCommitted.current = false;
+      // The DB row owns this object now; unmount cleanup must leave it intact.
+      stagedPhoto.current = null;
       clientKeyRef.current = null; // next log is a new match, not a retry
       prepend(match);
       showToast('Match logged 🎾', 'success');
@@ -338,13 +395,32 @@ export function LogMatchScreen() {
       setNotes('');
       photoUploadGuard.current.invalidate();
       setUploadingPhoto(false);
-      setPhotoUrl(null);
+      setPhotoDraft(null);
       setShowStats(false);
       setStats(emptyStats());
     } catch (e) {
-      showToast(e instanceof ApiError ? e.message : 'Could not log match — something went wrong', 'error');
+      submissionInFlight.current = false;
+      // A received 4xx proves the request was rejected before commit; transport
+      // and 5xx failures remain ambiguous and must reuse this staged object.
+      if (e instanceof ApiError && e.status >= 400 && e.status < 500) {
+        photoMayBeCommitted.current = false;
+      }
+      if (!mounted.current && !photoMayBeCommitted.current) {
+        const staged = stagedPhoto.current;
+        stagedPhoto.current = null;
+        if (staged) await discardStagedMatchPhoto(staged).catch(() => {});
+      }
+      showToast(
+        e instanceof ApiError
+          ? e.message
+          : !requestWasSent && e instanceof Error
+            ? e.message
+            : 'Could not confirm the match. Check your connection, then tap Log match again.',
+        'error',
+      );
     } finally {
-      setSubmitting(false);
+      submitActive.current = false;
+      if (mounted.current) setSubmitting(false);
     }
   };
 
@@ -566,11 +642,11 @@ export function LogMatchScreen() {
 
       {/* Photo — a proof-of-play shot shown on the feed card */}
       <Section title="Photo (optional)">
-        {photoUrl ? (
+        {photoDraft ? (
           <View style={styles.photoWrap}>
-            <Image source={{ uri: photoUrl }} style={styles.photo} resizeMode="cover" />
+            <Image source={{ uri: photoDraft.asset.uri }} style={styles.photo} resizeMode="cover" />
             <Pressable
-              onPress={() => setPhotoUrl(null)}
+              onPress={removePhoto}
               style={styles.photoRemove}
               hitSlop={8}
               accessibilityRole="button"

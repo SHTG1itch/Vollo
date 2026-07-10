@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -10,6 +10,7 @@ import { showToast } from '../components/Toast';
 import { tapLight } from '../lib/haptics';
 import { colors, font, fonts, radius, spacing, surfaceColors, surfaceColorsSoft } from '../theme';
 import type { Surface } from '../types';
+import { newClientKey } from '../utils/idempotency';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ScheduleMatch'>;
 
@@ -57,6 +58,8 @@ export function ScheduleMatchScreen({ navigation, route }: Props) {
   const [surface, setSurface] = useState<Surface | null>(null);
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
+  const saveActive = useRef(false);
+  const clientKey = useRef<string | null>(null);
 
   const base = useMemo(() => startOfToday(), []);
   // A minute tick keeps "which slots are still ahead of now" fresh while the
@@ -83,6 +86,7 @@ export function ScheduleMatchScreen({ navigation, route }: Props) {
   const hasOpponent = !!presetOpponentId || opponentName.trim().length > 0;
 
   const submit = async () => {
+    if (saveActive.current || saving) return;
     if (!hasOpponent) {
       showToast('Choose who you want to play.', 'error');
       return;
@@ -92,9 +96,13 @@ export function ScheduleMatchScreen({ navigation, route }: Props) {
       showToast('That slot is already in the past — pick a future time.', 'error');
       return;
     }
+    const requestKey = clientKey.current ?? newClientKey();
+    clientKey.current = requestKey;
+    saveActive.current = true;
     setSaving(true);
     try {
       await api.createScheduledMatch({
+        client_key: requestKey,
         ...(presetOpponentId ? { opponent_id: presetOpponentId } : { opponent_name: opponentName.trim() }),
         ...(surface ? { surface } : {}),
         scheduled_at: scheduledAt.toISOString(),
@@ -109,10 +117,12 @@ export function ScheduleMatchScreen({ navigation, route }: Props) {
             : 'Match added to your scheduled matches.',
         'success',
       );
+      clientKey.current = null;
       navigation.goBack();
     } catch (e) {
       showToast(e instanceof ApiError ? e.message : 'Could not schedule — try again', 'error');
     } finally {
+      saveActive.current = false;
       setSaving(false);
     }
   };

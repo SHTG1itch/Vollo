@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View,
+  ActivityIndicator, KeyboardAvoidingView, Linking, Platform, Pressable, StyleSheet, Text, View,
 } from 'react-native';
-import MapView, { UrlTile, type Region } from 'react-native-maps';
+import MapView, { type Region } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -16,14 +16,20 @@ import { showToast } from '../components/Toast';
 import { tapLight } from '../lib/haptics';
 import { colors, font, fonts, radius, shadow, spacing, surfaceColors, surfaceColorsSoft } from '../theme';
 import type { Surface } from '../types';
+import { newClientKey } from '../utils/idempotency';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AddCourt'>;
 const SURFACES: Surface[] = ['hard', 'clay', 'grass', 'indoor'];
 const OSM_TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 
 // Android can't run react-native-maps without a Google Maps API key (it crashes),
-// so there the map is a keyless Leaflet WebView. iOS keeps using react-native-maps.
+// so there the map is a keyless Leaflet WebView. iOS uses the native Apple base;
+// it must not fetch the public OSM tile service through UrlTile because native
+// tile requests cannot provide Vollo's identifying user agent/cache behavior.
 const USE_WEB_MAP = Platform.OS === 'android';
+const OSM_ATTRIBUTION = USE_WEB_MAP
+  ? 'Map/search data © OpenStreetMap contributors'
+  : 'Search data © OpenStreetMap contributors';
 
 const DEFAULT_REGION: Region = {
   latitude: 40.78,
@@ -53,6 +59,8 @@ export function AddCourtScreen({ route, navigation }: Props) {
   // async actions, so one finishing must not re-enable the other mid-flight.
   const [searching, setSearching] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const submitActive = useRef(false);
+  const clientKey = useRef<string | null>(null);
   const [locating, setLocating] = useState(false);
   // Last known position for the Android WebView map's location dot (iOS uses
   // react-native-maps' built-in showsUserLocation).
@@ -138,10 +146,11 @@ export function AddCourtScreen({ route, navigation }: Props) {
 
   const submit = async () => {
     const trimmed = name.trim();
-    if (!trimmed || submitting) {
+    if (!trimmed || submitActive.current || submitting) {
       if (!trimmed) showToast('Give the court a name so other players can find it.', 'error');
       return;
     }
+    submitActive.current = true;
     setSubmitting(true);
     try {
       // Best-effort reverse geocode for a city/address label — never blocks the add.
@@ -159,7 +168,10 @@ export function AddCourtScreen({ route, navigation }: Props) {
 
       // Clamp to a sane facility size; courts at one venue form a single sector.
       const count = Math.min(60, Math.max(1, parseInt(courtCount, 10) || 1));
+      const requestKey = clientKey.current ?? newClientKey();
+      clientKey.current = requestKey;
       const { court } = await api.createCourt({
+        client_key: requestKey,
         name: trimmed,
         surface,
         lat: center.current.lat,
@@ -168,6 +180,7 @@ export function AddCourtScreen({ route, navigation }: Props) {
         ...(city ? { city } : {}),
         ...(address ? { address } : {}),
       });
+      clientKey.current = null;
 
       showToast('Court added 🎾', 'success');
       if (origin === 'log') {
@@ -179,6 +192,7 @@ export function AddCourtScreen({ route, navigation }: Props) {
     } catch (e) {
       showToast(e instanceof ApiError ? e.message : 'Could not add court — try again', 'error');
     } finally {
+      submitActive.current = false;
       setSubmitting(false);
     }
   };
@@ -204,12 +218,9 @@ export function AddCourtScreen({ route, navigation }: Props) {
             style={StyleSheet.absoluteFill}
             initialRegion={initialRegion}
             onRegionChangeComplete={onRegionChangeComplete}
-            mapType="none"
             showsUserLocation
             rotateEnabled={false}
-          >
-            <UrlTile urlTemplate={OSM_TILE_URL} maximumZ={19} flipY={false} zIndex={-1} />
-          </MapView>
+          />
         )}
 
         {/* Fixed centre pin — the court goes wherever this sits. */}
@@ -229,6 +240,16 @@ export function AddCourtScreen({ route, navigation }: Props) {
           accessibilityLabel="Centre on my location"
         >
           {locating ? <ActivityIndicator color={colors.primary} /> : <Icon name="locate" size={22} color={colors.primary} />}
+        </Pressable>
+
+        <Pressable
+          style={styles.attribution}
+          onPress={() => void Linking.openURL('https://www.openstreetmap.org/copyright')}
+          accessibilityRole="link"
+          accessibilityLabel={OSM_ATTRIBUTION}
+          hitSlop={6}
+        >
+          <Text style={styles.attributionText}>{OSM_ATTRIBUTION}</Text>
         </Pressable>
       </View>
 
@@ -329,10 +350,21 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     ...shadow.card,
   },
+  attribution: {
+    position: 'absolute',
+    left: spacing.sm,
+    bottom: spacing.sm,
+    minHeight: 44,
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.sm,
+  },
+  attributionText: { color: '#245D8A', fontSize: 9, textDecorationLine: 'underline' },
   form: { margin: spacing.lg, gap: spacing.md },
   surfaceRow: { flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' },
   countRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   countHint: { flex: 1, color: colors.textDim, fontSize: font.small },
-  surfaceChip: { padding: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border },
+  surfaceChip: { minHeight: 44, justifyContent: 'center', padding: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border },
   searchRow: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-end' },
 });
