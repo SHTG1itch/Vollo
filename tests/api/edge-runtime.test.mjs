@@ -16,6 +16,7 @@ const denoLock = JSON.parse(readFileSync(
 ));
 const dbSource = readFileSync(new URL('../../supabase/functions/api/db.ts', import.meta.url), 'utf8');
 const runtimeConfig = readFileSync(new URL('../../supabase/functions/api/config.ts', import.meta.url), 'utf8');
+const databaseUrl = readFileSync(new URL('../../supabase/functions/api/databaseUrl.ts', import.meta.url), 'utf8');
 
 test('Edge runtime dependencies are exact reviewed pins with a committed lockfile', () => {
   assert.deepEqual(denoConfig.imports, {
@@ -42,7 +43,11 @@ test('Edge runtime dependencies are exact reviewed pins with a committed lockfil
 test('Edge database access is bounded per isolate and transaction-pooler ready', () => {
   assert.match(dbSource, /prepare: false/);
   assert.match(dbSource, /max: 1/);
-  assert.match(runtimeConfig, /Deno\.env\.get\('DATABASE_POOL_URL'\) \?\? Deno\.env\.get\('SUPABASE_DB_URL'\)/);
+  assert.match(runtimeConfig, /Deno\.env\.get\('DATABASE_POOL_URL'\)/);
+  assert.match(runtimeConfig, /Deno\.env\.get\('DATABASE_POOL_HOST'\)/);
+  assert.match(runtimeConfig, /resolveDatabaseUrl/);
+  assert.match(databaseUrl, /port = '6543'/);
+  assert.match(databaseUrl, /SHARED_POOLER_HOST/);
 });
 
 test('API middleware permits authenticated CORS and protects sensitive responses', () => {

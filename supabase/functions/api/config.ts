@@ -3,6 +3,7 @@
 // Authentication is handled by Supabase Auth (validated via the service-role
 // client in supabaseAdmin.ts); the internal sweep token still lives in the
 // private `app_secrets` table and is loaded lazily via db.ts/getSecret().
+import { resolveDatabaseUrl } from './databaseUrl.ts';
 
 function num(value: string | undefined, fallback: number): number {
   const n = Number(value);
@@ -20,10 +21,16 @@ export const config = {
   env,
 
   database: {
-    // Prefer a separately-provisioned transaction-pooler URL for deployed Edge
-    // traffic. The auto-injected direct URL remains a zero-config local/fallback
-    // path. Either connection is privileged; public REST stays sealed by RLS.
-    url: Deno.env.get('DATABASE_POOL_URL') ?? Deno.env.get('SUPABASE_DB_URL') ?? '',
+    // Prefer a complete transaction-pooler URL. Production can instead provide
+    // only its non-secret shared-pooler host: the resolver reuses Supabase's
+    // injected database credential without exposing it outside the isolate.
+    // Local development remains zero-config through the injected direct URL.
+    url: resolveDatabaseUrl({
+      explicitPoolUrl: Deno.env.get('DATABASE_POOL_URL'),
+      directUrl: Deno.env.get('SUPABASE_DB_URL'),
+      poolHost: Deno.env.get('DATABASE_POOL_HOST'),
+      supabaseUrl: Deno.env.get('SUPABASE_URL'),
+    }),
   },
 
   geocoder: {

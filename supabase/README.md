@@ -153,6 +153,13 @@ supabase functions deploy api --project-ref pfophuqopwfupxjonsty
 
 `verify_jwt = false` is taken from `config.toml`; no `--no-verify-jwt` needed.
 
+For serverless database traffic, provision either the complete transaction-mode
+`DATABASE_POOL_URL`, or only the non-secret `DATABASE_POOL_HOST` shown by the
+project's shared-pooler connection details. With the host-only option, Vollo
+derives the port-6543 URL inside the Edge isolate from Supabase's injected
+`SUPABASE_DB_URL`; the database password is never copied into source control or
+CLI output. Invalid/non-Supabase pooler hosts fail closed during startup.
+
 ## Migrations
 
 To apply the committed history to a linked project:

@@ -331,7 +331,10 @@ repository:
 
 - Require a green `Production verification` workflow, then apply every migration
   and deploy the matching Edge function from the same commit. Provision the
-  environment-specific Vault `project_url` and `DATABASE_POOL_URL` first.
+  environment-specific Vault `project_url` first. For database traffic, set a
+  complete transaction-mode `DATABASE_POOL_URL`, or set `DATABASE_POOL_HOST` to
+  the project's trusted shared-pooler hostname; the latter safely reuses the
+  credential from Supabase's injected `SUPABASE_DB_URL` on port 6543.
 - Keep email confirmation enabled, allow-list `vollo://reset-password`, and set up
   a production SMTP provider, abuse limits, and provider credentials in Supabase
   Auth. Apple remains hidden until its App ID/capability/provider are provisioned;
