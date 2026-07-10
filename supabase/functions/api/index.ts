@@ -36,7 +36,7 @@ import { fetchOverpassSectors, type OverpassSector } from './overpass.ts';
 import { getProfileAnalytics, getHeadToHead } from './analytics.ts';
 import { getPersonalRecords, getYearInReview } from './records.ts';
 import { runStreakSweep, runTerritorySweep, runCourtNameSweep, runRatingSweep } from './sweeps.ts';
-import type { AuthClaims, LeaderboardEntry, MatchCard, MatchResult, MatchStats, Surface } from './types.ts';
+import type { AuthClaims, LeaderboardEntry, MatchCard, MatchStats, Surface } from './types.ts';
 
 type Env = { Variables: { user?: AuthClaims } };
 
@@ -567,6 +567,93 @@ app.get('/api/feed/user/:userId', optionalAuth, async (c) => {
 });
 
 // ─── Matches ─────────────────────────────────────────────────────────────
+interface ScheduledMatchBinding {
+  id: string;
+  creator_id: string;
+  opponent_id: string | null;
+  opponent_name: string | null;
+  court_id: string | null;
+  surface: Surface | null;
+  status: string;
+  match_id: string | null;
+}
+
+/** Names on personal (off-app) schedules are identifiers, not display text.
+ *  Normalize Unicode, case, and whitespace so harmless input differences do
+ *  not prevent the real match from fulfilling its schedule. */
+function normalizeOpponentName(value: string): string {
+  return value.normalize('NFKC').trim().replace(/\s+/gu, ' ').toLowerCase();
+}
+
+/** Return the other registered participant, or null when the caller is not a
+ *  participant. This lets either side log the result without permitting a
+ *  third party or a different tagged opponent to consume the schedule. */
+function scheduledCounterpartyId(
+  creatorId: string,
+  scheduledOpponentId: string,
+  callerId: string,
+): string | null {
+  if (callerId === creatorId) return scheduledOpponentId;
+  if (callerId === scheduledOpponentId) return creatorId;
+  return null;
+}
+
+async function lockScheduledMatchForCreate(
+  client: Queryable,
+  scheduledMatchId: string,
+  callerId: string,
+  body: CreateMatchInput,
+): Promise<ScheduledMatchBinding> {
+  const { rows } = await client.query<ScheduledMatchBinding>(
+    `SELECT id, creator_id, opponent_id, opponent_name, court_id, surface, status, match_id
+       FROM scheduled_matches
+      WHERE id = $1
+      FOR UPDATE`,
+    [scheduledMatchId],
+  );
+  const scheduled = rows[0];
+  if (!scheduled) throw ApiError.notFound('Scheduled match not found');
+
+  if (scheduled.opponent_id) {
+    const expectedOpponentId = scheduledCounterpartyId(
+      scheduled.creator_id,
+      scheduled.opponent_id,
+      callerId,
+    );
+    if (!expectedOpponentId) throw ApiError.forbidden('You are not a participant in this scheduled match');
+    if (scheduled.status !== 'accepted') {
+      throw ApiError.badRequest('The invited player must accept this scheduled match before a result can be logged');
+    }
+    if (body.opponent_id !== expectedOpponentId) {
+      throw ApiError.badRequest('The tagged opponent does not match the scheduled opponent');
+    }
+  } else {
+    if (scheduled.creator_id !== callerId) {
+      throw ApiError.forbidden('You are not a participant in this scheduled match');
+    }
+    if (scheduled.status !== 'accepted') {
+      throw ApiError.badRequest('This scheduled match is not available for logging');
+    }
+    if (
+      body.opponent_id ||
+      !body.opponent_name ||
+      !scheduled.opponent_name ||
+      normalizeOpponentName(body.opponent_name) !== normalizeOpponentName(scheduled.opponent_name)
+    ) {
+      throw ApiError.badRequest('The opponent name does not match the scheduled opponent');
+    }
+  }
+
+  if (scheduled.match_id) throw ApiError.badRequest('A result has already been logged for this scheduled match');
+  if (scheduled.court_id && scheduled.court_id !== (body.court_id ?? null)) {
+    throw ApiError.badRequest('The court does not match the scheduled court');
+  }
+  if (scheduled.surface && scheduled.surface !== body.surface) {
+    throw ApiError.badRequest('The surface does not match the scheduled surface');
+  }
+  return scheduled;
+}
+
 app.post('/api/matches', requireAuth, async (c) => {
   const userId = uid(c);
   const body = createMatchSchema.parse(await jsonBody(c)) as CreateMatchInput;
@@ -628,6 +715,13 @@ app.post('/api/matches', requireAuth, async (c) => {
   let matchId: string;
   try {
     matchId = await withTransaction(async (client) => {
+    // Claim the schedule before inserting the result. The row lock serializes
+    // logging against cancellation and another client attempting to bind a
+    // second match to the same scheduled event.
+    const scheduled = body.scheduled_match_id
+      ? await lockScheduledMatchForCreate(client, body.scheduled_match_id, userId, body)
+      : null;
+
     const inserted = await client.query<{ id: string }>(
       `INSERT INTO matches
          (user_id, opponent_id, opponent_name, court_id, surface, score_array, result,
@@ -674,6 +768,26 @@ app.post('/api/matches', requireAuth, async (c) => {
 
     // Pending matches apply no effects yet — they kick in when the opponent
     // verifies. Auto matches (no registered opponent) count immediately.
+    // A pending registered result reserves the accepted schedule until the
+    // invited player verifies it. An off-app result counts automatically, so
+    // its schedule can be completed in this same transaction.
+    if (scheduled) {
+      const linked = scheduled.opponent_id
+        ? await client.query<{ id: string }>(
+            `UPDATE scheduled_matches SET match_id = $1
+              WHERE id = $2 AND status = 'accepted' AND match_id IS NULL
+              RETURNING id`,
+            [id, scheduled.id],
+          )
+        : await client.query<{ id: string }>(
+            `UPDATE scheduled_matches SET status = 'completed', match_id = $1
+              WHERE id = $2 AND status = 'accepted' AND match_id IS NULL
+              RETURNING id`,
+            [id, scheduled.id],
+          );
+      if (linked.rows.length !== 1) throw new Error('Scheduled match changed while its result was being logged');
+    }
+
     if (!needsVerification) {
       await applyMatchEffects(client, {
         matchId: id,
@@ -685,11 +799,11 @@ app.post('/api/matches', requireAuth, async (c) => {
     return id;
     });
   } catch (err) {
-    // Two identical retries racing past the pre-check: the (user_id, client_key)
-    // unique index stops the second — hand back the first insert's match.
-    const pgCode = (err as { code?: string; constraint_name?: string }).code;
-    const constraint = (err as { constraint_name?: string }).constraint_name ?? '';
-    if (body.client_key && pgCode === '23505' && constraint.includes('client_key')) {
+    // Two identical retries can race past the pre-check. Usually the unique
+    // client-key index catches the second insert; a scheduled retry instead
+    // waits on the schedule lock and sees the first request's binding before it
+    // reaches INSERT. In either case, return the durable first result.
+    if (body.client_key) {
       const dupe = await queryOne<{ id: string }>(
         'SELECT id FROM matches WHERE user_id = $1 AND client_key = $2',
         [userId, body.client_key],
@@ -729,22 +843,6 @@ app.post('/api/matches', requireAuth, async (c) => {
     }).catch(() => {});
   }
 
-  // If this match fulfils a scheduled proposal, link it so the score surfaces on
-  // both players' scheduled-match cards. Best-effort; the match is already saved.
-  // Only a live (proposed/accepted) schedule the user is part of can be completed
-  // — never resurrect a declined/cancelled one.
-  if (body.scheduled_match_id) {
-    try {
-      await query(
-        `UPDATE scheduled_matches SET status = 'completed', match_id = $1
-          WHERE id = $2 AND (creator_id = $3 OR opponent_id = $3) AND status IN ('proposed', 'accepted')`,
-        [matchId, body.scheduled_match_id, userId],
-      );
-    } catch (err) {
-      console.error('[matches] scheduled-match link failed', err instanceof Error ? err.message : err);
-    }
-  }
-
   const card = await fetchMatchCard(matchId, userId);
   return c.json({ match: card }, 201);
 });
@@ -767,35 +865,68 @@ app.post('/api/matches/:id/verify', requireAuth, async (c) => {
   const userId = uid(c);
   const id = c.req.param('id');
   const { action } = verifyMatchSchema.parse(await jsonBody(c));
-
-  const match = await queryOne<{
-    user_id: string;
-    opponent_id: string | null;
-    court_id: string | null;
-    surface: Surface;
-    result: MatchResult;
-    games_won: number;
-    games_lost: number;
-    verification_status: string;
-  }>(
-    `SELECT user_id, opponent_id, court_id, surface, result, games_won, games_lost, verification_status
-       FROM matches WHERE id = $1`,
-    [id],
-  );
-  if (!match) throw ApiError.notFound('Match not found');
-  if (match.opponent_id !== userId) throw ApiError.forbidden('Only the tagged opponent can verify this match');
-  if (match.verification_status !== 'pending') throw ApiError.badRequest('This match has already been resolved');
-
   const verifier = c.get('user')!.username;
 
-  if (action === 'reject') {
-    // Status-guarded so a concurrent confirm/reject (double-tap, retry) can't
-    // both fire — only the request that flips it off 'pending' proceeds.
-    const rejected = await query<{ id: string }>(
-      "UPDATE matches SET verification_status = 'rejected', verified_at = now() WHERE id = $1 AND verification_status = 'pending' RETURNING id",
+  // Lock before reading status or effect inputs. A verification racing a delete
+  // must finish first (so delete sees a counted match and reverses its effects),
+  // or see no row after delete commits. It can never act on a stale pre-lock
+  // snapshot. Concurrent confirm/reject requests serialize on the same row.
+  const { match, previousControllerId } = await withTransaction(async (client) => {
+    const { rows } = await client.query<{
+      user_id: string;
+      opponent_id: string | null;
+      court_id: string | null;
+      games_won: number;
+      games_lost: number;
+      verification_status: string;
+    }>(
+      `SELECT user_id, opponent_id, court_id, games_won, games_lost, verification_status
+         FROM matches
+        WHERE id = $1
+        FOR UPDATE`,
       [id],
     );
-    if (rejected.length === 0) throw ApiError.badRequest('This match has already been resolved');
+    const locked = rows[0];
+    if (!locked) throw ApiError.notFound('Match not found');
+    if (locked.opponent_id !== userId) throw ApiError.forbidden('Only the tagged opponent can verify this match');
+    if (locked.verification_status !== 'pending') throw ApiError.badRequest('This match has already been resolved');
+
+    if (action === 'reject') {
+      await client.query(
+        "UPDATE matches SET verification_status = 'rejected', verified_at = now() WHERE id = $1",
+        [id],
+      );
+      // A disputed result does not consume the schedule; release the binding so
+      // either participant can log a corrected result later.
+      await client.query(
+        `UPDATE scheduled_matches SET status = 'accepted', match_id = NULL
+          WHERE match_id = $1 AND status IN ('accepted', 'completed')`,
+        [id],
+      );
+      return { match: locked, previousControllerId: null };
+    }
+
+    const beforeController = locked.court_id ? await getCourtController(locked.court_id) : null;
+    await client.query(
+      "UPDATE matches SET verification_status = 'verified', verified_at = now() WHERE id = $1",
+      [id],
+    );
+    await applyMatchEffects(client, {
+      matchId: id,
+      userId: locked.user_id,
+      gamesWon: Number(locked.games_won),
+      gamesLost: Number(locked.games_lost),
+    });
+    // Registered schedules become complete only after the pending match and all
+    // of its rating/streak effects have committed successfully.
+    await client.query(
+      "UPDATE scheduled_matches SET status = 'completed' WHERE match_id = $1 AND status = 'accepted'",
+      [id],
+    );
+    return { match: locked, previousControllerId: beforeController };
+  });
+
+  if (action === 'reject') {
     await notify({
       userId: match.user_id,
       type: 'match_rejected',
@@ -805,25 +936,6 @@ app.post('/api/matches/:id/verify', requireAuth, async (c) => {
     }).catch(() => {});
     return c.json({ match: await fetchMatchCard(id, userId) });
   }
-
-  // confirm → the match now counts: apply its effects to the logger. The
-  // status-guarded UPDATE (with the row lock it takes) serialises concurrent
-  // verifies under READ COMMITTED — the loser matches 0 rows and bails BEFORE
-  // applyMatchEffects, so ELO/territory are applied exactly once.
-  const previousControllerId = match.court_id ? await getCourtController(match.court_id) : null;
-  await withTransaction(async (client) => {
-    const claimed = await client.query<{ id: string }>(
-      "UPDATE matches SET verification_status = 'verified', verified_at = now() WHERE id = $1 AND verification_status = 'pending' RETURNING id",
-      [id],
-    );
-    if (claimed.rows.length === 0) throw ApiError.badRequest('This match has already been resolved');
-    await applyMatchEffects(client, {
-      matchId: id,
-      userId: match.user_id,
-      gamesWon: Number(match.games_won),
-      gamesLost: Number(match.games_lost),
-    });
-  });
 
   if (match.court_id) {
     try {
@@ -878,44 +990,51 @@ app.get('/api/matches/:id', optionalAuth, async (c) => {
 app.delete('/api/matches/:id', requireAuth, async (c) => {
   const userId = uid(c);
   const id = c.req.param('id');
-  const match = await queryOne<{
-    user_id: string;
-    court_id: string | null;
-    opponent_id: string | null;
-    surface: Surface;
-    result: MatchResult;
-    games_won: number;
-    games_lost: number;
-    user_rating_delta: number | null;
-    verification_status: string;
-  }>(
-    `SELECT user_id, court_id, opponent_id, surface, result, games_won, games_lost,
-            user_rating_delta, verification_status
-       FROM matches WHERE id = $1`,
-    [id],
-  );
-  if (!match) throw ApiError.notFound('Match not found');
-  if (match.user_id !== userId) throw ApiError.forbidden('You can only delete your own matches');
 
-  // A pending/rejected match never applied ELO or touched a leaderboard, so its
-  // deletion must NOT reverse ratings or recompute territory (that would corrupt
-  // the rating). Streak is always recomputed (cheap; it excludes the row anyway).
-  const counted = match.verification_status === 'auto' || match.verification_status === 'verified';
-  const previousControllerId = counted && match.court_id ? await getCourtController(match.court_id) : null;
+  // Lock first and derive `counted` from the locked row. If verification won the
+  // race, deletion sees `verified` and recomputes ratings after removing it. If
+  // deletion won, verification sees no row. Neither path can leave stale effects.
+  const { counted, courtId, previousControllerId } = await withTransaction(async (client) => {
+    const { rows } = await client.query<{
+      user_id: string;
+      court_id: string | null;
+      verification_status: string;
+    }>(
+      `SELECT user_id, court_id, verification_status
+         FROM matches
+        WHERE id = $1
+        FOR UPDATE`,
+      [id],
+    );
+    const locked = rows[0];
+    if (!locked) throw ApiError.notFound('Match not found');
+    if (locked.user_id !== userId) throw ApiError.forbidden('You can only delete your own matches');
 
-  await withTransaction(async (client) => {
+    const isCounted = locked.verification_status === 'auto' || locked.verification_status === 'verified';
+    const beforeController = isCounted && locked.court_id ? await getCourtController(locked.court_id) : null;
+
+    // Keep schedule lifecycle constraints and cards coherent. Removing the
+    // result reopens a completed schedule, while a pending binding simply clears.
+    await client.query(
+      `UPDATE scheduled_matches
+          SET status = CASE WHEN status = 'completed' THEN 'accepted'::schedule_status ELSE status END,
+              match_id = NULL
+        WHERE match_id = $1`,
+      [id],
+    );
     await client.query('DELETE FROM matches WHERE id = $1', [id]);
     // Ratings are recomputed from the remaining history (exact), not delta-reversed.
-    if (counted) await recomputeUserRatings(client, userId);
+    if (isCounted) await recomputeUserRatings(client, userId);
     await recomputeUserStreak(userId, client);
+    return { counted: isCounted, courtId: locked.court_id, previousControllerId: beforeController };
   });
 
-  if (counted && match.court_id) {
+  if (counted && courtId) {
     // Post-commit side effect: the row is already gone, so a recompute failure
     // must not turn a successful delete into a 500 (the 6-hourly sweep is the
     // backstop) — same isolation as create/verify.
     try {
-      await recomputeAfterMatch({ courtId: match.court_id, loggerUserId: userId, previousControllerId });
+      await recomputeAfterMatch({ courtId, loggerUserId: userId, previousControllerId });
     } catch (err) {
       console.error('post-delete territory recompute failed', err);
     }
@@ -1113,8 +1232,8 @@ app.patch('/api/scheduled-matches/:id', requireAuth, async (c) => {
   const id = c.req.param('id');
   const { action } = updateScheduledMatchSchema.parse(await jsonBody(c));
 
-  const row = await queryOne<{ creator_id: string; opponent_id: string | null; status: string }>(
-    'SELECT creator_id, opponent_id, status FROM scheduled_matches WHERE id = $1',
+  const row = await queryOne<{ creator_id: string; opponent_id: string | null; status: string; match_id: string | null }>(
+    'SELECT creator_id, opponent_id, status, match_id FROM scheduled_matches WHERE id = $1',
     [id],
   );
   if (!row) throw ApiError.notFound('Scheduled match not found');
@@ -1128,6 +1247,7 @@ app.patch('/api/scheduled-matches/:id', requireAuth, async (c) => {
   if (action === 'cancel') {
     if (row.creator_id !== userId && row.opponent_id !== userId) throw ApiError.forbidden('Not your match to cancel');
     if (row.status !== 'proposed' && row.status !== 'accepted') throw ApiError.badRequest('This match can no longer be cancelled');
+    if (row.match_id) throw ApiError.badRequest('A result has already been logged for this scheduled match');
     newStatus = 'cancelled';
     notifyUserId = userId === row.creator_id ? row.opponent_id : row.creator_id;
     notifyType = 'schedule_cancelled';
@@ -1147,7 +1267,7 @@ app.patch('/api/scheduled-matches/:id', requireAuth, async (c) => {
   // value wins; the loser gets the same "already answered" error as a late tap.
   const expected = action === 'cancel' ? ['proposed', 'accepted'] : ['proposed'];
   const updated = await query<{ id: string }>(
-    'UPDATE scheduled_matches SET status = $1 WHERE id = $2 AND status = ANY($3) RETURNING id',
+    'UPDATE scheduled_matches SET status = $1 WHERE id = $2 AND status = ANY($3) AND match_id IS NULL RETURNING id',
     [newStatus, id, expected],
   );
   if (updated.length === 0) {
@@ -2060,7 +2180,11 @@ app.post('/api/users/me/follow-requests/:userId', requireAuth, async (c) => {
 
 /** Resolve a profile-content route's target and enforce privacy + blocks. */
 async function resolveViewableUserId(c: Context<Env>): Promise<string> {
-  const id = await resolveUserId(c.req.param('username'));
+  // This helper is called only from routes declaring :username; Hono's generic
+  // Context cannot preserve that path parameter through the helper boundary.
+  const username = c.req.param('username');
+  if (!username) throw ApiError.notFound('User not found');
+  const id = await resolveUserId(username);
   await assertCanViewContent(id, c.get('user')?.sub ?? null);
   return id;
 }
