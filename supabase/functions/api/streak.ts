@@ -1,5 +1,5 @@
 import { config } from './config.ts';
-import { pool, query, queryOne } from './db.ts';
+import { queryOne } from './db.ts';
 import type { Queryable } from './db.ts';
 import type { StreakState } from './types.ts';
 
@@ -75,9 +75,15 @@ export async function getStreakModifier(userId: string): Promise<number> {
  */
 export async function recomputeUserStreak(
   userId: string,
-  db: Queryable = pool,
+  db: Queryable,
   nowMs = Date.now(),
 ): Promise<StreakComputation> {
+  // This is a read-then-absolute-write recompute, so serialize it with rating
+  // recomputes for the same user before taking the match-history snapshot. The
+  // caller must provide a transaction-bound client for the lock to span all of
+  // the reads and the upsert (all mutation paths and the sweep do so).
+  await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0::bigint))', [userId]);
+
   const { rows } = await db.query<{ played_at: string }>(
     // Only matches that actually count toward the player's record drive the
     // streak — a pending (unverified) or rejected match must not.

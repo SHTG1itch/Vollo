@@ -1,5 +1,6 @@
 import { config } from './config.ts';
-import { query, queryOne, withTransaction } from './db.ts';
+import { pool, query, queryOne, withTransaction } from './db.ts';
+import type { Queryable } from './db.ts';
 import { centroid, clusterByRadius, districtName, type LatLng } from './geo.ts';
 import { notify } from './notifications.ts';
 import type { GeoJsonPolygon, Territory } from './types.ts';
@@ -27,8 +28,17 @@ interface NewTerritory {
  * Courts where the user currently sits at rank 1 or 2 over the trailing 30-day
  * window — the courts they control for territory purposes.
  */
-export async function getControlledCourts(userId: string): Promise<ControlledCourt[]> {
-  return query<ControlledCourt>(
+export async function getControlledCourts(
+  userId: string,
+  db: Queryable = pool,
+): Promise<ControlledCourt[]> {
+  const { rows } = await db.query<{
+    court_id: string;
+    rank: number;
+    name: string;
+    lat: number;
+    lng: number;
+  }>(
     `SELECT cl.court_id, cl.rank::int AS rank, c.name,
             ST_Y(c.geom) AS lat, ST_X(c.geom) AS lng
        FROM court_leaderboard cl
@@ -36,6 +46,7 @@ export async function getControlledCourts(userId: string): Promise<ControlledCou
       WHERE cl.user_id = $1 AND cl.rank <= 2 AND cl.score > 0`,
     [userId],
   );
+  return rows;
 }
 
 /**
@@ -49,8 +60,11 @@ export async function getControlledCourts(userId: string): Promise<ControlledCou
  * real area. ST_Dump + largest-part pick guarantees a single POLYGON for the
  * geometry(Polygon) column even if ST_MakeValid splits a pathological shape.
  */
-export async function computeHullForCourts(courtIds: string[]): Promise<HullResult | null> {
-  const row = await queryOne<{ geojson: string; center: string; area_sqkm: string }>(
+export async function computeHullForCourts(
+  courtIds: string[],
+  db: Queryable = pool,
+): Promise<HullResult | null> {
+  const { rows } = await db.query<{ geojson: string; center: string; area_sqkm: string }>(
     `WITH pts AS (
        SELECT ST_Collect(geom) AS g FROM courts WHERE id = ANY($1::uuid[])
      ),
@@ -79,6 +93,7 @@ export async function computeHullForCourts(courtIds: string[]): Promise<HullResu
        FROM poly`,
     [courtIds, config.territory.concaveTargetPercent],
   );
+  const row = rows[0] ?? null;
   if (!row?.geojson) return null;
 
   const geometry = JSON.parse(row.geojson) as GeoJsonPolygon;
@@ -100,36 +115,38 @@ export async function computeHullForCourts(courtIds: string[]): Promise<HullResu
  * Notifications are emitted after the transaction commits.
  */
 export async function recomputeUserTerritories(userId: string): Promise<void> {
-  const controlled = await getControlledCourts(userId);
-  const reference = await homeReference(userId, controlled);
-
-  const clusters = clusterByRadius(controlled, config.territory.radiusKm)
-    .filter((idx) => idx.length >= config.territory.minCourts);
-
-  const next: NewTerritory[] = [];
-  for (const idx of clusters) {
-    const courts = idx.map((i) => controlled[i]!);
-    const courtIds = courts.map((c) => c.court_id);
-    const hull = await computeHullForCourts(courtIds);
-    if (!hull) continue;
-    next.push({
-      courtIds: courtIds.sort(),
-      districtName: districtName(hull.center, reference),
-      hull,
-      courtCount: courts.length,
-    });
-  }
-
-  const existing = await query<{ id: string; court_ids: string[]; district_name: string; court_count: number }>(
-    'SELECT id, court_ids, district_name, court_count FROM territories WHERE user_id = $1',
-    [userId],
-  );
-
-  await withTransaction(async (client) => {
-    // Serialise per-user recomputes (same pattern as rating.ts): two concurrent
-    // delete-then-insert passes would each miss the other's uncommitted rows
-    // and leave the user with doubled territory polygons until the next sweep.
+  const { existing, next } = await withTransaction(async (client) => {
+    // Acquire the per-user lock before taking any source or existing-state
+    // snapshots. Otherwise a waiter can compute stale polygons, acquire the
+    // lock later, and overwrite the fresher result produced by the lock holder.
     await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1::text, 1::bigint))', [userId]);
+
+    const controlled = await getControlledCourts(userId, client);
+    const reference = await homeReference(userId, controlled, client);
+    const clusters = clusterByRadius(controlled, config.territory.radiusKm)
+      .filter((idx) => idx.length >= config.territory.minCourts);
+
+    const next: NewTerritory[] = [];
+    for (const idx of clusters) {
+      const courts = idx.map((i) => controlled[i]!);
+      const courtIds = courts.map((c) => c.court_id).sort();
+      const hull = await computeHullForCourts(courtIds, client);
+      if (!hull) continue;
+      next.push({
+        courtIds,
+        districtName: districtName(hull.center, reference),
+        hull,
+        courtCount: courts.length,
+      });
+    }
+
+    const { rows: existing } = await client.query<{
+      id: string;
+      court_ids: string[];
+      district_name: string;
+      court_count: number;
+    }>('SELECT id, court_ids, district_name, court_count FROM territories WHERE user_id = $1', [userId]);
+
     await client.query('DELETE FROM territories WHERE user_id = $1', [userId]);
     for (const t of next) {
       await client.query(
@@ -150,6 +167,7 @@ export async function recomputeUserTerritories(userId: string): Promise<void> {
         ],
       );
     }
+    return { existing, next };
   });
 
   await emitTerritoryDiffNotifications(userId, existing, next);
@@ -337,11 +355,16 @@ async function emitCourtTakeoverNotifications(
 }
 
 /** The reference point for compass-naming districts: home, else footprint centre. */
-async function homeReference(userId: string, controlled: ControlledCourt[]): Promise<LatLng | null> {
-  const home = await queryOne<{ lat: number | null; lng: number | null }>(
+async function homeReference(
+  userId: string,
+  controlled: ControlledCourt[],
+  db: Queryable,
+): Promise<LatLng | null> {
+  const { rows } = await db.query<{ lat: number | null; lng: number | null }>(
     'SELECT ST_Y(home_geom) AS lat, ST_X(home_geom) AS lng FROM users WHERE id = $1',
     [userId],
   );
+  const home = rows[0] ?? null;
   if (home?.lat != null && home?.lng != null) return { lat: Number(home.lat), lng: Number(home.lng) };
   if (controlled.length > 0) return centroid(controlled);
   return null;

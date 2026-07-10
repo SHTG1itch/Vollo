@@ -1,4 +1,4 @@
-import { pool, query } from './db.ts';
+import { query, withTransaction } from './db.ts';
 import { recomputeUserStreak } from './streak.ts';
 import { recomputeUserTerritories } from './territory.ts';
 import { recomputeUserRatings } from './rating.ts';
@@ -14,7 +14,7 @@ export async function runStreakSweep(nowMs = Date.now()): Promise<number> {
   let ok = 0;
   for (const u of users) {
     try {
-      await recomputeUserStreak(u.id, pool, nowMs);
+      await withTransaction((client) => recomputeUserStreak(u.id, client, nowMs));
       ok++;
     } catch (err) {
       console.error(`[sweep] streak recompute failed for ${u.id}`, err instanceof Error ? err.message : err);
@@ -56,7 +56,7 @@ export async function runRatingSweep(): Promise<number> {
   let ok = 0;
   for (const u of users) {
     try {
-      await recomputeUserRatings(pool, u.id);
+      await withTransaction((client) => recomputeUserRatings(client, u.id));
       ok++;
     } catch (err) {
       console.error(`[sweep] rating recompute failed for ${u.id}`, err instanceof Error ? err.message : err);

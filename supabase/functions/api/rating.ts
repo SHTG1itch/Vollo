@@ -1,6 +1,9 @@
 import type { Queryable } from './db.ts';
 import { pool } from './db.ts';
+import { DEFAULT_RATING, DEFAULT_RD, replayRating, type Posterior } from './rating-model.ts';
 import type { MatchResult, Surface, SurfaceRating } from './types.ts';
+
+export { bayesianUpdate, expectedScore, marginMultiplier } from './rating-model.ts';
 
 // ════════════════════════════════════════════════════════════════════════
 // Bayesian skill rating (Glicko-style).
@@ -18,58 +21,6 @@ import type { MatchResult, Surface, SurfaceRating } from './types.ts';
 // replaying a player's matches in chronological order (`recomputeUserRatings`),
 // which makes deletion exact with no fragile delta-reversal.
 // ════════════════════════════════════════════════════════════════════════
-
-const DEFAULT_RATING = 1000;        // prior mean μ₀ (kept on the legacy 1000 scale)
-const DEFAULT_RD = 350;             // prior deviation σ₀ — maximal uncertainty
-const RD_MIN = 30;                  // a rating never becomes infinitely certain
-const Q = Math.LN10 / 400;          // Glicko scale constant (ln 10 / 400)
-
-interface Posterior {
-  mu: number;
-  rd: number;
-}
-
-/** Glicko g(RD): how much weight to give an opponent given our uncertainty about
- *  them — a very uncertain opponent's result is less informative. */
-function g(rd: number): number {
-  return 1 / Math.sqrt(1 + (3 * Q * Q * rd * rd) / (Math.PI * Math.PI));
-}
-
-/** Expected score (win probability) for a player vs an opponent under the model. */
-export function expectedScore(mu: number, oppMu: number, oppRd: number): number {
-  return 1 / (1 + 10 ** ((-g(oppRd) * (mu - oppMu)) / 400));
-}
-
-/**
- * Margin multiplier: a 6-0 6-0 thrashing is stronger evidence of a skill gap
- * than a 7-6 7-6 squeaker, so it carries more information. Scales gently with
- * the game differential (~1.0 at margin 0, ~2.0 at margin 12). Folded into the
- * Bayesian update as an evidence-strength weight.
- */
-export function marginMultiplier(gamesWon: number, gamesLost: number): number {
-  const margin = Math.abs(gamesWon - gamesLost);
-  return 1 + Math.log1p(margin) / Math.log(13);
-}
-
-/**
- * One Bayesian update layer: fold a single match result into the prior posterior
- * and return the new posterior. `evidence` (the margin multiplier) scales how
- * much information this match carries — both the mean nudge and the precision
- * gain (RD reduction).
- */
-export function bayesianUpdate(prior: Posterior, opp: Posterior, result: MatchResult, evidence: number): Posterior {
-  const S = result === 'win' ? 1 : 0;
-  const gi = g(opp.rd);
-  const E = 1 / (1 + 10 ** ((-gi * (prior.mu - opp.mu)) / 400));
-  // Glicko information of the observation (= 1/d²), scaled by the margin so a
-  // decisive result both moves the rating more and shrinks RD more.
-  const likePrecision = evidence * Q * Q * gi * gi * E * (1 - E);
-  const priorPrecision = 1 / (prior.rd * prior.rd);
-  const newPrecision = priorPrecision + likePrecision;
-  const newRd = Math.max(RD_MIN, Math.min(DEFAULT_RD, Math.sqrt(1 / newPrecision)));
-  const newMu = prior.mu + (1 / newPrecision) * Q * gi * (S - E) * evidence;
-  return { mu: newMu, rd: newRd };
-}
 
 interface ReplayMatch {
   surface: Surface;
@@ -93,9 +44,8 @@ export async function recomputeUserRatings(db: Queryable, userId: string): Promi
   // absolute-write, so two overlapping same-user transactions (e.g. a DELETE
   // racing a POST/verify) could otherwise lose an update under READ COMMITTED.
   // A per-user xact advisory lock makes the second wait, then re-read full
-  // history on a fresh post-commit snapshot. (Inside a transaction it releases
-  // on commit; in the best-effort sweep — no surrounding txn — it's a no-op,
-  // which is fine since the sweep is idempotent.)
+  // history on a fresh post-commit snapshot. Mutation paths and the sweep pass
+  // a transaction-bound client, so the lock spans the replay and all writes.
   await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0::bigint))', [userId]);
 
   // Inline row type (a named interface here wouldn't satisfy the driver's Row
@@ -138,19 +88,17 @@ export async function recomputeUserRatings(db: Queryable, userId: string): Promi
 
   const touchedSurfaces: Surface[] = [];
   for (const [surface, ms] of bySurface) {
-    let post: Posterior = { mu: DEFAULT_RATING, rd: DEFAULT_RD };
-    let wins = 0;
-    let losses = 0;
-    let peak = DEFAULT_RATING;
-    for (const m of ms) {
-      const opp = (m.opponent_id ? oppMap.get(`${m.opponent_id}|${surface}`) : null) ?? { mu: DEFAULT_RATING, rd: DEFAULT_RD };
-      post = bayesianUpdate(post, opp, m.result, marginMultiplier(Number(m.games_won), Number(m.games_lost)));
-      if (m.result === 'win') wins++;
-      else losses++;
-      if (post.mu > peak) peak = post.mu;
-    }
-    const ratingVal = Math.round(post.mu);
-    const rdVal = Math.round(post.rd);
+    const replay = replayRating(ms.map((m) => ({
+      result: m.result,
+      gamesWon: Number(m.games_won),
+      gamesLost: Number(m.games_lost),
+      opponent: (m.opponent_id ? oppMap.get(`${m.opponent_id}|${surface}`) : null) ?? {
+        mu: DEFAULT_RATING,
+        rd: DEFAULT_RD,
+      },
+    })));
+    const ratingVal = Math.round(replay.posterior.mu);
+    const rdVal = Math.round(replay.posterior.rd);
     await db.query(
       `INSERT INTO user_ratings (user_id, surface, rating, rating_deviation, matches_played, wins, losses, peak_rating)
        VALUES ($1, $2, $3::numeric, $4::numeric, $5::int, $6::int, $7::int, $8::numeric)
@@ -160,8 +108,8 @@ export async function recomputeUserRatings(db: Queryable, userId: string): Promi
          matches_played  = EXCLUDED.matches_played,
          wins            = EXCLUDED.wins,
          losses          = EXCLUDED.losses,
-         peak_rating     = GREATEST(user_ratings.peak_rating, EXCLUDED.peak_rating)`,
-      [userId, surface, ratingVal, rdVal, ms.length, wins, losses, Math.round(peak)],
+         peak_rating     = EXCLUDED.peak_rating`,
+      [userId, surface, ratingVal, rdVal, ms.length, replay.wins, replay.losses, Math.round(replay.peak)],
     );
     touchedSurfaces.push(surface);
   }
