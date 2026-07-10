@@ -9,6 +9,7 @@
 // so the public PostgREST API stays sealed by RLS.
 // ════════════════════════════════════════════════════════════════════════
 import { Hono, type Context, type MiddlewareHandler } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { cors } from 'hono/cors';
 import { ZodError } from 'zod';
 
@@ -397,6 +398,12 @@ async function applyMatchEffects(
 const app = new Hono<Env>();
 
 app.use('*', cors({ exposeHeaders: ['Retry-After'] }));
+app.use('*', bodyLimit({
+  maxSize: 64 * 1024,
+  onError: (c) => c.json({
+    error: { code: 'payload_too_large', message: 'Request body must not exceed 64 KiB' },
+  }, 413),
+}));
 
 // Global request ceiling — a cheap abuse backstop.
 const globalLimiter = makeLimiter(60_000, 200);

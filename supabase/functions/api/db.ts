@@ -22,27 +22,30 @@ const sql = postgres(config.database.url, {
 });
 
 async function run(text: string, params?: ReadonlyArray<unknown>): Promise<Row[]> {
-  const res = await sql.unsafe(text, (params ?? []) as unknown[]);
+  // postgres.js models values passed to an untyped query as
+  // ParameterOrJSON<never>. The application-level query surface deliberately
+  // accepts unknown values, so narrow only at this library boundary.
+  const res = await sql.unsafe(text, (params ?? []) as never[]);
   return Array.from(res as Iterable<Row>);
 }
 
 /** A pg.Pool-like object exposing `.query(text, params) -> { rows }`. */
 export const pool = {
-  query: async <T extends Row = Row>(text: string, params?: ReadonlyArray<unknown>) => ({
+  query: async <T = Row>(text: string, params?: ReadonlyArray<unknown>) => ({
     rows: (await run(text, params)) as T[],
   }),
 };
 
 /** Either the shared pool or a transaction-bound client. */
 export interface Queryable {
-  query<T extends Row = Row>(
+  query<T = Row>(
     text: string,
     params?: ReadonlyArray<unknown>,
   ): Promise<{ rows: T[] }>;
 }
 
 /** Run a query and return the rows. */
-export async function query<T extends Row = Row>(
+export async function query<T = Row>(
   text: string,
   params?: ReadonlyArray<unknown>,
 ): Promise<T[]> {
@@ -50,7 +53,7 @@ export async function query<T extends Row = Row>(
 }
 
 /** Run a query expecting at most one row. */
-export async function queryOne<T extends Row = Row>(
+export async function queryOne<T = Row>(
   text: string,
   params?: ReadonlyArray<unknown>,
 ): Promise<T | null> {
@@ -68,8 +71,8 @@ export async function withTransaction<T>(
 ): Promise<T> {
   return await sql.begin(async (tx) => {
     const client: Queryable = {
-      query: async <R extends Row = Row>(text: string, params?: ReadonlyArray<unknown>) => ({
-        rows: Array.from((await tx.unsafe(text, (params ?? []) as unknown[])) as Iterable<R>),
+      query: async <R = Row>(text: string, params?: ReadonlyArray<unknown>) => ({
+        rows: Array.from((await tx.unsafe(text, (params ?? []) as never[])) as Iterable<R>),
       }),
     };
     return await fn(client);

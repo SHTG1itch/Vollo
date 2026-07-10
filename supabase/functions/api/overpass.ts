@@ -66,6 +66,8 @@ interface OsmTags {
   covered?: string;
   leisure?: string;
   amenity?: string;
+  landuse?: string;
+  club?: string;
   'addr:city'?: string;
 }
 
