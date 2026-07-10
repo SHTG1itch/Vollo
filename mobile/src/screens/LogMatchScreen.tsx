@@ -17,20 +17,15 @@ import { SurfaceBadge } from '../components/SurfaceBadge';
 import { colors, font, fonts, radius, spacing, surfaceColors, surfaceColorsSoft } from '../theme';
 import type { Court, MatchStats, ScoreArray, Surface } from '../types';
 import { analyzeLocal, scoreValidationError } from '../utils/format';
+import {
+  applyOpponentPrefill,
+  canSubmitLogMatch,
+  logMatchPrefillKey,
+  PhotoUploadGuard,
+} from '../utils/logMatchState';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 const SURFACES: Surface[] = ['hard', 'clay', 'grass', 'indoor'];
-
-/** Identity of a prefill navigation ("Log result" on a scheduled match), so a
- *  fresh navigation applies it but a re-focus (params cleared) doesn't. */
-function prefillKeyOf(p: RouteProp<TabParamList, 'Log'>['params']): string | null {
-  if (!p) return null;
-  if (p.scheduledMatchId) return p.scheduledMatchId;
-  if (p.prefillOpponentId || p.prefillOpponentName || p.prefillCourtId || p.prefillSurface) {
-    return `${p.prefillOpponentId ?? ''}|${p.prefillOpponentName ?? ''}|${p.prefillCourtId ?? ''}|${p.prefillSurface ?? ''}`;
-  }
-  return null;
-}
 
 /** UUID v4 for the create-match idempotency key. crypto.randomUUID when the JS
  *  engine provides it; a Math.random fallback otherwise (collision odds are
@@ -78,6 +73,7 @@ export function LogMatchScreen() {
   const [notes, setNotes] = useState('');
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const photoUploadGuard = useRef(new PhotoUploadGuard());
   const [showStats, setShowStats] = useState(false);
   const [stats, setStats] = useState<MatchStats>(emptyStats);
   const [courts, setCourts] = useState<Court[]>([]);
@@ -111,9 +107,13 @@ export function LogMatchScreen() {
     }, 300);
   };
 
-  useEffect(() => () => {
-    if (oppDebounce.current) clearTimeout(oppDebounce.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if (oppDebounce.current) clearTimeout(oppDebounce.current);
+      photoUploadGuard.current.invalidate();
+    },
+    [],
+  );
 
   // Load courts to tie a match to. Discovers real-world OSM courts near the
   // player first (so the picker isn't empty), then lists them distance-sorted.
@@ -187,17 +187,20 @@ export function LogMatchScreen() {
   // and remember the schedule id so the result links back. The synchronous
   // state seeding happens as a render-phase adjustment keyed on the prefill
   // (React's sanctioned pattern), never inside an effect.
-  const prefillKey = prefillKeyOf(route.params);
+  const prefillKey = logMatchPrefillKey(route.params);
   const [appliedPrefillKey, setAppliedPrefillKey] = useState<string | null>(null);
-  if (prefillKey && appliedPrefillKey !== prefillKey) {
+  if (!prefillKey && appliedPrefillKey !== null) {
+    // Params are cleared after each application. Resetting this key lets a
+    // later navigation apply the same prefill again as a fresh action.
+    setAppliedPrefillKey(null);
+  } else if (prefillKey && appliedPrefillKey !== prefillKey) {
     setAppliedPrefillKey(prefillKey);
     const p = route.params!;
-    if (p.prefillOpponentId) {
-      setOpponentId(p.prefillOpponentId);
-      setOpponentName(p.prefillOpponentName ?? '');
+    if (p.prefillOpponentId || p.prefillOpponentName) {
+      const nextOpponent = applyOpponentPrefill(p, { opponentId, opponentName });
+      setOpponentId(nextOpponent.opponentId);
+      setOpponentName(nextOpponent.opponentName);
       setOppResults([]);
-    } else if (p.prefillOpponentName) {
-      setOpponentName(p.prefillOpponentName);
     }
     if (p.prefillSurface) {
       setSurface(p.prefillSurface);
@@ -211,9 +214,18 @@ export function LogMatchScreen() {
   // params so a re-focus doesn't re-apply) stay in an effect.
   useEffect(() => {
     const p = route.params;
-    const key = prefillKeyOf(p);
-    if (!key || lastPrefillKey.current === key) return;
+    const key = logMatchPrefillKey(p);
+    if (!key) {
+      lastPrefillKey.current = null;
+      return;
+    }
+    if (lastPrefillKey.current === key) return;
     lastPrefillKey.current = key;
+
+    // A navigation prefill replaces the opponent field. Invalidate any search
+    // that was started for the previous text before its response can arrive.
+    if (oppDebounce.current) clearTimeout(oppDebounce.current);
+    oppToken.current += 1;
 
     if (p?.prefillCourtId) {
       const cid = p.prefillCourtId;
@@ -252,19 +264,27 @@ export function LogMatchScreen() {
   const statsTouched = showStats && Object.values(stats).some((v) => v > 0);
 
   const onAddPhoto = async () => {
-    if (uploadingPhoto) return;
+    const uploadToken = photoUploadGuard.current.begin();
+    if (uploadToken === null) return;
     setUploadingPhoto(true);
     try {
       const url = await pickAndUploadMatchPhoto();
-      if (url) setPhotoUrl(url);
+      if (url && photoUploadGuard.current.accepts(uploadToken)) setPhotoUrl(url);
     } catch (e) {
-      showToast(e instanceof Error ? e.message : 'Upload failed — please try again.', 'error');
+      if (photoUploadGuard.current.accepts(uploadToken)) {
+        showToast(e instanceof Error ? e.message : 'Upload failed — please try again.', 'error');
+      }
     } finally {
-      setUploadingPhoto(false);
+      if (photoUploadGuard.current.finish(uploadToken)) setUploadingPhoto(false);
     }
   };
 
   const submit = async () => {
+    if (submitting) return;
+    if (photoUploadGuard.current.active) {
+      showToast('Wait for the photo upload to finish before logging.', 'error');
+      return;
+    }
     if (!scoreValid) {
       showToast(scoreError ?? 'Enter a valid completed tennis score.', 'error');
       return;
@@ -316,6 +336,8 @@ export function LogMatchScreen() {
       setDuration(0);
       setTitle('');
       setNotes('');
+      photoUploadGuard.current.invalidate();
+      setUploadingPhoto(false);
       setPhotoUrl(null);
       setShowStats(false);
       setStats(emptyStats());
@@ -611,7 +633,19 @@ export function LogMatchScreen() {
         </Card>
       ) : null}
 
-      <Button label="Log match" onPress={submit} loading={submitting} disabled={!scoreValid} style={{ marginTop: spacing.md }} />
+      <Button
+        label={uploadingPhoto ? 'Uploading photo…' : 'Log match'}
+        onPress={submit}
+        loading={submitting}
+        disabled={
+          !canSubmitLogMatch({
+            scoreValid,
+            submitting,
+            photoUploadActive: uploadingPhoto,
+          })
+        }
+        style={{ marginTop: spacing.md }}
+      />
       <View style={{ height: spacing.xxl }} />
     </ScrollView>
     </KeyboardAvoidingView>

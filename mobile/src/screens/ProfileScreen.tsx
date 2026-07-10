@@ -48,6 +48,7 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
   // 'following' → unfollow on tap.
   const [followStatus, setFollowStatus] = useState<'none' | 'requested' | 'following'>('none');
   const [followLoading, setFollowLoading] = useState(false);
+  const [blockLoading, setBlockLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -57,9 +58,29 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
   // below never calls setState synchronously.
   const [prevFetch, setPrevFetch] = useState({ username, reloadKey });
   if (prevFetch.username !== username || prevFetch.reloadKey !== reloadKey) {
+    const differentProfile = prevFetch.username !== username;
     setPrevFetch({ username, reloadKey });
     setError(null);
-    if (!profile) setLoading(true); // a pull-to-refresh keeps the screen, not a full loader
+    if (differentProfile) {
+      // React Navigation can reuse this screen with new params. Never render
+      // the previous player's identity or private sections under the new URL.
+      setGoals([]);
+      setProfile(null);
+      setAnalytics(null);
+      setRatings([]);
+      setAchievements([]);
+      setStreak(null);
+      setTerritories([]);
+      setH2h([]);
+      setRecent([]);
+      setFollowStatus('none');
+      setFollowLoading(false);
+      setBlockLoading(false);
+      setRefreshing(false);
+      setLoading(true);
+    } else if (!profile) {
+      setLoading(true); // a pull-to-refresh keeps the screen, not a full loader
+    }
   }
 
   // Re-fetch when the screen regains focus (e.g. returning from EditProfile) so
@@ -180,7 +201,6 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
     }
   };
 
-  const [blockLoading, setBlockLoading] = useState(false);
   const setBlockedState = (next: boolean) => {
     setProfile((p) => (p ? { ...p, viewer_has_blocked: next } : p));
     setBlockLoading(false);

@@ -32,6 +32,7 @@ export function MatchDetailScreen({ route, navigation }: Props) {
   const [posting, setPosting] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [commentsError, setCommentsError] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   // Celebrate your own win once when the match opens (not on every refresh).
   // The ref stores the matchId already celebrated, so a pull-to-refresh of the
@@ -48,12 +49,15 @@ export function MatchDetailScreen({ route, navigation }: Props) {
     const differentMatch = prevFetch.matchId !== matchId;
     setPrevFetch({ matchId, reloadKey });
     setError(null);
+    setCommentsError(false);
     if (differentMatch) {
       // Screen reused for another match (deep link / match-to-match nav):
       // drop the stale content and show the loader.
       setMatch(null);
       setComments([]);
+      setDraft('');
       setCelebrate(false);
+      setShareOpen(false);
       setLoading(true);
     } else if (!match) {
       // Retrying a failed load shows the loader again, not "Match not found".
@@ -64,11 +68,16 @@ export function MatchDetailScreen({ route, navigation }: Props) {
   useEffect(() => {
     let active = true;
     void (async () => {
+      // Comments are an optional section. Handle their rejection from the
+      // moment the request starts so it can never suppress a valid match.
+      const commentsTask = api.getComments(matchId).then(
+        (value) => ({ ok: true as const, value }),
+        () => ({ ok: false as const }),
+      );
       try {
-        const [{ match: m }, { comments: c }] = await Promise.all([api.getMatch(matchId), api.getComments(matchId)]);
+        const { match: m } = await api.getMatch(matchId);
         if (!active) return;
         setMatch(m);
-        setComments(c);
         if (celebratedRef.current !== matchId && m.result === 'win' && m.user_id === user?.id) {
           celebratedRef.current = matchId;
           setCelebrate(true);
@@ -78,9 +87,18 @@ export function MatchDetailScreen({ route, navigation }: Props) {
       } finally {
         if (active) {
           setLoading(false);
-          setRefreshing(false);
         }
       }
+
+      const commentsResult = await commentsTask;
+      if (!active) return;
+      if (commentsResult.ok) {
+        setComments(commentsResult.value.comments);
+        setCommentsError(false);
+      } else {
+        setCommentsError(true);
+      }
+      setRefreshing(false);
     })();
     return () => {
       active = false;
@@ -131,8 +149,15 @@ export function MatchDetailScreen({ route, navigation }: Props) {
       const { comment } = await api.addComment(matchId, draft.trim());
       // Use the server's authoritative comment (real id/timestamp), not a stub.
       setComments((c) => [...c, comment]);
+      setCommentsError(false);
       setDraft('');
       setMatch((cur) => (cur ? { ...cur, comment_count: cur.comment_count + 1 } : cur));
+      // Keep the feed card authoritative when navigating back from the detail.
+      useFeed.setState((state) => ({
+        matches: state.matches.map((item) =>
+          item.id === matchId ? { ...item, comment_count: item.comment_count + 1 } : item,
+        ),
+      }));
     } catch (e) {
       showToast(e instanceof ApiError ? e.message : 'Could not post your comment — try again.', 'error');
     } finally {
@@ -259,7 +284,15 @@ export function MatchDetailScreen({ route, navigation }: Props) {
           <View style={styles.actions}>
             <KudosButton active={match.viewer_has_kudos ?? false} count={match.kudos_count} onPress={toggleKudos} />
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-              <Button label="Share" variant="secondary" onPress={() => setShareOpen(true)} style={{ height: 38, paddingHorizontal: spacing.md }} />
+              <Button
+                label={rejected ? 'Disputed' : 'Share'}
+                variant="secondary"
+                onPress={() => {
+                  if (!rejected) setShareOpen(true);
+                }}
+                disabled={rejected}
+                style={{ height: 38, paddingHorizontal: spacing.md }}
+              />
               {isOwner ? <Button label="Delete" variant="danger" onPress={remove} style={{ height: 38, paddingHorizontal: spacing.md }} /> : null}
             </View>
           </View>
@@ -293,7 +326,8 @@ export function MatchDetailScreen({ route, navigation }: Props) {
         {match.stats ? <StatsCard stats={match.stats} /> : null}
 
         <Text style={styles.commentsTitle}>Comments ({comments.length})</Text>
-        {comments.length === 0 ? <Muted>Be the first to comment.</Muted> : null}
+        {commentsError ? <Muted>Couldn’t refresh comments. Pull down to try again.</Muted> : null}
+        {comments.length === 0 && !commentsError ? <Muted>Be the first to comment.</Muted> : null}
         {comments.map((c) => (
           <View key={c.id} style={styles.comment}>
             <Pressable
@@ -329,7 +363,7 @@ export function MatchDetailScreen({ route, navigation }: Props) {
         <View style={{ height: spacing.xxl }} />
       </ScrollView>
       <ConfettiBurst play={celebrate} onDone={() => setCelebrate(false)} />
-      <ShareStorySheet match={match} visible={shareOpen} onClose={() => setShareOpen(false)} />
+      <ShareStorySheet match={match} visible={shareOpen && !rejected} onClose={() => setShareOpen(false)} />
     </KeyboardAvoidingView>
   );
 }

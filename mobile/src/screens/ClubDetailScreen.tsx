@@ -32,8 +32,19 @@ export function ClubDetailScreen({ route }: NativeStackScreenProps<RootStackPara
   // below never calls setState synchronously.
   const [prevFetch, setPrevFetch] = useState({ clubId, reloadKey });
   if (prevFetch.clubId !== clubId || prevFetch.reloadKey !== reloadKey) {
+    const differentClub = prevFetch.clubId !== clubId;
     setPrevFetch({ clubId, reloadKey });
     setError(null);
+    if (differentClub) {
+      // Route params can change without remounting this screen. Remove all
+      // club-keyed data before the next render to avoid cross-club leakage.
+      setClub(null);
+      setMembers([]);
+      setLeaderboard([]);
+      setMatches([]);
+      setBusy(false);
+      setRefreshing(false);
+    }
   }
 
   useEffect(() => {

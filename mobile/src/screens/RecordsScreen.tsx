@@ -33,8 +33,15 @@ export function RecordsScreen({ route }: NativeStackScreenProps<RootStackParamLi
   // below never calls setState synchronously.
   const [prevFetch, setPrevFetch] = useState({ username, reloadKey });
   if (prevFetch.username !== username || prevFetch.reloadKey !== reloadKey) {
+    const differentPlayer = prevFetch.username !== username;
     setPrevFetch({ username, reloadKey });
     setError(null);
+    if (differentPlayer) {
+      // This instance may be reused by param-driven navigation. Do not show a
+      // previous player's records while the newly requested profile loads.
+      setRecords(null);
+      setRefreshing(false);
+    }
   }
 
   useEffect(() => {

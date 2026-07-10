@@ -1,0 +1,66 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import {
+  applyOpponentPrefill,
+  canSubmitLogMatch,
+  logMatchPrefillKey,
+  PhotoUploadGuard,
+} from '../../mobile/src/utils/logMatchState.ts';
+
+test('free-text opponent prefills clear a previously tagged player id', () => {
+  assert.deepEqual(
+    applyOpponentPrefill(
+      { prefillOpponentName: 'Saturday ladder guest' },
+      { opponentId: 'registered-player', opponentName: 'Old Player' },
+    ),
+    { opponentId: null, opponentName: 'Saturday ladder guest' },
+  );
+});
+
+test('registered-player prefills retain the selected account identity', () => {
+  assert.deepEqual(
+    applyOpponentPrefill(
+      { prefillOpponentId: 'new-player', prefillOpponentName: 'New Player' },
+      { opponentId: 'old-player', opponentName: 'Old Player' },
+    ),
+    { opponentId: 'new-player', opponentName: 'New Player' },
+  );
+  assert.equal(logMatchPrefillKey({ scheduledMatchId: 'schedule-1' }), 'schedule-1');
+});
+
+test('a reset invalidates a late photo upload without affecting the next upload', () => {
+  const guard = new PhotoUploadGuard();
+  const staleToken = guard.begin();
+  assert.equal(typeof staleToken, 'number');
+  assert.equal(guard.begin(), null, 'only one picker/upload may be active');
+
+  guard.invalidate();
+  assert.equal(guard.active, false);
+  assert.equal(guard.accepts(staleToken), false);
+  assert.equal(guard.finish(staleToken), false);
+
+  const currentToken = guard.begin();
+  assert.equal(guard.accepts(currentToken), true);
+  assert.equal(guard.finish(currentToken), true);
+  assert.equal(guard.active, false);
+});
+
+test('submission stays disabled until validation passes and upload work is idle', () => {
+  assert.equal(
+    canSubmitLogMatch({ scoreValid: true, submitting: false, photoUploadActive: false }),
+    true,
+  );
+  assert.equal(
+    canSubmitLogMatch({ scoreValid: true, submitting: false, photoUploadActive: true }),
+    false,
+  );
+  assert.equal(
+    canSubmitLogMatch({ scoreValid: true, submitting: true, photoUploadActive: false }),
+    false,
+  );
+  assert.equal(
+    canSubmitLogMatch({ scoreValid: false, submitting: false, photoUploadActive: false }),
+    false,
+  );
+});

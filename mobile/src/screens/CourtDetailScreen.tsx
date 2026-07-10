@@ -20,37 +20,63 @@ export function CourtDetailScreen({ route, navigation }: Props) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [boardError, setBoardError] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
   // Adjust state during render when the fetch key changes, so the fetch effect
   // below never calls setState synchronously.
   const [prevFetch, setPrevFetch] = useState({ courtId, reloadKey });
   if (prevFetch.courtId !== courtId || prevFetch.reloadKey !== reloadKey) {
+    const differentCourt = prevFetch.courtId !== courtId;
     setPrevFetch({ courtId, reloadKey });
     setError(null);
-    if (!court) setLoading(true); // a pull-to-refresh keeps the screen, not a full loader
+    setBoardError(false);
+    if (differentCourt) {
+      // A route-param update may reuse this instance. Clear every court-keyed
+      // section before rendering so no old venue/controller data can flash.
+      setCourt(null);
+      setController(null);
+      setBoard([]);
+      setRefreshing(false);
+      setLoading(true);
+    } else if (!court) {
+      setLoading(true); // a pull-to-refresh keeps the screen, not a full loader
+    }
   }
 
   useEffect(() => {
     let active = true;
     void (async () => {
+      // Attach both handlers immediately so a quick leaderboard rejection is
+      // contained while the primary court request is still in flight.
+      const leaderboardTask = api.getCourtLeaderboard(courtId).then(
+        (value) => ({ ok: true as const, value }),
+        () => ({ ok: false as const }),
+      );
       try {
-        const [{ court: c, controller: ctrl }, { leaderboard }] = await Promise.all([
-          api.getCourt(courtId),
-          api.getCourtLeaderboard(courtId),
-        ]);
+        const { court: c, controller: ctrl } = await api.getCourt(courtId);
         if (!active) return;
         setCourt(c);
         setController(ctrl);
-        setBoard(leaderboard);
       } catch (e) {
         if (active) setError(e instanceof Error ? e.message : 'Failed to load court');
       } finally {
         if (active) {
           setLoading(false);
-          setRefreshing(false);
         }
       }
+
+      const leaderboardResult = await leaderboardTask;
+      if (!active) return;
+      if (leaderboardResult.ok) {
+        setBoard(leaderboardResult.value.leaderboard);
+        setBoardError(false);
+      } else {
+        // The court itself remains fully usable when this optional section is
+        // offline or the leaderboard endpoint is degraded.
+        setBoardError(true);
+      }
+      setRefreshing(false);
     })();
     return () => {
       active = false;
@@ -115,9 +141,10 @@ export function CourtDetailScreen({ route, navigation }: Props) {
         ) : null}
       </View>
 
-      {board.length === 0 ? (
+      {boardError ? <Muted>Couldn’t refresh the leaderboard. Pull down to try again.</Muted> : null}
+      {board.length === 0 && !boardError ? (
         <Muted>No matches logged here in the last 30 days.</Muted>
-      ) : (
+      ) : board.length > 0 ? (
         board.slice(0, 5).map((e) => {
           const medal = e.rank === 1 ? '🥇' : e.rank === 2 ? '🥈' : e.rank === 3 ? '🥉' : null;
           const isYou = e.user_id === user?.id;
@@ -136,7 +163,7 @@ export function CourtDetailScreen({ route, navigation }: Props) {
             </Pressable>
           );
         })
-      )}
+      ) : null}
     </ScrollView>
   );
 }
