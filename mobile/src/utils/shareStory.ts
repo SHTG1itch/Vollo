@@ -3,9 +3,10 @@ export const STORY_PIXEL_WIDTH = 1080;
 export const STORY_PIXEL_HEIGHT = 1920;
 
 /**
- * react-native-view-shot measures requested dimensions in logical pixels and
- * multiplies them by the device pixel ratio. Convert the desired physical story
- * size so every device emits the same 1080×1920 asset without wasting memory.
+ * React Native view layout uses logical points and is rasterized at the device
+ * pixel ratio. This gives the hidden capture view a 1080×1920 native backing
+ * surface. captureRef intentionally receives no width/height override because
+ * view-shot 4.0.3 applies those options differently on Android and iOS.
  */
 export function storyCaptureSize(pixelRatio: number): { width: number; height: number } {
   const ratio = Number.isFinite(pixelRatio) && pixelRatio > 0 ? pixelRatio : 1;

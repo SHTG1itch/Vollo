@@ -29,7 +29,11 @@ import { MatchShareCard, SHARE_ASPECT, type ShareVariant } from './MatchShareCar
 import { Button } from './ui';
 import { colors, fonts, radius, spacing } from '../theme';
 import type { MatchCard } from '../types';
-import { asFileUri, captureIsReady, storyCaptureSize } from '../utils/shareStory';
+import {
+  asFileUri,
+  captureIsReady,
+  storyCaptureSize,
+} from '../utils/shareStory';
 
 export function ShareStorySheet({
   match,
@@ -60,6 +64,10 @@ export function ShareStorySheet({
   // A new generation remounts the capture target on every open, so cached-image
   // callbacks cannot race the readiness reset and leave sharing disabled.
   const onModalShow = () => {
+    // This component stays mounted between matches. Never let a prior match's
+    // Photo selection survive onto a match that has no photo (which would leave
+    // every visible toggle unselected).
+    setVariant(hasPhoto ? 'photo' : 'court');
     setGeneration((g) => g + 1);
     setNote(null);
   };
@@ -84,8 +92,10 @@ export function ShareStorySheet({
       format: isPng ? 'png' : 'jpg',
       quality: 0.95,
       result,
-      width: captureSize.width,
-      height: captureSize.height,
+      // Do not pass width/height here. In view-shot 4.0.3 Android treats those
+      // as final bitmap pixels while iOS treats them as point dimensions and
+      // applies the screen scale. The hidden DPR-sized view already has an
+      // exact 1080x1920 native backing surface on both platforms.
     });
   }
 
@@ -143,7 +153,10 @@ export function ShareStorySheet({
       {/* The sheet backdrop is near-black — flip to light status icons while
           it's open (reverts automatically when the modal unmounts this). */}
       <StatusBar style="light" />
-      <View style={[styles.backdrop, { paddingTop: insets.top + spacing.sm, paddingBottom: insets.bottom + spacing.lg }]}>
+      <View
+        style={[styles.backdrop, { paddingTop: insets.top + spacing.sm, paddingBottom: insets.bottom + spacing.lg }]}
+        accessibilityViewIsModal
+      >
         <View style={styles.header}>
           <Text style={styles.title}>Share to story</Text>
           <Pressable
@@ -221,6 +234,9 @@ export function ShareStorySheet({
           <Pressable
             onPress={onCopy}
             disabled={!!busy || !canCapture}
+            accessibilityRole="button"
+            accessibilityLabel="Copy story image"
+            accessibilityState={{ disabled: !!busy || !canCapture, busy: busy === 'copy' }}
             style={({ pressed }) => [styles.copyBtn, pressed && { opacity: 0.7 }, (!!busy || !canCapture) && { opacity: 0.5 }]}
           >
             {busy === 'copy' ? (
@@ -231,7 +247,7 @@ export function ShareStorySheet({
           </Pressable>
         </View>
 
-        <Text style={styles.hint} numberOfLines={2}>
+        <Text style={styles.hint} numberOfLines={2} accessibilityLiveRegion="polite">
           {note ??
             (!canCapture
               ? 'Preparing your photo…'
@@ -262,7 +278,7 @@ const styles = StyleSheet.create({
   // laid out — view-shot rasterises the layer, and opacity:0 would blank it.
   captureHost: { position: 'absolute', left: -100000, top: 0 },
   toggle: { flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: radius.md, padding: 3, alignSelf: 'center', marginBottom: spacing.md },
-  toggleItem: { paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, borderRadius: radius.sm },
+  toggleItem: { minHeight: 44, justifyContent: 'center', paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, borderRadius: radius.sm },
   toggleItemActive: { backgroundColor: colors.primary },
   toggleText: { color: 'rgba(255,255,255,0.7)', fontFamily: fonts.bold, fontSize: 13 },
   toggleTextActive: { color: colors.white },
