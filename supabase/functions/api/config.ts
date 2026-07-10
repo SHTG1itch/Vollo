@@ -20,16 +20,20 @@ export const config = {
   env,
 
   database: {
-    // Auto-injected by Supabase into every Edge Function — the direct Postgres
-    // connection string (service role), which bypasses RLS. All data access is
-    // funnelled through this function, so the public REST API stays sealed.
-    url: Deno.env.get('SUPABASE_DB_URL') ?? '',
+    // Prefer a separately-provisioned transaction-pooler URL for deployed Edge
+    // traffic. The auto-injected direct URL remains a zero-config local/fallback
+    // path. Either connection is privileged; public REST stays sealed by RLS.
+    url: Deno.env.get('DATABASE_POOL_URL') ?? Deno.env.get('SUPABASE_DB_URL') ?? '',
   },
 
   geocoder: {
     provider: (Deno.env.get('GEOCODER') ?? 'nominatim') as 'nominatim' | 'geoapify',
     nominatimBaseUrl: Deno.env.get('NOMINATIM_BASE_URL') ?? 'https://nominatim.openstreetmap.org',
-    nominatimUserAgent: Deno.env.get('NOMINATIM_USER_AGENT') ?? 'Vollo/0.1',
+    nominatimUserAgent: Deno.env.get('NOMINATIM_USER_AGENT') ?? 'Vollo/1.0 (app.vollo.mobile)',
+    // The public service has an application-wide absolute ceiling of one
+    // request per second. The database-backed lease in geocoding.ts enforces
+    // this across every Edge isolate; never allow configuration below 1s.
+    nominatimMinIntervalMs: Math.max(1_000, num(Deno.env.get('NOMINATIM_MIN_INTERVAL_MS'), 1_100)),
     geoapifyApiKey: Deno.env.get('GEOAPIFY_API_KEY') ?? '',
   },
 

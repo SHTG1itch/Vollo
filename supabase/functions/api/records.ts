@@ -42,7 +42,12 @@ export interface YearInReview {
  * counted-only rule as everything else; the year boundary is the viewer's
  * local time via tzOffset (minutes behind UTC).
  */
-export async function getYearInReview(userId: string, year: number, tzOffset: number): Promise<YearInReview> {
+export async function getYearInReview(
+  userId: string,
+  year: number,
+  tzOffset: number,
+  viewerId: string | null,
+): Promise<YearInReview> {
   // All queries share the same local-time year window.
   const WIN = `m.user_id = $1 AND m.${COUNTED}
     AND m.played_at - make_interval(mins => $3) >= make_date($2, 1, 1)::timestamp
@@ -70,8 +75,13 @@ export async function getYearInReview(userId: string, year: number, tzOffset: nu
   const kudos = await queryOne<{ c: string }>(
     `SELECT COUNT(*) AS c
        FROM kudos k JOIN matches m ON m.id = k.match_id
-      WHERE ${WIN}`,
-    params,
+      WHERE ${WIN}
+        AND (k.user_id = $4 OR NOT EXISTS (
+          SELECT 1 FROM blocks b
+           WHERE (b.blocker_id = $4 AND b.blocked_id = k.user_id)
+              OR (b.blocker_id = k.user_id AND b.blocked_id = $4)
+        ))`,
+    [...params, viewerId],
   );
 
   const monthlyRows = await query<{ month: string; matches: string; wins: string }>(
@@ -95,8 +105,25 @@ export async function getYearInReview(userId: string, year: number, tzOffset: nu
             COUNT(*) FILTER (WHERE m.result = 'loss') AS losses
        FROM matches m LEFT JOIN users ou ON ou.id = m.opponent_id
       WHERE ${WIN} AND COALESCE(ou.display_name, m.opponent_name) IS NOT NULL
+        AND (
+          m.opponent_id IS NULL OR m.user_id = $4
+          OR (
+            NOT EXISTS (
+              SELECT 1 FROM blocks b
+               WHERE (b.blocker_id = $4 AND b.blocked_id = m.opponent_id)
+                  OR (b.blocker_id = m.opponent_id AND b.blocked_id = $4)
+            )
+            AND (
+              NOT ou.is_private
+              OR EXISTS (
+                SELECT 1 FROM follows f
+                 WHERE f.follower_id = $4 AND f.following_id = m.opponent_id
+              )
+            )
+          )
+        )
       GROUP BY 1 ORDER BY COUNT(*) DESC, 1 ASC LIMIT 1`,
-    params,
+    [...params, viewerId],
   );
 
   const favoriteCourt = await queryOne<{ court_id: string; name: string; matches: string }>(

@@ -39,7 +39,7 @@ secret    = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET)"
 skip_nonce_check = false
 
 [auth.external.apple]
-enabled = true
+enabled = false
 # For NATIVE iOS sign-in, the id token's audience is the app bundle id
 # (app.vollo.mobile) — add it to Apple → "Authorized Client IDs" in the
 # dashboard. A Services ID + signing key is only needed for the web/Android leg.

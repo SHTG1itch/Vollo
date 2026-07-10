@@ -371,13 +371,16 @@ async function homeReference(
 }
 
 /** The current rank-1 controller of a court (for capturing pre-match state). */
-export async function getCourtController(courtId: string): Promise<string | null> {
-  const row = await queryOne<{ user_id: string }>(
+export async function getCourtController(
+  courtId: string,
+  db: Queryable = pool,
+): Promise<string | null> {
+  const { rows } = await db.query<{ user_id: string }>(
     `SELECT user_id FROM court_leaderboard WHERE court_id = $1 AND rank = 1 AND score > 0
      ORDER BY score DESC LIMIT 1`,
     [courtId],
   );
-  return row?.user_id ?? null;
+  return rows[0]?.user_id ?? null;
 }
 
 // The dominant player's confirmed wins across the courts in this territory over

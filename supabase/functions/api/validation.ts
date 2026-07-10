@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isGoogleAvatarUrl } from './mediaOwnership.ts';
 
 export const surfaceSchema = z.enum(['hard', 'clay', 'grass', 'indoor']);
 
@@ -7,25 +8,26 @@ export const surfaceSchema = z.enum(['hard', 'clay', 'grass', 'indoor']);
 // persisting arbitrary origins would let a client embed tracking pixels or
 // later-swappable third-party content into every viewer's feed and profile.
 const SUPABASE_URL = (Deno.env.get('SUPABASE_URL') ?? '').replace(/\/$/, '');
-function isAllowedMediaUrl(v: string): boolean {
+function isVolloMediaUrl(v: string): boolean {
   const isStorage = SUPABASE_URL
     ? v.startsWith(`${SUPABASE_URL}/storage/v1/object/`)
     : /^https:\/\/[a-z0-9-]+\.supabase\.co\/storage\/v1\/object\//.test(v);
-  if (isStorage) return true;
-  try {
-    const u = new URL(v);
-    if (u.protocol !== 'https:') return false;
-    return u.hostname === 'googleusercontent.com' || u.hostname.endsWith('.googleusercontent.com');
-  } catch {
-    return false;
-  }
+  return isStorage;
 }
-const mediaUrlSchema = z
+const volloMediaUrlSchema = z
   .string()
   .trim()
   .url()
   .max(500)
-  .refine(isAllowedMediaUrl, { message: 'URL must point to Vollo media storage' });
+  .refine(isVolloMediaUrl, { message: 'URL must point to Vollo media storage' });
+const profileAvatarUrlSchema = z
+  .string()
+  .trim()
+  .url()
+  .max(500)
+  .refine((value) => isVolloMediaUrl(value) || isGoogleAvatarUrl(value), {
+    message: 'URL must point to Vollo media storage or a Google avatar',
+  });
 
 // Server-side sign-in proxy: the client posts a username (or email) + password and
 // we resolve the email internally, so the email never travels back to the client.
@@ -85,7 +87,7 @@ export const createMatchSchema = z
     title: z.string().trim().max(80).optional(),
     // A single proof-of-play photo (the scoreboard, the court). Public URL the
     // client uploaded to Storage; the edge function only persists the string.
-    photo_url: mediaUrlSchema.optional(),
+    photo_url: volloMediaUrlSchema.optional(),
     rpe_index: z.number().int().min(1).max(10).optional(),
     duration_minutes: z.number().int().min(1).max(600).optional(),
     notes: z.string().trim().max(500).optional(),
@@ -124,11 +126,26 @@ export const createMatchSchema = z
     }
   });
 
+export const matchMediaDraftSchema = z.object({
+  object_path: z.string().regex(
+    /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\/match\/[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\.jpg$/i,
+    'object_path must be an owned match-photo draft path',
+  ),
+});
+
+export const profileMediaDraftSchema = z.object({
+  object_path: z.string().regex(
+    /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\/profile\/(?:avatar|cover)-[A-Za-z0-9][A-Za-z0-9._-]{0,199}\.jpg$/i,
+    'object_path must be an owned profile-photo draft path',
+  ),
+});
+
 // ─── Scheduled matches ──────────────────────────────────────────────────────
 const SCHEDULE_MAX_AHEAD_MS = 365 * 86_400_000; // a year out is plenty
 
 export const createScheduledMatchSchema = z
   .object({
+    client_key: z.string().uuid().optional(),
     opponent_id: z.string().uuid().optional(),
     opponent_name: z.string().trim().max(60).optional(),
     court_id: z.string().uuid().optional(),
@@ -166,6 +183,7 @@ export const verifyMatchSchema = z.object({
 });
 
 export const createCourtSchema = z.object({
+  client_key: z.string().uuid().optional(),
   name: z.string().trim().min(1).max(120),
   description: z.string().trim().max(500).optional(),
   surface: surfaceSchema.default('hard'),
@@ -200,8 +218,9 @@ export const equipmentSchema = z
 export const updateProfileSchema = z.object({
   display_name: z.string().trim().min(1).max(60).optional(),
   bio: z.string().trim().max(280).optional(),
-  avatar_url: mediaUrlSchema.optional(),
-  cover_url: mediaUrlSchema.optional(),
+  // Explicit null clears a saved image; omission leaves it unchanged.
+  avatar_url: profileAvatarUrlSchema.nullable().optional(),
+  cover_url: volloMediaUrlSchema.nullable().optional(),
   dominant_hand: z.enum(['right', 'left']).optional(),
   // Signature colour as #RRGGBB. Empty string clears it back to "unset" so the
   // client can reset to the default hashed hue.
@@ -212,12 +231,15 @@ export const updateProfileSchema = z.object({
     .refine((v) => v === null || /^#[0-9A-Fa-f]{6}$/.test(v), { message: 'color must be a #RRGGBB hex string' })
     .nullable()
     .optional(),
+  // Explicit null clears both the point and its label atomically; omission is
+  // a no-op. This distinction is required for a reliable profile editor.
   home: z
     .object({
       lat: z.number().min(-90).max(90),
       lng: z.number().min(-180).max(180),
       label: z.string().trim().max(160).optional(),
     })
+    .nullable()
     .optional(),
   equipment: equipmentSchema.optional(),
   // Private account: matches/stats visible only to followers (see 021).
@@ -242,6 +264,7 @@ export const yearQuerySchema = z.object({
 
 // ─── Clubs ──────────────────────────────────────────────────────────────────
 export const createClubSchema = z.object({
+  client_key: z.string().uuid().optional(),
   name: z.string().trim().min(3).max(60),
   description: z.string().trim().max(280).optional(),
   city: z.string().trim().max(120).optional(),
@@ -292,14 +315,12 @@ const boolParam = (def: boolean) =>
 // Discovery imports real-world courts within a map viewport. Reuses the bbox
 // shape but requires all four corners (a viewport is never partial).
 //   import=0 → return DB courts only (instant first paint, no Overpass call)
-//   force=1  → bypass the per-viewport import cache (used by the backfill)
 export const discoverQuerySchema = z.object({
   min_lng: z.coerce.number().min(-180).max(180),
   min_lat: z.coerce.number().min(-90).max(90),
   max_lng: z.coerce.number().min(-180).max(180),
   max_lat: z.coerce.number().min(-90).max(90),
   import: boolParam(true),
-  force: boolParam(false),
 });
 
 export const reverseGeocodeQuerySchema = z.object({

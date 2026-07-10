@@ -47,6 +47,8 @@ const ENDPOINTS = [
 
 const TIMEOUT_MS = 20_000;
 const MAX_PITCHES = 600; // a metro tile rarely holds more; guards payload size
+const MAX_ELEMENTS = 5000;
+const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 // Unnamed, uncontained pitches within this distance fold into one facility
 // (single-linkage). Most real multi-court venues sit well inside this.
 const CLUSTER_KM = 0.14; // 140 m
@@ -190,15 +192,68 @@ async function fetchFrom(endpoint: string, ql: string): Promise<OsmElement[]> {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
-      'User-Agent': 'Vollo/0.1 (tennis court discovery)',
+      'User-Agent': 'Vollo/1.0 (tennis court discovery)',
       Accept: 'application/json',
     },
     body: 'data=' + encodeURIComponent(ql),
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`overpass ${endpoint} responded ${res.status}`);
-  const json = (await res.json()) as { elements?: OsmElement[] };
-  return json.elements ?? [];
+
+  const declaredLength = res.headers.get('content-length');
+  if (declaredLength && /^\d+$/.test(declaredLength) && Number(declaredLength) > MAX_RESPONSE_BYTES) {
+    await res.body?.cancel();
+    throw new Error(`overpass ${endpoint} response exceeds ${MAX_RESPONSE_BYTES} bytes`);
+  }
+  if (!res.body) throw new Error(`overpass ${endpoint} returned an empty response`);
+
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_RESPONSE_BYTES) {
+        await reader.cancel('response too large');
+        throw new Error(`overpass ${endpoint} response exceeds ${MAX_RESPONSE_BYTES} bytes`);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  let json: unknown;
+  try {
+    json = JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    throw new Error(`overpass ${endpoint} returned invalid JSON`);
+  }
+  if (!json || typeof json !== 'object' || !Array.isArray((json as { elements?: unknown }).elements)) {
+    throw new Error(`overpass ${endpoint} returned an invalid element list`);
+  }
+  const elements = (json as { elements: unknown[] }).elements;
+  if (elements.length > MAX_ELEMENTS) {
+    throw new Error(`overpass ${endpoint} returned more than ${MAX_ELEMENTS} elements`);
+  }
+  return elements.filter((value): value is OsmElement => {
+    if (!value || typeof value !== 'object') return false;
+    const element = value as Partial<OsmElement>;
+    return (
+      (element.type === 'node' || element.type === 'way' || element.type === 'relation')
+      && typeof element.id === 'number'
+      && Number.isSafeInteger(element.id)
+    );
+  });
 }
 
 /** Ray-casting point-in-polygon over a [lng,lat] ring. */

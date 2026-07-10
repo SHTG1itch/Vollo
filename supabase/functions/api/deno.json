@@ -3,6 +3,7 @@
     "hono": "npm:hono@4.12.28",
     "hono/cors": "npm:hono@4.12.28/cors",
     "hono/body-limit": "npm:hono@4.12.28/body-limit",
+    "hono/secure-headers": "npm:hono@4.12.28/secure-headers",
     "postgres": "npm:postgres@3.4.9",
     "zod": "npm:zod@3.25.76",
     "@supabase/supabase-js": "npm:@supabase/supabase-js@2.108.2"

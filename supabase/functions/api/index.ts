@@ -11,6 +11,7 @@
 import { Hono, type Context, type MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { cors } from 'hono/cors';
+import { secureHeaders } from 'hono/secure-headers';
 import { ZodError } from 'zod';
 
 import { query, queryOne, withTransaction, getSecret, type Queryable } from './db.ts';
@@ -21,7 +22,7 @@ import {
   bboxQuerySchema, calendarQuerySchema, clubsQuerySchema, commentSchema, commentsQuerySchema,
   courtsQuerySchema, createClubSchema, createCourtSchema, createMatchSchema, createScheduledMatchSchema,
   discoverQuerySchema, feedQuerySchema, followRequestActionSchema,
-  geocodeQuerySchema, loginSchema, notificationIdsSchema, pushTokenSchema,
+  geocodeQuerySchema, loginSchema, matchMediaDraftSchema, notificationIdsSchema, profileMediaDraftSchema, pushTokenSchema,
   reverseGeocodeQuerySchema, setGoalSchema, updateProfileSchema, updateScheduledMatchSchema,
   userSearchQuerySchema, verifyMatchSchema, yearQuerySchema,
 } from './validation.ts';
@@ -32,14 +33,21 @@ import { recomputeUserRatings, getRatings } from './rating.ts';
 import { evaluateAchievements, getAchievements } from './achievements.ts';
 import { getCourtController, recomputeAfterMatch, getUserTerritories, listTerritories } from './territory.ts';
 import { notify } from './notifications.ts';
-import { geocode, reverseGeocode } from './geocoding.ts';
+import {
+  GeocoderBusyError,
+  allowsAutomatedGeocoding,
+  geocode,
+  reverseGeocode,
+} from './geocoding.ts';
 import { fetchOverpassSectors, type OverpassSector } from './overpass.ts';
 import { getProfileAnalytics, getHeadToHead } from './analytics.ts';
 import { getPersonalRecords, getYearInReview } from './records.ts';
 import { runStreakSweep, runTerritorySweep, runCourtNameSweep, runRatingSweep } from './sweeps.ts';
+import { processMediaCleanupJobs } from './mediaCleanup.ts';
+import { isGoogleAvatarUrl, isOwnedUserMediaUrl, ownedUserMediaPathFromUrl } from './mediaOwnership.ts';
 import type { AuthClaims, LeaderboardEntry, MatchCard, MatchStats, Surface } from './types.ts';
 
-type Env = { Variables: { user?: AuthClaims } };
+type Env = { Variables: { user?: AuthClaims; requestId: string } };
 
 const USER_SELECT = `
   id, username, email, display_name, avatar_url, cover_url, bio, dominant_hand, color,
@@ -56,10 +64,28 @@ async function jsonBody<T = Record<string, unknown>>(c: Context): Promise<T> {
   }
 }
 
+const UUID_RE = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+
+/** Reject malformed UUID path values at the HTTP boundary. Letting PostgreSQL
+ * cast attacker-controlled text would turn a client 400 into a noisy 500. */
+function uuidParam(c: Context, name = 'id'): string {
+  const value = c.req.param(name);
+  if (typeof value !== 'string' || !UUID_RE.test(value)) {
+    throw ApiError.badRequest(`${name} must be a valid UUID`);
+  }
+  return value;
+}
+
 function uid(c: Context<Env>): string {
   const u = c.get('user');
   if (!u) throw ApiError.unauthorized();
   return u.sub;
+}
+
+function authUid(c: Context<Env>): string {
+  const user = c.get('user');
+  if (!user) throw ApiError.unauthorized();
+  return user.auth_id;
 }
 
 interface AuthResult {
@@ -97,7 +123,11 @@ async function authFromHeader(c: Context): Promise<AuthResult> {
       [data.user.id],
     );
     if (!row) return { claims: null, hadToken: true, transient: false };
-    return { claims: { sub: row.id, username: row.username }, hadToken: true, transient: false };
+    return {
+      claims: { sub: row.id, username: row.username, auth_id: data.user.id },
+      hadToken: true,
+      transient: false,
+    };
   } catch {
     // Threw before we could decide (GoTrue network error, DB error) — transient.
     return { claims: null, hadToken: true, transient: true };
@@ -131,10 +161,26 @@ const optionalAuth: MiddlewareHandler<Env> = async (c, next) => {
 // is the only client, so this is just an abuse backstop, not a strict quota.
 function makeLimiter(windowMs: number, max: number) {
   const buckets = new Map<string, { count: number; resetAt: number }>();
+  const maxBuckets = 4_096;
+  let calls = 0;
   return (key: string): boolean => {
     const now = Date.now();
+    // Edge isolates are long-lived enough for a rotating-IP attack to grow an
+    // otherwise unbounded Map. Periodically reap expired entries and cap the
+    // remainder; eviction can only relax this best-effort local backstop, while
+    // the durable login limiter remains authoritative across isolates.
+    calls += 1;
+    if (calls % 256 === 0) {
+      for (const [bucketKey, bucket] of buckets) {
+        if (bucket.resetAt <= now) buckets.delete(bucketKey);
+      }
+    }
     let b = buckets.get(key);
     if (!b || b.resetAt <= now) {
+      if (!b && buckets.size >= maxBuckets) {
+        const oldestKey = buckets.keys().next().value as string | undefined;
+        if (oldestKey !== undefined) buckets.delete(oldestKey);
+      }
       b = { count: 0, resetAt: now + windowMs };
       buckets.set(key, b);
     }
@@ -152,11 +198,17 @@ const geocodeLimiterFn = makeLimiter(60_000, 30);
 // from getting Overpass-banned, which would break court discovery for everyone.
 const discoverLimiterFn = makeLimiter(60_000, 40);
 function clientIp(c: Context): string {
-  // Take the LAST x-forwarded-for hop: it's the one appended by Supabase's own
-  // gateway. The first entry is client-controlled — keying limiters on it would
-  // let an attacker rotate a fake header to dodge every IP throttle.
+  // Supabase documents the first X-Forwarded-For entry as the original client
+  // address. Using the final proxy hop would collapse unrelated callers behind
+  // the edge gateway into one throttle bucket.
   const hops = c.req.header('x-forwarded-for')?.split(',') ?? [];
-  return hops.at(-1)?.trim() || 'unknown';
+  return hops[0]?.trim().slice(0, 128) || 'unknown';
+}
+
+async function opaqueThrottleKey(prefix: string, value: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  const hex = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+  return `${prefix}:${hex}`;
 }
 
 /** Escape ILIKE wildcards in user-supplied search text so `%`/`_` match
@@ -234,6 +286,7 @@ function decodeCursor(raw: string): Cursor {
     if (
       typeof parsed?.t === 'string' &&
       typeof parsed?.id === 'string' &&
+      UUID_RE.test(parsed.id) &&
       !Number.isNaN(new Date(parsed.t).getTime())
     ) {
       return { t: parsed.t, id: parsed.id };
@@ -264,6 +317,7 @@ function fullStats(partial?: Partial<MatchStats>): MatchStats {
 async function fetchMatchCard(matchId: string, viewerId: string | null) {
   const row = await queryOne<Record<string, unknown>>(
     `SELECT mf.*,
+            ${visibleMatchSocialColumns('$2')},
             CASE WHEN $2::uuid IS NULL THEN false
                  ELSE EXISTS(SELECT 1 FROM kudos k WHERE k.match_id = mf.id AND k.user_id = $2)
             END AS viewer_has_kudos
@@ -316,6 +370,61 @@ async function assertCanViewContent(targetId: string, viewerId: string | null): 
   if (access.restricted) throw new ApiError(403, 'private_profile', 'This profile is private');
 }
 
+/** SQL predicate implementing the symmetric block boundary for one visible
+ * user row. A null viewer is anonymous and therefore has no block graph. */
+function mutuallyVisibleCondition(viewerParam: string, userCol: string): string {
+  return `(${userCol} = ${viewerParam} OR NOT EXISTS(
+    SELECT 1 FROM blocks bv
+     WHERE (bv.blocker_id = ${viewerParam} AND bv.blocked_id = ${userCol})
+        OR (bv.blocker_id = ${userCol} AND bv.blocked_id = ${viewerParam})))`;
+}
+
+/** Viewer-specific social totals. The match_feed view intentionally stores raw
+ * aggregate counts; blocked actors must be removed at the API boundary. */
+function visibleMatchSocialColumns(viewerParam: string): string {
+  return `
+    (SELECT COUNT(*) FROM kudos vk
+      WHERE vk.match_id = mf.id AND ${mutuallyVisibleCondition(viewerParam, 'vk.user_id')})
+      AS visible_kudos_count,
+    (SELECT COUNT(*) FROM comments vc
+      WHERE vc.match_id = mf.id AND ${mutuallyVisibleCondition(viewerParam, 'vc.user_id')})
+      AS visible_comment_count`;
+}
+
+/** Lock both profile rows in stable UUID order before changing their social
+ * relationship. Follow, request, block, and unblock requests therefore cannot
+ * pass stale pre-checks and commit contradictory states. */
+async function lockSocialPair(client: Queryable, leftId: string, rightId: string): Promise<void> {
+  // Match the database trigger/FK lock order: pair advisory first, profile rows
+  // second. Re-acquiring the same xact advisory lock inside an INSERT trigger is
+  // safe and avoids a direct-SQL write deadlocking an API relationship request.
+  await client.query('SELECT public.lock_social_pair($1, $2)', [leftId, rightId]);
+  const { rows } = await client.query<{ id: string }>(
+    `SELECT id FROM users
+      WHERE id = $1 OR id = $2
+      ORDER BY id
+      FOR UPDATE`,
+    [leftId, rightId],
+  );
+  if (rows.length !== 2) throw ApiError.notFound('User not found');
+}
+
+async function socialPairIsBlocked(
+  client: Queryable,
+  leftId: string,
+  rightId: string,
+): Promise<boolean> {
+  const { rows } = await client.query<{ blocked: boolean }>(
+    `SELECT EXISTS(
+       SELECT 1 FROM blocks
+        WHERE (blocker_id = $1 AND blocked_id = $2)
+           OR (blocker_id = $2 AND blocked_id = $1)
+     ) AS blocked`,
+    [leftId, rightId],
+  );
+  return Boolean(rows[0]?.blocked);
+}
+
 /**
  * SQL fragments that hide matches the viewer may not see, matching
  * assertCanViewContent: no block in either direction, and private authors only
@@ -325,10 +434,18 @@ async function assertCanViewContent(targetId: string, viewerId: string | null): 
  */
 function matchVisibilityConditions(viewerParam: string, authorCol: string): string[] {
   return [
-    `(${authorCol} = ${viewerParam} OR NOT EXISTS(
-        SELECT 1 FROM blocks b
-         WHERE (b.blocker_id = ${viewerParam} AND b.blocked_id = ${authorCol})
-            OR (b.blocker_id = ${authorCol} AND b.blocked_id = ${viewerParam})))`,
+    mutuallyVisibleCondition(viewerParam, authorCol),
+    // A registered opponent's identity appears on the card too. Participants
+    // retain their own record, while third parties must pass both block graphs.
+    `(mf.opponent_id IS NULL OR mf.user_id = ${viewerParam} OR mf.opponent_id = ${viewerParam}
+       OR ${mutuallyVisibleCondition(viewerParam, 'mf.opponent_id')})`,
+    // A verified registered opponent is part of the activity, not merely free
+    // text. Their private-account boundary must therefore protect the shared
+    // match from third parties just as the author's boundary does.
+    `(mf.opponent_id IS NULL OR mf.user_id = ${viewerParam} OR mf.opponent_id = ${viewerParam}
+       OR NOT (SELECT ou.is_private FROM users ou WHERE ou.id = mf.opponent_id)
+       OR EXISTS(SELECT 1 FROM follows ofl
+                  WHERE ofl.follower_id = ${viewerParam} AND ofl.following_id = mf.opponent_id))`,
     `(${authorCol} = ${viewerParam}
        OR NOT (SELECT u.is_private FROM users u WHERE u.id = ${authorCol})
        OR EXISTS(SELECT 1 FROM follows f WHERE f.follower_id = ${viewerParam} AND f.following_id = ${authorCol}))`,
@@ -397,7 +514,22 @@ async function applyMatchEffects(
 // ════════════════════════════════════════════════════════════════════════
 const app = new Hono<Env>();
 
-app.use('*', cors({ exposeHeaders: ['Retry-After'] }));
+app.use('*', cors({
+  origin: '*',
+  allowHeaders: ['Authorization', 'Content-Type', 'X-Client-Info', 'apikey'],
+  exposeHeaders: ['Retry-After', 'X-Request-Id'],
+  maxAge: 600,
+}));
+app.use('*', secureHeaders());
+app.use('*', async (c, next) => {
+  // Generate this at the trust boundary rather than reflecting a caller value.
+  // It ties a generic client 500 to one sanitized server log without exposing
+  // tokens, request bodies, emails, or other private data.
+  const requestId = crypto.randomUUID();
+  c.set('requestId', requestId);
+  c.header('X-Request-Id', requestId);
+  await next();
+});
 app.use('*', bodyLimit({
   maxSize: 64 * 1024,
   onError: (c) => c.json({
@@ -409,7 +541,18 @@ app.use('*', bodyLimit({
 const globalLimiter = makeLimiter(60_000, 200);
 app.use('/api/*', async (c, next) => {
   if (!globalLimiter(clientIp(c))) throw ApiError.tooManyRequests();
+  // Apply before dispatch so authentication failures and unexpected errors get
+  // the same cache protection as successful viewer-specific responses.
+  const suppliedAuth = c.req.header('Authorization') ?? c.req.header('authorization');
+  if (suppliedAuth || c.req.path.startsWith('/api/auth/') || c.req.path.startsWith('/api/internal/')) {
+    c.header('Cache-Control', 'no-store');
+  }
   await next();
+  // Tokens and viewer-specific payloads must never be stored by a browser,
+  // shared proxy, or an over-eager intermediary cache.
+  if (c.get('user')) {
+    c.header('Cache-Control', 'no-store');
+  }
 });
 
 app.get('/api', (c) => c.json({ name: 'Vollo API', status: 'ok', runtime: 'supabase-edge' }));
@@ -455,7 +598,11 @@ app.post('/api/auth/login', async (c) => {
       : 'SELECT id, email FROM users WHERE username = $1',
     [identifier],
   );
-  const accountKey = account ? `account:${account.id}` : `id:${normalizedIdentifier}`;
+  // Unknown identifiers are attacker-controlled and may themselves be private
+  // data. Keep only a stable hash in the durable throttle table.
+  const accountKey = account
+    ? `account:${account.id}`
+    : await opaqueThrottleKey('id', normalizedIdentifier);
   // Throttle on both source IP and canonical target account, so neither a
   // single-IP spray nor a distributed attack on one account gets free tries.
   const throttleKeys = [`ip:${clientIp(c)}`, accountKey];
@@ -529,6 +676,7 @@ app.get('/api/feed', optionalAuth, async (c) => {
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
   const rows = await query<Record<string, unknown>>(
     `SELECT mf.*,
+            ${visibleMatchSocialColumns('$1')},
             CASE WHEN $1::uuid IS NULL THEN false
                  ELSE EXISTS(SELECT 1 FROM kudos k WHERE k.match_id = mf.id AND k.user_id = $1)
             END AS viewer_has_kudos
@@ -546,8 +694,9 @@ app.get('/api/feed', optionalAuth, async (c) => {
 app.get('/api/feed/user/:userId', optionalAuth, async (c) => {
   const { limit, before } = feedQuerySchema.parse(c.req.query());
   const viewerId = c.get('user')?.sub ?? null;
-  await assertCanViewContent(c.req.param('userId'), viewerId);
-  const params: unknown[] = [viewerId, c.req.param('userId')];
+  const targetId = uuidParam(c, 'userId');
+  await assertCanViewContent(targetId, viewerId);
+  const params: unknown[] = [viewerId, targetId];
   let p = params.length;
   let extra = '';
   if (before) {
@@ -559,6 +708,7 @@ app.get('/api/feed/user/:userId', optionalAuth, async (c) => {
   const limitIdx = ++p;
   const rows = await query<Record<string, unknown>>(
     `SELECT mf.*,
+            ${visibleMatchSocialColumns('$1')},
             CASE WHEN $1::uuid IS NULL THEN false
                  ELSE EXISTS(SELECT 1 FROM kudos k WHERE k.match_id = mf.id AND k.user_id = $1)
             END AS viewer_has_kudos
@@ -661,9 +811,102 @@ async function lockScheduledMatchForCreate(
   return scheduled;
 }
 
+// Register media paths before their bytes are uploaded. If the app is killed
+// before the owning write consumes one, the worker removes it after 24 hours.
+async function registerMediaDraft(ownerAuthId: string, objectPath: string): Promise<void> {
+  await withTransaction(async (client) => {
+    await client.query(
+      `SELECT pg_advisory_xact_lock(hashtextextended('vollo-media-draft:' || $1, 0))`,
+      [ownerAuthId],
+    );
+    const { rows } = await client.query<{ already_registered: boolean; draft_count: string }>(
+      `SELECT
+         EXISTS (
+           SELECT 1 FROM media_object_cleanup_jobs
+            WHERE object_path = $1 AND auth_id = $2 AND reason = 'draft'
+         ) AS already_registered,
+         (COUNT(*) FILTER (WHERE reason = 'draft'))::text AS draft_count
+       FROM media_object_cleanup_jobs
+       WHERE auth_id = $2`,
+      [objectPath, ownerAuthId],
+    );
+    if (!rows[0]?.already_registered && Number(rows[0]?.draft_count ?? 0) >= 20) {
+      throw ApiError.tooManyRequests('Too many unfinished photo drafts; try again after cleanup');
+    }
+    await client.query(
+      `INSERT INTO media_object_cleanup_jobs
+         (object_path, auth_id, reason, attempts, next_attempt_at, locked_until, last_error)
+       VALUES ($1, $2, 'draft', 0, clock_timestamp() + interval '24 hours', NULL, NULL)
+       ON CONFLICT (object_path) DO UPDATE SET
+         auth_id = EXCLUDED.auth_id,
+         reason = 'draft',
+         attempts = 0,
+         next_attempt_at = EXCLUDED.next_attempt_at,
+         locked_until = NULL,
+         last_error = NULL,
+         updated_at = clock_timestamp()`,
+      [objectPath, ownerAuthId],
+    );
+  });
+}
+
+async function discardMediaDraft(ownerAuthId: string, objectPath: string): Promise<void> {
+  await query(
+    `DELETE FROM media_object_cleanup_jobs
+      WHERE object_path = $1 AND auth_id = $2 AND reason = 'draft'`,
+    [objectPath, ownerAuthId],
+  );
+}
+
+app.post('/api/media/match-drafts', requireAuth, async (c) => {
+  const ownerAuthId = authUid(c);
+  const { object_path: objectPath } = matchMediaDraftSchema.parse(await jsonBody(c));
+  if (!objectPath.startsWith(`${ownerAuthId}/match/`)) {
+    throw ApiError.badRequest('Match photo draft must belong to your media folder');
+  }
+  await registerMediaDraft(ownerAuthId, objectPath);
+  return c.json({ ok: true }, 201);
+});
+
+app.delete('/api/media/match-drafts', requireAuth, async (c) => {
+  const ownerAuthId = authUid(c);
+  const { object_path: objectPath } = matchMediaDraftSchema.parse(await jsonBody(c));
+  if (!objectPath.startsWith(`${ownerAuthId}/match/`)) {
+    throw ApiError.badRequest('Match photo draft must belong to your media folder');
+  }
+  await discardMediaDraft(ownerAuthId, objectPath);
+  return c.body(null, 204);
+});
+
+app.post('/api/media/profile-drafts', requireAuth, async (c) => {
+  const ownerAuthId = authUid(c);
+  const { object_path: objectPath } = profileMediaDraftSchema.parse(await jsonBody(c));
+  if (!objectPath.startsWith(`${ownerAuthId}/profile/`)) {
+    throw ApiError.badRequest('Profile photo draft must belong to your media folder');
+  }
+  await registerMediaDraft(ownerAuthId, objectPath);
+  return c.json({ ok: true }, 201);
+});
+
+app.delete('/api/media/profile-drafts', requireAuth, async (c) => {
+  const ownerAuthId = authUid(c);
+  const { object_path: objectPath } = profileMediaDraftSchema.parse(await jsonBody(c));
+  if (!objectPath.startsWith(`${ownerAuthId}/profile/`)) {
+    throw ApiError.badRequest('Profile photo draft must belong to your media folder');
+  }
+  await discardMediaDraft(ownerAuthId, objectPath);
+  return c.body(null, 204);
+});
+
 app.post('/api/matches', requireAuth, async (c) => {
   const userId = uid(c);
   const body = createMatchSchema.parse(await jsonBody(c)) as CreateMatchInput;
+  const matchPhotoPath = body.photo_url
+    ? ownedUserMediaPathFromUrl(body.photo_url, authUid(c), 'match')
+    : null;
+  if (body.photo_url && !matchPhotoPath) {
+    throw ApiError.badRequest('Match photo must belong to your Vollo media folder');
+  }
 
   let analysis;
   try {
@@ -676,35 +919,28 @@ app.post('/api/matches', requireAuth, async (c) => {
     throw ApiError.badRequest('You cannot log a match against yourself');
   }
 
-  if (body.opponent_id) {
-    // A block in either direction makes the players mutually invisible — you
-    // can't tag someone who blocked you (404 so the block is never revealed).
-    if ((await profileAccess(body.opponent_id, userId)).blocked) {
-      throw ApiError.notFound('User not found');
-    }
-    // Cap unanswered tags per opponent: each pending match lands in the
-    // opponent's verify queue and fires a push, so unbounded tagging is a
-    // harassment vector.
-    const pending = await queryOne<{ c: string }>(
-      `SELECT COUNT(*) AS c FROM matches
-        WHERE user_id = $1 AND opponent_id = $2 AND verification_status = 'pending'`,
-      [userId, body.opponent_id],
-    );
-    if (Number(pending?.c ?? 0) >= 3) {
-      throw ApiError.tooManyRequests('You already have matches awaiting this player’s confirmation');
-    }
-  }
-
   // Client-supplied idempotency key: a timed-out request the app retries must
   // not double-log (double Elo, double streak). The partial unique index on
   // (user_id, client_key) makes the second insert collide; we return the
   // original match instead.
   if (body.client_key) {
-    const dupe = await queryOne<{ id: string }>(
-      'SELECT id FROM matches WHERE user_id = $1 AND client_key = $2',
+    const dupe = await queryOne<{ id: string; photo_url: string | null }>(
+      'SELECT id, photo_url FROM matches WHERE user_id = $1 AND client_key = $2',
       [userId, body.client_key],
     );
-    if (dupe) return c.json({ match: await fetchMatchCard(dupe.id, userId) }, 200);
+    if (dupe) {
+      const existingPhotoPath = dupe.photo_url
+        ? ownedUserMediaPathFromUrl(dupe.photo_url, authUid(c), 'match')
+        : null;
+      if (matchPhotoPath && matchPhotoPath === existingPhotoPath) {
+        await query(
+          `DELETE FROM media_object_cleanup_jobs
+            WHERE object_path = $1 AND auth_id = $2 AND reason = 'draft'`,
+          [matchPhotoPath, authUid(c)],
+        );
+      }
+      return c.json({ match: await fetchMatchCard(dupe.id, userId) }, 200);
+    }
   }
 
   const playedAt = body.played_at ?? new Date().toISOString();
@@ -722,6 +958,25 @@ app.post('/api/matches', requireAuth, async (c) => {
   let matchId: string;
   try {
     matchId = await withTransaction(async (client) => {
+    if (body.opponent_id) {
+      // Serialize the block check and pending-cap check with block/unblock and
+      // every other tag for this pair. Concurrent requests cannot all observe
+      // "two pending" and flood the opponent, and a block can never slip
+      // between the check and INSERT.
+      await lockSocialPair(client, userId, body.opponent_id);
+      if (await socialPairIsBlocked(client, userId, body.opponent_id)) {
+        throw ApiError.notFound('User not found');
+      }
+      const pending = await client.query<{ c: string }>(
+        `SELECT COUNT(*) AS c FROM matches
+          WHERE user_id = $1 AND opponent_id = $2 AND verification_status = 'pending'`,
+        [userId, body.opponent_id],
+      );
+      if (Number(pending.rows[0]?.c ?? 0) >= 3) {
+        throw ApiError.tooManyRequests('You already have matches awaiting this player’s confirmation');
+      }
+    }
+
     // Claim the schedule before inserting the result. The row lock serializes
     // logging against cancellation and another client attempting to bind a
     // second match to the same scheduled event.
@@ -763,6 +1018,14 @@ app.post('/api/matches', requireAuth, async (c) => {
       ],
     );
     const id = inserted.rows[0]!.id;
+
+    if (matchPhotoPath) {
+      await client.query(
+        `DELETE FROM media_object_cleanup_jobs
+          WHERE object_path = $1 AND auth_id = $2 AND reason = 'draft'`,
+        [matchPhotoPath, authUid(c)],
+      );
+    }
 
     if (body.stats) {
       const s = fullStats(body.stats);
@@ -859,7 +1122,7 @@ app.post('/api/matches', requireAuth, async (c) => {
 app.get('/api/matches/pending', requireAuth, async (c) => {
   const userId = uid(c);
   const rows = await query<Record<string, unknown>>(
-    `SELECT mf.* FROM match_feed mf
+    `SELECT mf.*, ${visibleMatchSocialColumns('$1')} FROM match_feed mf
       WHERE mf.opponent_id = $1 AND mf.verification_status = 'pending'
       ORDER BY mf.created_at DESC LIMIT 50`,
     [userId],
@@ -870,7 +1133,7 @@ app.get('/api/matches/pending', requireAuth, async (c) => {
 // The tagged opponent confirms (it counts) or rejects (it never counts) a match.
 app.post('/api/matches/:id/verify', requireAuth, async (c) => {
   const userId = uid(c);
-  const id = c.req.param('id');
+  const id = uuidParam(c);
   const { action } = verifyMatchSchema.parse(await jsonBody(c));
   const verifier = c.get('user')!.username;
 
@@ -913,7 +1176,7 @@ app.post('/api/matches/:id/verify', requireAuth, async (c) => {
       return { match: locked, previousControllerId: null };
     }
 
-    const beforeController = locked.court_id ? await getCourtController(locked.court_id) : null;
+    const beforeController = locked.court_id ? await getCourtController(locked.court_id, client) : null;
     await client.query(
       "UPDATE matches SET verification_status = 'verified', verified_at = now() WHERE id = $1",
       [id],
@@ -984,11 +1247,28 @@ async function assertCanViewMatch(
     throw ApiError.notFound('Match not found');
   }
   await assertCanViewContent(match.user_id, viewerId);
+  if (match.opponent_id) {
+    const opponentAccess = await profileAccess(match.opponent_id, viewerId);
+    if (opponentAccess.blocked || opponentAccess.restricted) {
+      throw ApiError.notFound('Match not found');
+    }
+  }
+}
+
+/** Participants retain a direct read of their historical shared result, but a
+ * tagged opponent may not create new social interaction after either player
+ * blocks the other. The owner can still manage their own activity. */
+async function assertCanInteractWithMatch(match: ViewableMatch, viewerId: string): Promise<void> {
+  await assertCanViewMatch(match, viewerId);
+  if (viewerId === match.opponent_id) {
+    const access = await profileAccess(match.user_id, viewerId);
+    if (access.blocked) throw ApiError.notFound('Match not found');
+  }
 }
 
 app.get('/api/matches/:id', optionalAuth, async (c) => {
   const viewerId = c.get('user')?.sub ?? null;
-  const card = await fetchMatchCard(c.req.param('id'), viewerId);
+  const card = await fetchMatchCard(uuidParam(c), viewerId);
   if (!card) throw ApiError.notFound('Match not found');
   await assertCanViewMatch(card, viewerId);
   return c.json({ match: card });
@@ -996,7 +1276,7 @@ app.get('/api/matches/:id', optionalAuth, async (c) => {
 
 app.delete('/api/matches/:id', requireAuth, async (c) => {
   const userId = uid(c);
-  const id = c.req.param('id');
+  const id = uuidParam(c);
 
   // Lock first and derive `counted` from the locked row. If verification won the
   // race, deletion sees `verified` and recomputes ratings after removing it. If
@@ -1018,7 +1298,7 @@ app.delete('/api/matches/:id', requireAuth, async (c) => {
     if (locked.user_id !== userId) throw ApiError.forbidden('You can only delete your own matches');
 
     const isCounted = locked.verification_status === 'auto' || locked.verification_status === 'verified';
-    const beforeController = isCounted && locked.court_id ? await getCourtController(locked.court_id) : null;
+    const beforeController = isCounted && locked.court_id ? await getCourtController(locked.court_id, client) : null;
 
     // Keep schedule lifecycle constraints and cards coherent. Removing the
     // result reopens a completed schedule, while a pending binding simply clears.
@@ -1051,17 +1331,21 @@ app.delete('/api/matches/:id', requireAuth, async (c) => {
 
 app.post('/api/matches/:id/kudos', requireAuth, async (c) => {
   const userId = uid(c);
-  const id = c.req.param('id');
+  const id = uuidParam(c);
   const match = await queryOne<ViewableMatch>(
     'SELECT user_id, opponent_id, verification_status FROM matches WHERE id = $1', [id]);
   if (!match) throw ApiError.notFound('Match not found');
-  await assertCanViewMatch(match, userId);
+  await assertCanInteractWithMatch(match, userId);
 
   const inserted = await queryOne<{ id: string }>(
     'INSERT INTO kudos (match_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING id',
     [id, userId],
   );
-  const countRow = await queryOne<{ c: string }>('SELECT COUNT(*) AS c FROM kudos WHERE match_id = $1', [id]);
+  const countRow = await queryOne<{ c: string }>(
+    `SELECT COUNT(*) AS c FROM kudos k
+      WHERE k.match_id = $1 AND ${mutuallyVisibleCondition('$2', 'k.user_id')}`,
+    [id, userId],
+  );
 
   if (inserted && match.user_id !== userId) {
     await notify({
@@ -1078,43 +1362,49 @@ app.post('/api/matches/:id/kudos', requireAuth, async (c) => {
 
 app.delete('/api/matches/:id/kudos', requireAuth, async (c) => {
   const userId = uid(c);
-  const id = c.req.param('id');
+  const id = uuidParam(c);
   const match = await queryOne<ViewableMatch>(
     'SELECT user_id, opponent_id, verification_status FROM matches WHERE id = $1', [id]);
   if (!match) throw ApiError.notFound('Match not found');
   await assertCanViewMatch(match, userId);
   await query('DELETE FROM kudos WHERE match_id = $1 AND user_id = $2', [id, userId]);
-  const countRow = await queryOne<{ c: string }>('SELECT COUNT(*) AS c FROM kudos WHERE match_id = $1', [id]);
+  const countRow = await queryOne<{ c: string }>(
+    `SELECT COUNT(*) AS c FROM kudos k
+      WHERE k.match_id = $1 AND ${mutuallyVisibleCondition('$2', 'k.user_id')}`,
+    [id, userId],
+  );
   return c.json({ kudos_count: Number(countRow?.c ?? 0), viewer_has_kudos: false });
 });
 
 app.get('/api/matches/:id/comments', optionalAuth, async (c) => {
-  const id = c.req.param('id');
+  const id = uuidParam(c);
   const parent = await queryOne<ViewableMatch>(
     'SELECT user_id, opponent_id, verification_status FROM matches WHERE id = $1', [id]);
   if (!parent) throw ApiError.notFound('Match not found');
   await assertCanViewMatch(parent, c.get('user')?.sub ?? null);
   const { limit, before } = commentsQuerySchema.parse(c.req.query());
-  const params: unknown[] = [id];
+  const viewerId = c.get('user')?.sub ?? null;
+  const params: unknown[] = [id, viewerId];
   let extra = '';
   if (before) {
     // Composite "<ISO>~<uuid>" keyset cursor — a timestamp alone would
     // drop/duplicate rows on created_at ties. Both halves are validated here:
     // a malformed uuid must be a 400, not a Postgres 22P02 surfacing as a 500.
     const [ts, cid] = before.split('~');
-    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (Number.isNaN(Date.parse(ts)) || !cid || !UUID_RE.test(cid)) {
       throw ApiError.badRequest('Invalid pagination cursor');
     }
     params.push(ts, cid);
-    extra = `AND (c.created_at, c.id) < ($2::timestamptz, $3::uuid)`;
+    extra = `AND (c.created_at, c.id) < ($3::timestamptz, $4::uuid)`;
   }
   params.push(limit);
   const rows = await query<{ id: string; created_at: string }>(
     `SELECT c.id, c.body, c.created_at, c.user_id,
             u.username, u.display_name, u.avatar_url
        FROM comments c JOIN users u ON u.id = c.user_id
-      WHERE c.match_id = $1 ${extra}
+      WHERE c.match_id = $1
+        AND ${mutuallyVisibleCondition('$2', 'c.user_id')}
+        ${extra}
       ORDER BY c.created_at DESC, c.id DESC
       LIMIT $${params.length}`,
     params,
@@ -1128,11 +1418,11 @@ app.get('/api/matches/:id/comments', optionalAuth, async (c) => {
 
 app.post('/api/matches/:id/comments', requireAuth, async (c) => {
   const userId = uid(c);
-  const id = c.req.param('id');
+  const id = uuidParam(c);
   const match = await queryOne<ViewableMatch>(
     'SELECT user_id, opponent_id, verification_status FROM matches WHERE id = $1', [id]);
   if (!match) throw ApiError.notFound('Match not found');
-  await assertCanViewMatch(match, userId);
+  await assertCanInteractWithMatch(match, userId);
   const { body } = commentSchema.parse(await jsonBody(c));
 
   const comment = await queryOne(
@@ -1179,7 +1469,13 @@ async function fetchScheduledMatch(id: string, viewerId: string) {
 app.get('/api/scheduled-matches', requireAuth, async (c) => {
   const userId = uid(c);
   const rows = await query<Record<string, unknown>>(
-    `${SCHEDULED_SELECT} WHERE s.creator_id = $1 OR s.opponent_id = $1 ORDER BY s.scheduled_at DESC LIMIT 100`,
+    `${SCHEDULED_SELECT}
+      WHERE (s.creator_id = $1 OR s.opponent_id = $1)
+        AND ${mutuallyVisibleCondition(
+          '$1',
+          'CASE WHEN s.creator_id = $1 THEN s.opponent_id ELSE s.creator_id END',
+        )}
+      ORDER BY s.scheduled_at DESC LIMIT 100`,
     [userId],
   );
   return c.json({ scheduled_matches: rows.map((r) => mapScheduledMatch(r, userId)) });
@@ -1190,20 +1486,13 @@ app.post('/api/scheduled-matches', requireAuth, async (c) => {
   const b = createScheduledMatchSchema.parse(await jsonBody(c));
   if (b.opponent_id === userId) throw ApiError.badRequest('You cannot schedule a match against yourself');
 
-  if (b.opponent_id) {
-    // Blocked players are mutually invisible — no proposals, no challenge pushes.
-    if ((await profileAccess(b.opponent_id, userId)).blocked) {
-      throw ApiError.notFound('User not found');
-    }
-    // Cap open proposals per opponent: each one notifies (challenges push) and
-    // sits in the target's list, so unbounded proposing is a spam vector.
-    const open = await queryOne<{ c: string }>(
-      `SELECT COUNT(*) AS c FROM scheduled_matches
-        WHERE creator_id = $1 AND opponent_id = $2 AND status = 'proposed'`,
-      [userId, b.opponent_id],
+  if (b.client_key) {
+    const existing = await queryOne<{ id: string }>(
+      'SELECT id FROM scheduled_matches WHERE creator_id = $1 AND client_key = $2',
+      [userId, b.client_key],
     );
-    if (Number(open?.c ?? 0) >= 3) {
-      throw ApiError.tooManyRequests('You already have open proposals with this player — wait for a response');
+    if (existing) {
+      return c.json({ scheduled_match: await fetchScheduledMatch(existing.id, userId) }, 200);
     }
   }
 
@@ -1212,12 +1501,46 @@ app.post('/api/scheduled-matches', requireAuth, async (c) => {
   // against a registered player.
   const status = b.opponent_id ? 'proposed' : 'accepted';
   const isChallenge = !!b.is_challenge && !!b.opponent_id;
-  const inserted = await queryOne<{ id: string }>(
-    `INSERT INTO scheduled_matches (creator_id, opponent_id, opponent_name, court_id, surface, scheduled_at, note, status, is_challenge)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
-    [userId, b.opponent_id ?? null, b.opponent_id ? null : b.opponent_name ?? null, b.court_id ?? null, b.surface ?? null, b.scheduled_at, b.note ?? null, status, isChallenge],
-  );
-  const card = await fetchScheduledMatch(inserted!.id, userId);
+  let scheduledId: string;
+  try {
+    scheduledId = await withTransaction(async (client) => {
+    if (b.opponent_id) {
+      await lockSocialPair(client, userId, b.opponent_id);
+      if (await socialPairIsBlocked(client, userId, b.opponent_id)) {
+        throw ApiError.notFound('User not found');
+      }
+      const open = await client.query<{ c: string }>(
+        `SELECT COUNT(*) AS c FROM scheduled_matches
+          WHERE creator_id = $1 AND opponent_id = $2 AND status = 'proposed'`,
+        [userId, b.opponent_id],
+      );
+      if (Number(open.rows[0]?.c ?? 0) >= 3) {
+        throw ApiError.tooManyRequests('You already have open proposals with this player — wait for a response');
+      }
+    }
+    const inserted = await client.query<{ id: string }>(
+      `INSERT INTO scheduled_matches
+         (creator_id, opponent_id, opponent_name, court_id, surface, scheduled_at, note, status, is_challenge, client_key)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+      [userId, b.opponent_id ?? null, b.opponent_id ? null : b.opponent_name ?? null, b.court_id ?? null, b.surface ?? null, b.scheduled_at, b.note ?? null, status, isChallenge, b.client_key ?? null],
+    );
+    return inserted.rows[0]!.id;
+    });
+  } catch (error) {
+    // Two retries can race past the fast pre-check. The unique index chooses
+    // one durable proposal; the loser returns it and sends no second push.
+    if (b.client_key) {
+      const existing = await queryOne<{ id: string }>(
+        'SELECT id FROM scheduled_matches WHERE creator_id = $1 AND client_key = $2',
+        [userId, b.client_key],
+      );
+      if (existing) {
+        return c.json({ scheduled_match: await fetchScheduledMatch(existing.id, userId) }, 200);
+      }
+    }
+    throw error;
+  }
+  const card = await fetchScheduledMatch(scheduledId, userId);
 
   if (b.opponent_id) {
     await notify({
@@ -1227,7 +1550,7 @@ app.post('/api/scheduled-matches', requireAuth, async (c) => {
       body: isChallenge
         ? `${c.get('user')!.username} challenged you to a match. Accept to lock it in.`
         : `${c.get('user')!.username} wants to play you. Tap to respond.`,
-      data: { scheduledMatchId: inserted!.id },
+      data: { scheduledMatchId: scheduledId },
       push: isChallenge,
     }).catch(() => {});
   }
@@ -1236,7 +1559,7 @@ app.post('/api/scheduled-matches', requireAuth, async (c) => {
 
 app.patch('/api/scheduled-matches/:id', requireAuth, async (c) => {
   const userId = uid(c);
-  const id = c.req.param('id');
+  const id = uuidParam(c);
   const { action } = updateScheduledMatchSchema.parse(await jsonBody(c));
 
   const row = await queryOne<{ creator_id: string; opponent_id: string | null; status: string; match_id: string | null }>(
@@ -1299,8 +1622,12 @@ app.patch('/api/scheduled-matches/:id', requireAuth, async (c) => {
 // Open groups with a shared feed and a 30-day member leaderboard. Joining is
 // instant (no approval); the creator is the first admin.
 const CLUB_SELECT = `
-  SELECT c.id, c.name, c.description, c.city, c.creator_id, c.created_at,
-         (SELECT COUNT(*) FROM club_members m WHERE m.club_id = c.id) AS member_count,
+  SELECT c.id, c.name, c.description, c.city,
+         CASE WHEN c.creator_id IS NULL OR ${mutuallyVisibleCondition('$1', 'c.creator_id')}
+              THEN c.creator_id ELSE NULL END AS creator_id,
+         c.created_at,
+         (SELECT COUNT(*) FROM club_members m
+           WHERE m.club_id = c.id AND ${mutuallyVisibleCondition('$1', 'm.user_id')}) AS member_count,
          CASE WHEN $1::uuid IS NULL THEN false
               ELSE EXISTS(SELECT 1 FROM club_members m WHERE m.club_id = c.id AND m.user_id = $1)
          END AS viewer_is_member
@@ -1352,49 +1679,72 @@ app.get('/api/clubs', optionalAuth, async (c) => {
 app.post('/api/clubs', requireAuth, async (c) => {
   const userId = uid(c);
   const b = createClubSchema.parse(await jsonBody(c));
-  const clubId = await withTransaction(async (client) => {
-    let inserted;
-    try {
-      inserted = await client.query<{ id: string }>(
-        'INSERT INTO clubs (name, description, city, creator_id) VALUES ($1, $2, $3, $4) RETURNING id',
-        [b.name, b.description ?? null, b.city ?? null, userId],
+  const existing = b.client_key
+    ? await queryOne<{ id: string }>(
+        'SELECT id FROM clubs WHERE creator_id = $1 AND client_key = $2',
+        [userId, b.client_key],
+      )
+    : null;
+  if (existing) {
+    const row = await queryOne<Record<string, unknown>>(`${CLUB_SELECT} WHERE c.id = $2`, [userId, existing.id]);
+    return c.json({ club: mapClub(row!) });
+  }
+
+  let clubId: string;
+  let created = true;
+  try {
+    clubId = await withTransaction(async (client) => {
+      const inserted = await client.query<{ id: string }>(
+        `INSERT INTO clubs (name, description, city, creator_id, client_key)
+         VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+        [b.name, b.description ?? null, b.city ?? null, userId, b.client_key ?? null],
       );
-    } catch (err) {
-      if (typeof err === 'object' && err !== null && (err as { code?: string }).code === '23505') {
-        throw new ApiError(409, 'conflict', 'A club with this name already exists');
-      }
+      const id = inserted.rows[0]!.id;
+      await client.query(
+        "INSERT INTO club_members (club_id, user_id, role) VALUES ($1, $2, 'admin')",
+        [id, userId],
+      );
+      return id;
+    });
+  } catch (err) {
+    if (typeof err === 'object' && err !== null && (err as { code?: string }).code === '23505') {
+      const raced = b.client_key
+        ? await queryOne<{ id: string }>(
+            'SELECT id FROM clubs WHERE creator_id = $1 AND client_key = $2',
+            [userId, b.client_key],
+          )
+        : null;
+      if (!raced) throw new ApiError(409, 'conflict', 'A club with this name already exists');
+      clubId = raced.id;
+      created = false;
+    } else {
       throw err;
     }
-    const id = inserted.rows[0]!.id;
-    await client.query(
-      "INSERT INTO club_members (club_id, user_id, role) VALUES ($1, $2, 'admin')",
-      [id, userId],
-    );
-    return id;
-  });
+  }
   const row = await queryOne<Record<string, unknown>>(`${CLUB_SELECT} WHERE c.id = $2`, [userId, clubId]);
-  return c.json({ club: mapClub(row!) }, 201);
+  return created ? c.json({ club: mapClub(row!) }, 201) : c.json({ club: mapClub(row!) });
 });
 
 app.get('/api/clubs/:id', optionalAuth, async (c) => {
   const viewerId = c.get('user')?.sub ?? null;
-  const id = c.req.param('id');
+  const id = uuidParam(c);
   const row = await queryOne<Record<string, unknown>>(`${CLUB_SELECT} WHERE c.id = $2`, [viewerId, id]);
   if (!row) throw ApiError.notFound('Club not found');
   const members = await query(
     `SELECT u.id, u.username, u.display_name, u.avatar_url, m.role::text AS role, m.joined_at
        FROM club_members m JOIN users u ON u.id = m.user_id
       WHERE m.club_id = $1
+        AND ${mutuallyVisibleCondition('$2', 'm.user_id')}
       ORDER BY m.role ASC, m.joined_at ASC
       LIMIT 50`,
-    [id],
+    [id, viewerId],
   );
   return c.json({ club: mapClub(row), members });
 });
 
 app.post('/api/clubs/:id/join', requireAuth, async (c) => {
   const userId = uid(c);
-  const id = c.req.param('id');
+  const id = uuidParam(c);
   const club = await queryOne<{ id: string }>('SELECT id FROM clubs WHERE id = $1', [id]);
   if (!club) throw ApiError.notFound('Club not found');
   await query(
@@ -1443,7 +1793,7 @@ async function leaveClub(client: Queryable, clubId: string, userId: string): Pro
 
 app.delete('/api/clubs/:id/join', requireAuth, async (c) => {
   const userId = uid(c);
-  const id = c.req.param('id');
+  const id = uuidParam(c);
   await withTransaction((client) => leaveClub(client, id, userId));
   return c.body(null, 204);
 });
@@ -1451,12 +1801,12 @@ app.delete('/api/clubs/:id/join', requireAuth, async (c) => {
 // 30-day member leaderboard — same trailing window and counted-only rule as
 // court leaderboards, ranked by summed MatchScore.
 app.get('/api/clubs/:id/leaderboard', optionalAuth, async (c) => {
-  const id = c.req.param('id');
+  const id = uuidParam(c);
   const viewerId = c.get('user')?.sub ?? null;
   const club = await queryOne<{ id: string }>('SELECT id FROM clubs WHERE id = $1', [id]);
   if (!club) throw ApiError.notFound('Club not found');
-  // Private members' match activity is followers-only everywhere else — the
-  // club board must not become a side channel for it (same rule for blocks).
+  // This competitive surface follows the explicit show_competitive setting;
+  // blocks still remove entries from the viewer's board.
   const visibility = userVisibilityConditions('$2', 'cm.user_id').join(' AND ');
   const rows = await query<Record<string, unknown>>(
     `SELECT u.id AS user_id, u.username, u.display_name, u.avatar_url,
@@ -1493,7 +1843,7 @@ app.get('/api/clubs/:id/leaderboard', optionalAuth, async (c) => {
 app.get('/api/clubs/:id/feed', optionalAuth, async (c) => {
   const { limit, before } = feedQuerySchema.parse(c.req.query());
   const viewerId = c.get('user')?.sub ?? null;
-  const id = c.req.param('id');
+  const id = uuidParam(c);
   const club = await queryOne<{ id: string }>('SELECT id FROM clubs WHERE id = $1', [id]);
   if (!club) throw ApiError.notFound('Club not found');
 
@@ -1513,6 +1863,7 @@ app.get('/api/clubs/:id/feed', optionalAuth, async (c) => {
   const limitIdx = ++p;
   const rows = await query<Record<string, unknown>>(
     `SELECT mf.*,
+            ${visibleMatchSocialColumns('$1')},
             CASE WHEN $1::uuid IS NULL THEN false
                  ELSE EXISTS(SELECT 1 FROM kudos k WHERE k.match_id = mf.id AND k.user_id = $1)
             END AS viewer_has_kudos
@@ -1538,19 +1889,89 @@ app.get('/api/courts/geocode', requireAuth, async (c) => {
     const results = await geocode(q, limit);
     return c.json({ results });
   } catch (err) {
+    if (err instanceof GeocoderBusyError) {
+      throw rateLimitError('Address lookup is busy, please retry shortly', err.retryAfterSeconds);
+    }
     console.warn('[geocode] provider error', err instanceof Error ? err.message : err);
     throw new ApiError(502, 'geocode_failed', 'Address lookup is temporarily unavailable');
   }
 });
 
 // ─── Court discovery: import real-world courts from OpenStreetMap ───────────
-// Cache of recently-imported viewport cells (per isolate) so panning the map
-// doesn't hammer the free Overpass API; the DB upsert is idempotent regardless.
-const DISCOVER_TTL_MS = 15 * 60_000;
-const discoveredCells = new Map<string, number>();
+// Viewports snap to coarse cells before hashing. Freshness and in-flight work
+// live in Postgres so every Edge isolate observes the same lease.
 function discoverCellKey(b: { min_lng: number; min_lat: number; max_lng: number; max_lat: number }): string {
   const snap = (x: number) => Math.round(x / 0.05) * 0.05;
   return [snap(b.min_lng), snap(b.min_lat), snap(b.max_lng), snap(b.max_lat)].map((n) => n.toFixed(2)).join(',');
+}
+
+async function discoverCellHash(
+  b: { min_lng: number; min_lat: number; max_lng: number; max_lat: number },
+): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(`overpass:${discoverCellKey(b)}`),
+  );
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+/** Atomically claim one viewport and pace Overpass starts across the fleet. */
+async function claimDiscoveryCell(cellKey: string): Promise<boolean> {
+  return withTransaction(async (client) => {
+    await client.query(
+      `INSERT INTO court_discovery_cells (cell_key)
+       VALUES ($1)
+       ON CONFLICT (cell_key) DO NOTHING`,
+      [cellKey],
+    );
+
+    const { rows: claimed } = await client.query<{ cell_key: string }>(
+      `UPDATE court_discovery_cells
+          SET locked_until = clock_timestamp() + interval '3 minutes',
+              updated_at = clock_timestamp()
+        WHERE cell_key = $1
+          AND next_refresh_at <= clock_timestamp()
+          AND (locked_until IS NULL OR locked_until <= clock_timestamp())
+       RETURNING cell_key`,
+      [cellKey],
+    );
+    if (claimed.length === 0) return false;
+
+    const { rows: providerLease } = await client.query<{ service: string }>(
+      `INSERT INTO outbound_service_limits (service, last_started_at)
+       VALUES ('overpass', clock_timestamp())
+       ON CONFLICT (service) DO UPDATE
+         SET last_started_at = EXCLUDED.last_started_at
+       WHERE outbound_service_limits.last_started_at
+               <= clock_timestamp() - interval '10 seconds'
+       RETURNING service`,
+    );
+    if (providerLease.length > 0) return true;
+
+    // Another viewport just started. Release this cell and apply a small retry
+    // delay so a busy map does not turn provider pacing into a database spin.
+    await client.query(
+      `UPDATE court_discovery_cells
+          SET next_refresh_at = GREATEST(next_refresh_at, clock_timestamp() + interval '10 seconds'),
+              locked_until = NULL,
+              updated_at = clock_timestamp()
+        WHERE cell_key = $1`,
+      [cellKey],
+    );
+    return false;
+  });
+}
+
+async function finishDiscoveryCell(cellKey: string, succeeded: boolean): Promise<void> {
+  await query(
+    `UPDATE court_discovery_cells
+        SET next_refresh_at = clock_timestamp()
+              + CASE WHEN $2::boolean THEN interval '15 minutes' ELSE interval '2 minutes' END,
+            locked_until = NULL,
+            updated_at = clock_timestamp()
+      WHERE cell_key = $1`,
+    [cellKey, succeeded],
+  );
 }
 
 // A name OSM gave us no facility for — formatName() fell back to a bare
@@ -1572,6 +1993,9 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * gets stored (and what re-imports keep, via the upsert's generic-name guard).
  */
 async function enrichSectorNames(sectors: OverpassSector[]): Promise<void> {
+  // Public Nominatim permits user-triggered lookups, not systematic reverse
+  // geocoding of imported OSM features. Automated naming requires Geoapify.
+  if (!allowsAutomatedGeocoding()) return;
   const anon = sectors.filter((s) => GENERIC_COURT_NAME.test(s.name)).slice(0, NEIGHBORHOOD_ENRICH_MAX);
   for (let i = 0; i < anon.length; i++) {
     const s = anon[i]!;
@@ -1656,16 +2080,22 @@ app.get('/api/courts/discover', requireAuth, async (c) => {
     const spanLng = b.max_lng - b.min_lng;
     const spanLat = b.max_lat - b.min_lat;
     if (spanLng <= 0.35 && spanLat <= 0.35) {
-      const key = discoverCellKey(b);
-      const now = Date.now();
-      const fresh = discoveredCells.get(key);
-      if (b.force || !fresh || fresh <= now) {
+      const key = await discoverCellHash(b);
+      if (await claimDiscoveryCell(key)) {
+        let succeeded = false;
         try {
           await importOverpassCourts(b);
-          if (discoveredCells.size > 5000) discoveredCells.clear(); // bound per-isolate memory
-          discoveredCells.set(key, now + DISCOVER_TTL_MS);
+          succeeded = true;
         } catch (err) {
           console.warn('[discover] overpass import failed', err instanceof Error ? err.message : err);
+        } finally {
+          try {
+            await finishDiscoveryCell(key, succeeded);
+          } catch (err) {
+            // The three-minute claim expires by itself if this best-effort
+            // bookkeeping fails, so discovery cannot remain permanently stuck.
+            console.warn('[discover] could not release cell lease', err instanceof Error ? err.message : err);
+          }
         }
       }
     }
@@ -1680,6 +2110,9 @@ app.get('/api/courts/reverse-geocode', requireAuth, async (c) => {
   try {
     return c.json({ result: await reverseGeocode(lat, lng) });
   } catch (err) {
+    if (err instanceof GeocoderBusyError) {
+      throw rateLimitError('Address lookup is busy, please retry shortly', err.retryAfterSeconds);
+    }
     console.warn('[reverse-geocode] provider error', err instanceof Error ? err.message : err);
     return c.json({ result: null });
   }
@@ -1720,17 +2153,38 @@ app.get('/api/courts', async (c) => {
 
 app.post('/api/courts', requireAuth, async (c) => {
   const b = createCourtSchema.parse(await jsonBody(c));
-  const row = await queryOne<Record<string, unknown>>(
-    `INSERT INTO courts (name, description, surface, geom, address, city, osm_id, court_count, created_by)
-     VALUES ($1, $2, $3, ST_SetSRID(ST_MakePoint($4, $5), 4326), $6, $7, $8, $9, $10)
-     RETURNING ${COURT_COLS}`,
-    [b.name, b.description ?? null, b.surface, b.lng, b.lat, b.address ?? null, b.city ?? null, b.osm_id ?? null, b.court_count ?? 1, uid(c)],
-  );
-  return c.json({ court: mapCourt(row!) }, 201);
+  const userId = uid(c);
+  if (b.client_key) {
+    const existing = await queryOne<Record<string, unknown>>(
+      `SELECT ${COURT_COLS} FROM courts WHERE created_by = $1 AND client_key = $2`,
+      [userId, b.client_key],
+    );
+    if (existing) return c.json({ court: mapCourt(existing) }, 200);
+  }
+
+  try {
+    const row = await queryOne<Record<string, unknown>>(
+      `INSERT INTO courts
+         (name, description, surface, geom, address, city, osm_id, court_count, created_by, client_key)
+       VALUES ($1, $2, $3, ST_SetSRID(ST_MakePoint($4, $5), 4326), $6, $7, $8, $9, $10, $11)
+       RETURNING ${COURT_COLS}`,
+      [b.name, b.description ?? null, b.surface, b.lng, b.lat, b.address ?? null, b.city ?? null, b.osm_id ?? null, b.court_count ?? 1, userId, b.client_key ?? null],
+    );
+    return c.json({ court: mapCourt(row!) }, 201);
+  } catch (error) {
+    if (b.client_key) {
+      const existing = await queryOne<Record<string, unknown>>(
+        `SELECT ${COURT_COLS} FROM courts WHERE created_by = $1 AND client_key = $2`,
+        [userId, b.client_key],
+      );
+      if (existing) return c.json({ court: mapCourt(existing) }, 200);
+    }
+    throw error;
+  }
 });
 
 app.get('/api/courts/:id', optionalAuth, async (c) => {
-  const id = c.req.param('id');
+  const id = uuidParam(c);
   const row = await queryOne<Record<string, unknown>>(`SELECT ${COURT_COLS} FROM courts WHERE id = $1`, [id]);
   if (!row) throw ApiError.notFound('Court not found');
 
@@ -1759,8 +2213,8 @@ app.get('/api/courts/:id', optionalAuth, async (c) => {
 });
 
 app.get('/api/courts/:id/leaderboard', optionalAuth, async (c) => {
-  // Rows carry per-user wins and last_played_at — followers-only data for a
-  // private account, so apply the standard visibility rule per entry.
+  // Rows carry competitive results, so apply the explicit show_competitive
+  // setting and symmetric block boundary per entry.
   const visibility = userVisibilityConditions('$2', 'cl.user_id').join(' AND ');
   const rows = await query<Record<string, unknown>>(
     `SELECT cl.court_id, cl.user_id, cl.score, cl.matches_played, cl.wins, cl.losses,
@@ -1770,7 +2224,7 @@ app.get('/api/courts/:id/leaderboard', optionalAuth, async (c) => {
       WHERE cl.court_id = $1 AND ${visibility}
       ORDER BY cl.rank ASC, cl.score DESC
       LIMIT 100`,
-    [c.req.param('id'), c.get('user')?.sub ?? null],
+    [uuidParam(c), c.get('user')?.sub ?? null],
   );
   const leaderboard: LeaderboardEntry[] = rows.map((r) => ({
     court_id: r.court_id as string,
@@ -1791,8 +2245,8 @@ app.get('/api/courts/:id/leaderboard', optionalAuth, async (c) => {
 });
 
 // ─── Territories ─────────────────────────────────────────────────────────
-// A territory hull centred on someone's regular courts is a home-location
-// proxy — private accounts' zones are followers-only, like their matches.
+// A territory hull centred on someone's regular courts is a location proxy, so
+// the separate show_competitive toggle controls it explicitly (see Settings).
 app.get('/api/territories', optionalAuth, async (c) => {
   const b = bboxQuerySchema.parse(c.req.query());
   const hasBbox = b.min_lng != null && b.min_lat != null && b.max_lng != null && b.max_lat != null;
@@ -1804,7 +2258,7 @@ app.get('/api/territories', optionalAuth, async (c) => {
 });
 
 app.get('/api/territories/user/:userId', optionalAuth, async (c) => {
-  const targetId = c.req.param('userId');
+  const targetId = uuidParam(c, 'userId');
   const viewerId = c.get('user')?.sub ?? null;
   if (viewerId !== targetId) {
     // Same rule as listTerritories: the owner's show_competitive toggle decides
@@ -1826,12 +2280,26 @@ app.get('/api/territories/user/:userId', optionalAuth, async (c) => {
 app.patch('/api/users/me', requireAuth, async (c) => {
   const userId = uid(c);
   const b = updateProfileSchema.parse(await jsonBody(c));
+  const mediaOwnerId = authUid(c);
+  const avatarMediaPath = b.avatar_url && !isGoogleAvatarUrl(b.avatar_url)
+    ? ownedUserMediaPathFromUrl(b.avatar_url, mediaOwnerId, 'avatar')
+    : null;
+  const coverMediaPath = b.cover_url
+    ? ownedUserMediaPathFromUrl(b.cover_url, mediaOwnerId, 'cover')
+    : null;
+  if (b.avatar_url && !isGoogleAvatarUrl(b.avatar_url) && !avatarMediaPath) {
+    throw ApiError.badRequest('Avatar must belong to your Vollo media folder');
+  }
+  if (b.cover_url && !coverMediaPath) {
+    throw ApiError.badRequest('Cover photo must belong to your Vollo media folder');
+  }
   const sets: string[] = [];
   const params: unknown[] = [];
   let i = 1;
 
   if (b.display_name !== undefined) { sets.push(`display_name = $${i++}`); params.push(b.display_name); }
   if (b.bio !== undefined) { sets.push(`bio = $${i++}`); params.push(b.bio); }
+  // null is an explicit clear; undefined means the field was omitted/no-op.
   if (b.avatar_url !== undefined) { sets.push(`avatar_url = $${i++}`); params.push(b.avatar_url); }
   if (b.cover_url !== undefined) { sets.push(`cover_url = $${i++}`); params.push(b.cover_url); }
   if (b.dominant_hand !== undefined) { sets.push(`dominant_hand = $${i++}`); params.push(b.dominant_hand); }
@@ -1839,10 +2307,14 @@ app.patch('/api/users/me', requireAuth, async (c) => {
   if (b.show_competitive !== undefined) { sets.push(`show_competitive = $${i++}`); params.push(b.show_competitive); }
   if (b.color !== undefined) { sets.push(`color = $${i++}`); params.push(b.color); }
   if (b.home !== undefined) {
-    sets.push(`home_geom = ST_SetSRID(ST_MakePoint($${i++}, $${i++}), 4326)`);
-    params.push(b.home.lng, b.home.lat);
-    sets.push(`home_label = $${i++}`);
-    params.push(b.home.label ?? null);
+    if (b.home === null) {
+      sets.push('home_geom = NULL', 'home_label = NULL');
+    } else {
+      sets.push(`home_geom = ST_SetSRID(ST_MakePoint($${i++}, $${i++}), 4326)`);
+      params.push(b.home.lng, b.home.lat);
+      sets.push(`home_label = $${i++}`);
+      params.push(b.home.label ?? null);
+    }
   }
   if (b.equipment !== undefined) {
     // Pass the raw object: postgres.js serializes a jsonb param itself (same
@@ -1857,10 +2329,22 @@ app.patch('/api/users/me', requireAuth, async (c) => {
   }
 
   params.push(userId);
-  const row = await queryOne<Record<string, unknown>>(
-    `UPDATE users SET ${sets.join(', ')} WHERE id = $${i} RETURNING ${USER_SELECT}`,
-    params,
-  );
+  const row = await withTransaction(async (client) => {
+    const { rows } = await client.query<Record<string, unknown>>(
+      `UPDATE users SET ${sets.join(', ')} WHERE id = $${i} RETURNING ${USER_SELECT}`,
+      params,
+    );
+    for (const objectPath of [avatarMediaPath, coverMediaPath]) {
+      if (objectPath) {
+        await client.query(
+          `DELETE FROM media_object_cleanup_jobs
+            WHERE object_path = $1 AND auth_id = $2 AND reason = 'draft'`,
+          [objectPath, mediaOwnerId],
+        );
+      }
+    }
+    return rows[0]!;
+  });
   return c.json({ user: mapUser(row!) });
 });
 
@@ -1907,25 +2391,24 @@ app.delete('/api/users/me/push-token', requireAuth, async (c) => {
 
 app.delete('/api/users/me', requireAuth, async (c) => {
   const userId = uid(c);
-  // Leave every club through the normal path first — the raw FK cascade would
-  // strip memberships without promoting a new admin or dissolving empty clubs,
-  // leaving zombie clubs nobody can administer.
-  const memberships = await query<{ club_id: string }>(
-    'SELECT club_id FROM club_members WHERE user_id = $1',
-    [userId],
-  );
-  for (const m of memberships) {
-    await withTransaction((client) => leaveClub(client, m.club_id, userId));
-  }
   const row = await queryOne<{ auth_id: string | null }>('SELECT auth_id FROM users WHERE id = $1', [userId]);
-  if (row?.auth_id) {
-    // Delete the auth identity first: users.auth_id ON DELETE CASCADE removes the
-    // profile and all owned data atomically. If this throws, the account is left
-    // intact (the request 500s and can be retried) rather than orphaning an auth
-    // user with no profile — which would soft-lock the login.
-    await adminClient.auth.admin.deleteUser(row.auth_id);
+  if (!row) throw ApiError.notFound('User not found');
+  if (row.auth_id) {
+    // GoTrue reports failures in `error` rather than throwing. No database or
+    // media mutation happens before this succeeds, so a retry cannot find a
+    // half-deleted account. The auth FK cascade deletes the profile; migration
+    // 031 repairs clubs and durably queues its Storage folder in that transaction.
+    const { error } = await adminClient.auth.admin.deleteUser(row.auth_id);
+    if (error) {
+      console.error('[account-delete] auth provider rejected deletion', error.status, error.code);
+      throw new ApiError(502, 'account_deletion_failed', 'Account deletion is temporarily unavailable; please try again');
+    }
+    // Eager best effort for a fast privacy outcome. Storage failures stay queued
+    // for maintenance retries, including if this isolate exits after Auth commits.
+    await processMediaCleanupJobs(1, row.auth_id);
   } else {
-    // Legacy row with no linked auth identity — remove the profile directly.
+    // Legacy row with no linked auth identity. Database deletion triggers still
+    // repair any club from which the profile cascades.
     await query('DELETE FROM users WHERE id = $1', [userId]);
   }
   return c.body(null, 204);
@@ -1982,7 +2465,7 @@ app.post('/api/users/me/goals', requireAuth, async (c) => {
 });
 
 app.delete('/api/users/me/goals/:id', requireAuth, async (c) => {
-  await query('DELETE FROM goals WHERE id = $1 AND user_id = $2', [c.req.param('id'), uid(c)]);
+  await query('DELETE FROM goals WHERE id = $1 AND user_id = $2', [uuidParam(c), uid(c)]);
   return c.body(null, 204);
 });
 
@@ -2005,6 +2488,7 @@ app.post('/api/users/:username/block', requireAuth, async (c) => {
   const targetId = await resolveUserId(c.req.param('username'));
   if (targetId === userId) throw ApiError.badRequest('You cannot block yourself');
   await withTransaction(async (client) => {
+    await lockSocialPair(client, userId, targetId);
     await client.query(
       'INSERT INTO blocks (blocker_id, blocked_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
       [userId, targetId],
@@ -2028,7 +2512,10 @@ app.post('/api/users/:username/block', requireAuth, async (c) => {
 app.delete('/api/users/:username/block', requireAuth, async (c) => {
   const userId = uid(c);
   const targetId = await resolveUserId(c.req.param('username'));
-  await query('DELETE FROM blocks WHERE blocker_id = $1 AND blocked_id = $2', [userId, targetId]);
+  await withTransaction(async (client) => {
+    await lockSocialPair(client, userId, targetId);
+    await client.query('DELETE FROM blocks WHERE blocker_id = $1 AND blocked_id = $2', [userId, targetId]);
+  });
   return c.body(null, 204);
 });
 
@@ -2037,8 +2524,10 @@ app.get('/api/users/:username', optionalAuth, async (c) => {
   const row = await queryOne<Record<string, unknown>>(
     `SELECT ${USER_SELECT},
             (SELECT COUNT(*) FROM matches  WHERE user_id = u.id AND verification_status IN ('auto','verified')) AS match_count,
-            (SELECT COUNT(*) FROM follows  WHERE following_id = u.id) AS follower_count,
-            (SELECT COUNT(*) FROM follows  WHERE follower_id = u.id)  AS following_count,
+            (SELECT COUNT(*) FROM follows f
+              WHERE f.following_id = u.id AND ${mutuallyVisibleCondition('$2', 'f.follower_id')}) AS follower_count,
+            (SELECT COUNT(*) FROM follows f
+              WHERE f.follower_id = u.id AND ${mutuallyVisibleCondition('$2', 'f.following_id')}) AS following_count,
             (SELECT COUNT(*) FROM territories WHERE user_id = u.id)   AS territory_count,
             CASE WHEN $2::uuid IS NULL THEN false
                  ELSE EXISTS(SELECT 1 FROM follows f WHERE f.follower_id = $2 AND f.following_id = u.id)
@@ -2056,20 +2545,28 @@ app.get('/api/users/:username', optionalAuth, async (c) => {
     [c.req.param('username'), viewerId],
   );
   if (!row) throw ApiError.notFound('User not found');
-  // Someone this user blocked never learns the account still exists.
-  if (Boolean(row.blocked_by)) throw ApiError.notFound('User not found');
+  // Blocks are symmetric in effect. The blocker can still find and reverse
+  // their own block through /users/me/blocks, without leaking this profile.
+  if (Boolean(row.blocked_by) || Boolean(row.viewer_has_blocked)) {
+    throw ApiError.notFound('User not found');
+  }
 
   const isSelf = viewerId != null && viewerId === (row.id as string);
   const restricted =
     !isSelf && Boolean(row.is_private) && !Boolean(row.viewer_is_following);
   return c.json({
     user: isSelf ? mapUser(row) : mapPublicUser(row),
-    stats: {
-      match_count: Number(row.match_count),
-      follower_count: Number(row.follower_count),
-      following_count: Number(row.following_count),
-      territory_count: Number(row.territory_count),
-    },
+    // The schema's private-account contract covers stats as well as activity.
+    // Preserve the stable numeric DTO for older clients without disclosing
+    // totals before the follow request is approved.
+    stats: restricted
+      ? { match_count: 0, follower_count: 0, following_count: 0, territory_count: 0 }
+      : {
+          match_count: Number(row.match_count),
+          follower_count: Number(row.follower_count),
+          following_count: Number(row.following_count),
+          territory_count: Number(row.territory_count),
+        },
     viewer_is_following: Boolean(row.viewer_is_following),
     // Pending follow request awaiting this (private) profile's approval.
     viewer_has_requested: Boolean(row.viewer_has_requested),
@@ -2086,53 +2583,59 @@ app.post('/api/users/:username/follow', requireAuth, async (c) => {
   const userId = uid(c);
   const targetId = await resolveUserId(c.req.param('username'));
   if (targetId === userId) throw ApiError.badRequest('You cannot follow yourself');
-  // A block in either direction forbids following (presented as not-found so a
-  // block is never disclosed to the blocked party).
-  if ((await profileAccess(targetId, userId)).blocked) throw ApiError.notFound('User not found');
-
-  const target = await queryOne<{ is_private: boolean; following: boolean }>(
-    `SELECT u.is_private,
-            EXISTS(SELECT 1 FROM follows f WHERE f.follower_id = $2 AND f.following_id = u.id) AS following
-       FROM users u WHERE u.id = $1`,
-    [targetId, userId],
-  );
-  if (target!.following) return c.json({ ok: true, status: 'following' });
-
-  if (target!.is_private) {
-    const requested = await queryOne(
-      `INSERT INTO follow_requests (requester_id, target_id) VALUES ($1, $2)
-       ON CONFLICT DO NOTHING RETURNING requester_id`,
+  const result = await withTransaction(async (client) => {
+    await lockSocialPair(client, userId, targetId);
+    if (await socialPairIsBlocked(client, userId, targetId)) {
+      return { status: 'blocked' as const, inserted: false };
+    }
+    const { rows } = await client.query<{ is_private: boolean; following: boolean }>(
+      `SELECT u.is_private,
+              EXISTS(SELECT 1 FROM follows f
+                       WHERE f.follower_id = $2 AND f.following_id = u.id) AS following
+         FROM users u WHERE u.id = $1`,
+      [targetId, userId],
+    );
+    const target = rows[0]!;
+    if (target.following) return { status: 'following' as const, inserted: false };
+    if (target.is_private) {
+      const inserted = await client.query(
+        `INSERT INTO follow_requests (requester_id, target_id) VALUES ($1, $2)
+         ON CONFLICT DO NOTHING RETURNING requester_id`,
+        [userId, targetId],
+      );
+      return { status: 'requested' as const, inserted: inserted.rows.length > 0 };
+    }
+    const inserted = await client.query(
+      `INSERT INTO follows (follower_id, following_id) VALUES ($1, $2)
+       ON CONFLICT DO NOTHING RETURNING follower_id`,
       [userId, targetId],
     );
-    if (requested) {
-      await notify({
-        userId: targetId,
-        type: 'follow_request',
-        title: '🔐 Follow request',
-        body: `${c.get('user')!.username} wants to follow you. Approve it in your alerts.`,
-        data: { requesterId: userId },
-        push: false,
-      }).catch(() => {});
-    }
-    return c.json({ ok: true, status: 'requested' }, 201);
-  }
+    return { status: 'following' as const, inserted: inserted.rows.length > 0 };
+  });
 
-  const inserted = await queryOne(
-    `INSERT INTO follows (follower_id, following_id) VALUES ($1, $2)
-     ON CONFLICT DO NOTHING RETURNING follower_id`,
-    [userId, targetId],
-  );
-  if (inserted) {
+  // Present a block as not-found so the relationship is never disclosed.
+  if (result.status === 'blocked') throw ApiError.notFound('User not found');
+  if (result.inserted && result.status === 'requested') {
+    await notify({
+      userId: targetId,
+      type: 'follow_request',
+      title: '🔐 Follow request',
+      body: `${c.get('user')!.username} wants to follow you. Approve it in your alerts.`,
+      data: { requesterId: userId, username: c.get('user')!.username },
+      push: false,
+    }).catch(() => {});
+  } else if (result.inserted) {
     await notify({
       userId: targetId,
       type: 'follow',
       title: '👋 New follower',
       body: `${c.get('user')!.username} started following you.`,
-      data: { followerId: userId },
+      data: { followerId: userId, username: c.get('user')!.username },
       push: false,
     }).catch(() => {});
   }
-  return c.json({ ok: true, status: 'following' }, 201);
+  const response = { ok: true, status: result.status };
+  return result.inserted ? c.json(response, 201) : c.json(response);
 });
 
 // Unfollow — also withdraws a pending follow request, so one DELETE covers
@@ -2140,8 +2643,11 @@ app.post('/api/users/:username/follow', requireAuth, async (c) => {
 app.delete('/api/users/:username/follow', requireAuth, async (c) => {
   const userId = uid(c);
   const targetId = await resolveUserId(c.req.param('username'));
-  await query('DELETE FROM follows WHERE follower_id = $1 AND following_id = $2', [userId, targetId]);
-  await query('DELETE FROM follow_requests WHERE requester_id = $1 AND target_id = $2', [userId, targetId]);
+  await withTransaction(async (client) => {
+    await lockSocialPair(client, userId, targetId);
+    await client.query('DELETE FROM follows WHERE follower_id = $1 AND following_id = $2', [userId, targetId]);
+    await client.query('DELETE FROM follow_requests WHERE requester_id = $1 AND target_id = $2', [userId, targetId]);
+  });
   return c.body(null, 204);
 });
 
@@ -2151,6 +2657,7 @@ app.get('/api/users/me/follow-requests', requireAuth, async (c) => {
     `SELECT u.id, u.username, u.display_name, u.avatar_url, r.created_at AS requested_at
        FROM follow_requests r JOIN users u ON u.id = r.requester_id
       WHERE r.target_id = $1
+        AND ${mutuallyVisibleCondition('$1', 'r.requester_id')}
       ORDER BY r.created_at DESC LIMIT 200`,
     [uid(c)],
   );
@@ -2159,26 +2666,38 @@ app.get('/api/users/me/follow-requests', requireAuth, async (c) => {
 
 app.post('/api/users/me/follow-requests/:userId', requireAuth, async (c) => {
   const userId = uid(c);
-  const requesterId = c.req.param('userId');
+  const requesterId = uuidParam(c, 'userId');
   const { action } = followRequestActionSchema.parse(await jsonBody(c));
-  // Deleting the request claims it — a double-tap or a concurrent accept and
-  // decline can't both proceed.
-  const claimed = await queryOne(
-    'DELETE FROM follow_requests WHERE requester_id = $1 AND target_id = $2 RETURNING requester_id',
-    [requesterId, userId],
-  );
-  if (!claimed) throw ApiError.notFound('Follow request not found');
-  if (action === 'accept') {
-    await query(
+  const outcome = await withTransaction(async (client) => {
+    // The same pair lock is taken by follow/unfollow/block. Deleting the request
+    // then claims it, so double taps and accept-vs-block races have one winner.
+    await lockSocialPair(client, userId, requesterId);
+    const claimed = await client.query(
+      'DELETE FROM follow_requests WHERE requester_id = $1 AND target_id = $2 RETURNING requester_id',
+      [requesterId, userId],
+    );
+    if (claimed.rows.length === 0) return 'missing' as const;
+    if (action === 'decline') return 'declined' as const;
+    // A stale legacy request may coexist with a block. Consume it, but never
+    // recreate the relationship or reveal why it disappeared.
+    if (await socialPairIsBlocked(client, userId, requesterId)) return 'blocked' as const;
+    await client.query(
       `INSERT INTO follows (follower_id, following_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
       [requesterId, userId],
     );
+    return 'accepted' as const;
+  });
+
+  if (outcome === 'missing' || outcome === 'blocked') {
+    throw ApiError.notFound('Follow request not found');
+  }
+  if (outcome === 'accepted') {
     await notify({
       userId: requesterId,
       type: 'follow_accepted',
       title: '✅ Follow request approved',
       body: `${c.get('user')!.username} approved your follow request.`,
-      data: { userId },
+      data: { userId, username: c.get('user')!.username },
       push: false,
     }).catch(() => {});
   }
@@ -2209,7 +2728,12 @@ app.get('/api/users/:username/streak', optionalAuth, async (c) => {
   return c.json({ streak: await getStreakState(await resolveViewableUserId(c)) });
 });
 app.get('/api/users/:username/head-to-head', optionalAuth, async (c) => {
-  return c.json({ head_to_head: await getHeadToHead(await resolveViewableUserId(c)) });
+  return c.json({
+    head_to_head: await getHeadToHead(
+      await resolveViewableUserId(c),
+      c.get('user')?.sub ?? null,
+    ),
+  });
 });
 app.get('/api/users/:username/records', optionalAuth, async (c) => {
   return c.json({ records: await getPersonalRecords(await resolveViewableUserId(c)) });
@@ -2219,7 +2743,7 @@ app.get('/api/users/:username/records', optionalAuth, async (c) => {
 app.get('/api/users/:username/year-in-review', optionalAuth, async (c) => {
   const { year, tz_offset } = yearQuerySchema.parse(c.req.query());
   const id = await resolveViewableUserId(c);
-  return c.json({ review: await getYearInReview(id, year, tz_offset) });
+  return c.json({ review: await getYearInReview(id, year, tz_offset, c.get('user')?.sub ?? null) });
 });
 
 // Training log: one month of per-day aggregates (+ light match refs so a day
@@ -2301,11 +2825,21 @@ app.post('/api/internal/sweep', async (c) => {
   const expected = await getSecret('internal_secret');
   if (!provided || !expected || !timingSafeEqual(provided, expected)) throw ApiError.unauthorized();
   const type = (await jsonBody<{ type?: string }>(c)).type;
-  if (type === 'streak') return c.json({ ok: true, recomputed: await runStreakSweep() });
-  if (type === 'territory') return c.json({ ok: true, recomputed: await runTerritorySweep() });
-  if (type === 'ratings') return c.json({ ok: true, recomputed: await runRatingSweep() });
-  if (type === 'court_names') return c.json({ ok: true, named: await runCourtNameSweep() });
-  throw ApiError.badRequest('type must be streak, territory, ratings or court_names');
+  const supported = ['streak', 'territory', 'ratings', 'court_names', 'media_cleanup'];
+  if (!type || !supported.includes(type)) {
+    throw ApiError.badRequest('type must be streak, territory, ratings, court_names or media_cleanup');
+  }
+  // Piggyback the durable deletion queue on existing scheduled sweeps, while
+  // retaining an explicit type for operations/manual recovery.
+  // Keep deletion cleanup bounded so a large Storage folder cannot crowd the
+  // actual sweep out of the Edge wall-clock budget. Cron invokes this route
+  // frequently and failed jobs remain durable with backoff.
+  const media_cleanup = await processMediaCleanupJobs(2);
+  if (type === 'streak') return c.json({ ok: true, recomputed: await runStreakSweep(), media_cleanup });
+  if (type === 'territory') return c.json({ ok: true, recomputed: await runTerritorySweep(), media_cleanup });
+  if (type === 'ratings') return c.json({ ok: true, recomputed: await runRatingSweep(), media_cleanup });
+  if (type === 'court_names') return c.json({ ok: true, named: await runCourtNameSweep(), media_cleanup });
+  return c.json({ ok: true, media_cleanup });
 });
 
 // ─── Error handling ──────────────────────────────────────────────────────
@@ -2339,7 +2873,12 @@ app.onError((err, c) => {
         return c.json({ error: { code: 'bad_request', message: 'Value failed a database constraint' } }, 400);
     }
   }
-  console.error('[error] unhandled', err);
+  console.error('[error] unhandled', {
+    request_id: c.get('requestId'),
+    method: c.req.method,
+    path: c.req.path,
+    error: err instanceof Error ? err.message : String(err),
+  });
   return c.json({ error: { code: 'internal_error', message: 'Something went wrong' } }, 500);
 });
 

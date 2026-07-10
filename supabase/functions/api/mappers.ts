@@ -89,7 +89,6 @@ export function mapCourt(r: Record<string, unknown>): Court {
     source: (r.source as string | null) ?? 'user',
     sector_key: (r.sector_key as string | null) ?? null,
     court_count: r.court_count != null ? Number(r.court_count) : 1,
-    created_by: (r.created_by as string | null) ?? null,
     created_at: toIso(r.created_at),
   };
 }
@@ -166,8 +165,11 @@ export function mapMatchCard(r: Record<string, unknown>): MatchCard {
     court_lng: r.court_lng != null ? Number(r.court_lng) : null,
     opponent_username: (r.opponent_username as string | null) ?? null,
     opponent_display_name: (r.opponent_display_name as string | null) ?? null,
-    kudos_count: Number(r.kudos_count ?? 0),
-    comment_count: Number(r.comment_count ?? 0),
+    // API queries provide viewer-filtered aliases so a blocked actor's old
+    // reaction is not exposed as an aggregate-count side channel. Fall back to
+    // the view totals for internal callers that do not select the aliases.
+    kudos_count: Number(r.visible_kudos_count ?? r.kudos_count ?? 0),
+    comment_count: Number(r.visible_comment_count ?? r.comment_count ?? 0),
     viewer_has_kudos: r.viewer_has_kudos != null ? Boolean(r.viewer_has_kudos) : undefined,
   };
 }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { mapPublicUser, mapUser } from '../../supabase/functions/api/mappers.ts';
+import { mapCourt, mapPublicUser, mapUser } from '../../supabase/functions/api/mappers.ts';
 
 const row = {
   id: '11111111-1111-4111-8111-111111111111',
@@ -38,4 +38,24 @@ test('public user mapping never exposes email or saved home data', () => {
   assert.equal(user.home_label, null);
   assert.equal(user.username, row.username);
   assert.deepEqual(user.equipment, row.equipment);
+});
+
+test('public court mapping does not expose the creating account id', () => {
+  const court = mapCourt({
+    id: '22222222-2222-4222-8222-222222222222',
+    name: 'Public Courts',
+    description: null,
+    surface: 'hard',
+    lat: 47.62,
+    lng: -122.34,
+    address: null,
+    city: 'Seattle',
+    osm_id: null,
+    source: 'user',
+    sector_key: null,
+    court_count: 2,
+    created_by: row.id,
+    created_at: row.created_at,
+  });
+  assert.equal('created_by' in court, false);
 });

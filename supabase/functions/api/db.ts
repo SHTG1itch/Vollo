@@ -16,7 +16,9 @@ export type Row = Record<string, unknown>;
 // the transaction-mode pooler, which doesn't support prepared statements.
 const sql = postgres(config.database.url, {
   prepare: false,
-  max: 5,
+  // Edge isolates scale horizontally. One connection per isolate follows the
+  // serverless guidance and avoids exhausting Postgres with 5× every cold start.
+  max: 1,
   idle_timeout: 20,
   connect_timeout: 15,
 });

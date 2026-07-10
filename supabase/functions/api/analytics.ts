@@ -179,8 +179,10 @@ export interface HeadToHead {
   losses: number;
 }
 
-/** Head-to-head records against every opponent the user has faced. */
-export async function getHeadToHead(userId: string): Promise<HeadToHead[]> {
+/** Head-to-head records against every opponent the user has faced. Registered
+ * opponents retain their own privacy/block boundary when a third party views
+ * this profile; the owner can always see their complete record. */
+export async function getHeadToHead(userId: string, viewerId: string | null): Promise<HeadToHead[]> {
   const rows = await query<{
     opponent_id: string | null;
     opponent_name: string;
@@ -198,9 +200,26 @@ export async function getHeadToHead(userId: string): Promise<HeadToHead[]> {
       WHERE m.user_id = $1
         AND m.verification_status IN ('auto', 'verified')
         AND (m.opponent_id IS NOT NULL OR m.opponent_name IS NOT NULL)
+        AND (
+          m.opponent_id IS NULL OR m.user_id = $2
+          OR (
+            NOT EXISTS (
+              SELECT 1 FROM blocks b
+               WHERE (b.blocker_id = $2 AND b.blocked_id = m.opponent_id)
+                  OR (b.blocker_id = m.opponent_id AND b.blocked_id = $2)
+            )
+            AND (
+              NOT o.is_private
+              OR EXISTS (
+                SELECT 1 FROM follows f
+                 WHERE f.follower_id = $2 AND f.following_id = m.opponent_id
+              )
+            )
+          )
+        )
       GROUP BY opponent_id, COALESCE(o.display_name, m.opponent_name, 'Unknown')
       ORDER BY matches DESC`,
-    [userId],
+    [userId, viewerId],
   );
   return rows.map((r) => ({
     opponent_id: r.opponent_id,

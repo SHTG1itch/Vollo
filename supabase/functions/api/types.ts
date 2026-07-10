@@ -90,7 +90,6 @@ export interface Court {
   sector_key: string | null;
   /** Number of physical courts this facility holds (a "sector"). */
   court_count: number;
-  created_by: string | null;
   created_at: string;
 }
 
@@ -273,4 +272,6 @@ export interface ScheduledMatchCard {
 export interface AuthClaims {
   sub: string; // user id
   username: string;
+  /** Supabase auth.users id; also the Storage ownership folder. */
+  auth_id: string;
 }
