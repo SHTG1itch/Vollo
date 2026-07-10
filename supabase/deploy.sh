@@ -20,7 +20,7 @@ if [ -z "${SUPABASE_ACCESS_TOKEN:-}" ]; then
   exit 1
 fi
 
-npx -y supabase@latest functions deploy api --project-ref "$REF"
+npx -y supabase@2.101.0 functions deploy api --project-ref "$REF"
 
 echo
 echo "Deployed. Smoke test:"
