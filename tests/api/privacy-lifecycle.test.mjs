@@ -22,23 +22,23 @@ const records = readFileSync(
   'utf8',
 );
 const migration = readFileSync(
-  new URL('../../supabase/migrations/031_privacy_social_and_deletion_lifecycle.sql', import.meta.url),
+  new URL('../../supabase/migrations/20260710075731_031_privacy_social_and_deletion_lifecycle.sql', import.meta.url),
   'utf8',
 );
 const relationshipGuardMigration = readFileSync(
-  new URL('../../supabase/migrations/040_split_relationship_guard_triggers.sql', import.meta.url),
+  new URL('../../supabase/migrations/20260710185343_040_split_relationship_guard_triggers.sql', import.meta.url),
   'utf8',
 );
 const mediaMigration = readFileSync(
-  new URL('../../supabase/migrations/034_match_media_cleanup.sql', import.meta.url),
+  new URL('../../supabase/migrations/20260710075734_034_match_media_cleanup.sql', import.meta.url),
   'utf8',
 );
 const profileMediaMigration = readFileSync(
-  new URL('../../supabase/migrations/037_profile_media_cleanup.sql', import.meta.url),
+  new URL('../../supabase/migrations/20260710075737_037_profile_media_cleanup.sql', import.meta.url),
   'utf8',
 );
 const storageShapeMigration = readFileSync(
-  new URL('../../supabase/migrations/038_storage_object_shape.sql', import.meta.url),
+  new URL('../../supabase/migrations/20260710075738_038_storage_object_shape.sql', import.meta.url),
   'utf8',
 );
 

@@ -7,11 +7,11 @@ const sweeps = readFileSync(
   'utf8',
 );
 const migration = readFileSync(
-  new URL('../../supabase/migrations/033_batched_sweeps_and_cron.sql', import.meta.url),
+  new URL('../../supabase/migrations/20260710075733_033_batched_sweeps_and_cron.sql', import.meta.url),
   'utf8',
 );
 const retention = readFileSync(
-  new URL('../../supabase/migrations/035_operational_retention.sql', import.meta.url),
+  new URL('../../supabase/migrations/20260710075735_035_operational_retention.sql', import.meta.url),
   'utf8',
 );
 
@@ -36,6 +36,8 @@ test('sweep cursors wrap safely and stale workers cannot finish a new lease', ()
 
 test('cron uses Vault, explicit long timeouts, and frequent bounded schedules', () => {
   assert.match(migration, /CREATE EXTENSION IF NOT EXISTS supabase_vault WITH SCHEMA vault/);
+  assert.match(migration, /CREATE EXTENSION IF NOT EXISTS pg_cron/);
+  assert.match(migration, /CREATE EXTENSION IF NOT EXISTS pg_net/);
   assert.match(migration, /FROM vault\.decrypted_secrets AS endpoint/);
   assert.match(migration, /WHERE endpoint\.name = 'project_url'/);
   assert.match(migration, /'\*\/15 \* \* \* \*'/);

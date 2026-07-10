@@ -1,0 +1,5 @@
+-- Production applied this follow-up after 012_supabase_auth. Its final
+-- SECURITY DEFINER/revocation state is already represented in the canonical
+-- 012 migration and reinforced by the additive 030 auth-hardening migration.
+-- This ledger placeholder preserves the historical remote version on clean
+-- replays without executing a divergent duplicate definition.

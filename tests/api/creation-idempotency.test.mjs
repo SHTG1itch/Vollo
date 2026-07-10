@@ -8,11 +8,11 @@ const validation = readFileSync(
   'utf8',
 );
 const migration = readFileSync(
-  new URL('../../supabase/migrations/036_creation_idempotency.sql', import.meta.url),
+  new URL('../../supabase/migrations/20260710075736_036_creation_idempotency.sql', import.meta.url),
   'utf8',
 );
 const clubMigration = readFileSync(
-  new URL('../../supabase/migrations/039_club_creation_idempotency.sql', import.meta.url),
+  new URL('../../supabase/migrations/20260710075739_039_club_creation_idempotency.sql', import.meta.url),
   'utf8',
 );
 

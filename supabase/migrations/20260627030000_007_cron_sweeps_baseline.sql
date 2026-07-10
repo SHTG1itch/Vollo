@@ -1,0 +1,4 @@
+-- Production provisioned pg_cron/pg_net outside its historical migration
+-- ledger. Keep this ordered baseline so local and remote histories converge.
+-- The portable, bounded schedules and required extensions are defined by the
+-- additive 033 migration; no legacy hard-coded production URL is replayed.

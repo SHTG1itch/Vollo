@@ -4,7 +4,7 @@ import test from 'node:test';
 
 const apiSource = readFileSync(new URL('../../supabase/functions/api/index.ts', import.meta.url), 'utf8');
 const migration = readFileSync(
-  new URL('../../supabase/migrations/029_scheduled_match_integrity.sql', import.meta.url),
+  new URL('../../supabase/migrations/20260710034401_029_scheduled_match_integrity.sql', import.meta.url),
   'utf8',
 );
 

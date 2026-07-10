@@ -11,7 +11,7 @@ const config = readFileSync(
   'utf8',
 );
 const migration = readFileSync(
-  new URL('../../supabase/migrations/032_geocoder_cache_and_rate_limit.sql', import.meta.url),
+  new URL('../../supabase/migrations/20260710075732_032_geocoder_cache_and_rate_limit.sql', import.meta.url),
   'utf8',
 );
 const sweeps = readFileSync(
