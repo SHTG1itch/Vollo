@@ -1,5 +1,13 @@
 import { create } from 'zustand';
-import { ApiError, api, setAuthToken, setSessionRefresher, setUnauthorizedHandler } from '../api/client';
+import {
+  ApiError,
+  api,
+  getAuthGeneration,
+  isAuthGenerationCurrent,
+  setAuthToken,
+  setSessionRefresher,
+  setUnauthorizedHandler,
+} from '../api/client';
 import { supabase } from '../lib/supabase';
 import { getAppleCredential, getGoogleIdToken, OAuthCancelled } from '../lib/oauth';
 import { getRegisteredPushToken } from '../services/push';
@@ -13,6 +21,9 @@ interface AuthState {
    *  on it. Kept in sync by the onAuthStateChange bridge below. */
   token: string | null;
   hydrated: boolean;
+  /** Set when persisted-session hydration failed; rendering still proceeds so
+   *  a storage failure can never strand the app on its splash screen. */
+  hydrationError: string | null;
   login: (identifier: string, password: string) => Promise<void>;
   /** Native Google / Apple sign-in. Both exchange a provider ID token for a
    *  Supabase session, which flows back through onAuthStateChange like any other
@@ -32,6 +43,7 @@ export const useAuth = create<AuthState>()((set, get) => ({
   user: null,
   token: null,
   hydrated: false,
+  hydrationError: null,
 
   // Sign-in is proxied server-side so a typed username never has to be turned
   // into an email on the client. The proxy returns the session, which we install
@@ -123,18 +135,16 @@ export const useAuth = create<AuthState>()((set, get) => ({
     // Idempotent: the client's unauthorized handler may already have torn the
     // session down — a second call must not re-run the sign-out side effects.
     if (!get().token) return;
-    // Best-effort: stop pushes to this device before the token is revoked.
-    // Failure never blocks logout (the request has its own 15s timeout).
+    // Snapshot and dispatch old-token push cleanup without awaiting it. This
+    // detached request never retries under a subsequent account.
     const pushToken = getRegisteredPushToken();
-    if (pushToken) {
-      try {
-        await api.unregisterPushToken(pushToken);
-      } catch {
-        /* best-effort */
-      }
-    }
+    if (pushToken) api.unregisterPushTokenBestEffort(pushToken);
+
+    // Clear navigation state, the API bearer, and account-owned caches before
+    // Supabase's network revocation. The UI must not remain signed in while a
+    // slow or offline sign-out request is pending.
+    applySession(null, null);
     await supabase.auth.signOut().catch(() => {});
-    // onAuthStateChange clears token/user and per-user caches.
   },
 
   setUser: (user) => set({ user }),
@@ -156,49 +166,64 @@ export const useAuth = create<AuthState>()((set, get) => ({
 // ── Supabase session → app auth state bridge ───────────────────────────────
 let initialized = false;
 
-function applySession(token: string | null): void {
-  const prev = useAuth.getState().token;
-  setAuthToken(token);
-  useAuth.setState({ token });
-  if (token) {
-    void useAuth.getState().refreshMe();
-  } else if (prev) {
-    // Signed out — drop the profile and clear per-user caches so the next
-    // account never sees stale data.
-    useAuth.setState({ user: null });
+function applySession(token: string | null, accountId: string | null): void {
+  const previousGeneration = getAuthGeneration();
+  setAuthToken(token, accountId);
+  const changedSession = previousGeneration !== getAuthGeneration();
+  if (changedSession) {
+    // Drop the previous profile and account-owned caches before rendering the
+    // signed-in replacement (or the signed-out navigator).
+    useAuth.setState({ token, user: null });
     useFeed.getState().reset();
     useNotifications.getState().reset();
+  } else {
+    useAuth.setState({ token });
   }
+  if (token) void useAuth.getState().refreshMe();
 }
 
 supabase.auth.onAuthStateChange((_event, session) => {
-  applySession(session?.access_token ?? null);
+  applySession(session?.access_token ?? null, session?.user.id ?? null);
   if (!initialized) {
     initialized = true;
-    useAuth.setState({ hydrated: true });
   }
+  useAuth.setState({ hydrated: true, hydrationError: null });
 });
 
 // Fallback in case the listener hasn't fired yet — resolve the stored session
 // directly so the splash can never hang waiting to hydrate.
-void supabase.auth.getSession().then(({ data }) => {
-  if (initialized) return;
-  applySession(data.session?.access_token ?? null);
-  initialized = true;
-  useAuth.setState({ hydrated: true });
-});
+void supabase.auth
+  .getSession()
+  .then(({ data, error }) => {
+    if (initialized) return;
+    if (error) throw error;
+    applySession(data.session?.access_token ?? null, data.session?.user.id ?? null);
+    initialized = true;
+    useAuth.setState({ hydrated: true, hydrationError: null });
+  })
+  .catch((error: unknown) => {
+    if (initialized) return;
+    initialized = true;
+    useAuth.setState({
+      hydrated: true,
+      hydrationError: error instanceof Error ? error.message : 'Could not restore the saved session.',
+    });
+  });
 
 // On a 401 the client first asks us for a fresh token — an access token that
 // expired while backgrounded is refreshable and must not end the session.
-setSessionRefresher(async () => {
+setSessionRefresher(async (generation) => {
+  if (!isAuthGenerationCurrent(generation)) return null;
   const { data, error } = await supabase.auth.refreshSession();
-  if (error || !data.session) return null;
+  if (!isAuthGenerationCurrent(generation) || error || !data.session) return null;
   // onAuthStateChange mirrors the new token too; return it so the client can
   // retry the failed request immediately without waiting for that bridge.
   return data.session.access_token;
 });
 
 // Only when the refresh also failed is the session truly dead — sign out cleanly.
-setUnauthorizedHandler(() => {
-  if (useAuth.getState().token) void supabase.auth.signOut();
+setUnauthorizedHandler((generation) => {
+  if (!isAuthGenerationCurrent(generation) || !useAuth.getState().token) return;
+  applySession(null, null);
+  void supabase.auth.signOut().catch(() => {});
 });

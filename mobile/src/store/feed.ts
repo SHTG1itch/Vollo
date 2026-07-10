@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { api } from '../api/client';
+import { api, getAuthGeneration, isAuthGenerationCurrent } from '../api/client';
+import { RequestGeneration } from '../utils/sessionGeneration';
 import type { MatchCard } from '../types';
 
 type Scope = 'global' | 'following';
@@ -22,10 +23,19 @@ interface FeedState {
 
 // A monotonic token so a slow fetch for a previous scope can't overwrite the
 // results of a newer one (e.g. rapid Global↔Following toggles).
-let fetchToken = 0;
+const feedRequests = new RequestGeneration();
+const feedState = new RequestGeneration();
 // matchIds with a kudos request in flight — guards against racing add/remove
 // from rapid double-taps.
-const kudosInFlight = new Set<string>();
+const kudosInFlight = new Map<string, symbol>();
+
+function isCurrent(request: number, session: number): boolean {
+  return feedRequests.isCurrent(request) && isAuthGenerationCurrent(session);
+}
+
+function isCurrentState(state: number, session: number): boolean {
+  return feedState.isCurrent(state) && isAuthGenerationCurrent(session);
+}
 
 export const useFeed = create<FeedState>((set, get) => ({
   matches: [],
@@ -39,25 +49,31 @@ export const useFeed = create<FeedState>((set, get) => ({
   setScope: (scope) => {
     if (scope === get().scope) return;
     // Invalidate any in-flight fetch/loadMore for the old scope immediately.
-    fetchToken++;
+    feedRequests.invalidate();
+    feedState.invalidate();
     // Show the loader (not the empty state) while the new scope loads.
-    set({ scope, matches: [], cursor: null, loading: true, error: null });
+    set({ scope, matches: [], cursor: null, loading: true, loadingMore: false, error: null });
     void get().fetch(false);
   },
 
   fetch: async (refresh = false) => {
-    const token = ++fetchToken;
+    const token = feedRequests.next();
+    const session = getAuthGeneration();
     const scope = get().scope;
-    set(refresh ? { refreshing: true, error: null } : { loading: true, error: null });
+    set(
+      refresh
+        ? { refreshing: true, loadingMore: false, error: null }
+        : { loading: true, loadingMore: false, error: null },
+    );
     try {
       const { matches, next_cursor } = await api.getFeed({ scope, limit: 20 });
-      if (token !== fetchToken) return; // a newer fetch superseded this one
+      if (!isCurrent(token, session)) return; // a newer fetch/session superseded this one
       set({ matches, cursor: next_cursor });
     } catch (e) {
-      if (token !== fetchToken) return;
+      if (!isCurrent(token, session)) return;
       set({ error: e instanceof Error ? e.message : 'Failed to load feed' });
     } finally {
-      if (token === fetchToken) set({ loading: false, refreshing: false });
+      if (isCurrent(token, session)) set({ loading: false, refreshing: false });
     }
   },
 
@@ -66,17 +82,18 @@ export const useFeed = create<FeedState>((set, get) => ({
     if (!cursor || loadingMore) return;
     // Capture the token so a slow page for a superseded scope (or a logged-out
     // session, via reset) is discarded instead of clobbering the newer feed.
-    const token = fetchToken;
+    const token = feedRequests.capture();
+    const session = getAuthGeneration();
     set({ loadingMore: true });
     try {
       const res = await api.getFeed({ scope, before: cursor, limit: 20 });
-      if (token !== fetchToken) return; // scope changed / reset while in flight
+      if (!isCurrent(token, session)) return; // scope/session changed while in flight
       // Append onto the CURRENT list, not the one captured before the await.
       set({ matches: [...get().matches, ...res.matches], cursor: res.next_cursor });
     } catch {
       /* keep what we have */
     } finally {
-      if (token === fetchToken) set({ loadingMore: false });
+      if (isCurrent(token, session)) set({ loadingMore: false });
     }
   },
 
@@ -90,6 +107,9 @@ export const useFeed = create<FeedState>((set, get) => ({
     const target = get().matches.find((m) => m.id === matchId);
     if (!target) return;
     const wasKudosed = target.viewer_has_kudos ?? false;
+    const state = feedState.capture();
+    const session = getAuthGeneration();
+    const operation = Symbol(matchId);
 
     const applyDelta = (kudosed: boolean) =>
       set({
@@ -101,10 +121,11 @@ export const useFeed = create<FeedState>((set, get) => ({
       });
 
     applyDelta(!wasKudosed);
-    kudosInFlight.add(matchId);
+    kudosInFlight.set(matchId, operation);
 
     try {
       const res = wasKudosed ? await api.removeKudos(matchId) : await api.addKudos(matchId);
+      if (!isCurrentState(state, session) || kudosInFlight.get(matchId) !== operation) return;
       // Reconcile only this item from the authoritative server counts.
       set({
         matches: get().matches.map((m) =>
@@ -112,17 +133,19 @@ export const useFeed = create<FeedState>((set, get) => ({
         ),
       });
     } catch {
+      if (!isCurrentState(state, session) || kudosInFlight.get(matchId) !== operation) return;
       // Revert just this item — don't clobber concurrent feed updates.
       applyDelta(wasKudosed);
     } finally {
-      kudosInFlight.delete(matchId);
+      if (kudosInFlight.get(matchId) === operation) kudosInFlight.delete(matchId);
     }
   },
 
   reset: () => {
     // Invalidate in-flight requests so a late page can't repopulate the feed
     // (e.g. the previous user's matches after logout), and drop stale kudos locks.
-    fetchToken++;
+    feedRequests.invalidate();
+    feedState.invalidate();
     kudosInFlight.clear();
     set({ matches: [], scope: 'global', loading: false, refreshing: false, loadingMore: false, cursor: null, error: null });
   },

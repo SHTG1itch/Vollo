@@ -1,4 +1,5 @@
 import { API_BASE } from './config';
+import { SessionGeneration } from '../utils/sessionGeneration';
 import type {
   Achievement,
   AuthResponse,
@@ -41,8 +42,29 @@ export class ApiError extends Error {
 }
 
 let authToken: string | null = null;
-export function setAuthToken(token: string | null): void {
+const authGeneration = new SessionGeneration();
+let sessionAbortController = new AbortController();
+
+/** The generation captured by account-owned store operations. */
+export function getAuthGeneration(): number {
+  return authGeneration.capture();
+}
+
+export function isAuthGenerationCurrent(generation: number): boolean {
+  return authGeneration.isCurrent(generation);
+}
+
+/**
+ * Mirror the current Supabase token and account identity into the API client.
+ * Token rotation for one account remains in the same generation. Signing in,
+ * signing out, or changing accounts invalidates every old request.
+ */
+export function setAuthToken(token: string | null, accountId: string | null): void {
   authToken = token;
+  if (authGeneration.updateAccount(token ? accountId : null)) {
+    sessionAbortController.abort();
+    sessionAbortController = new AbortController();
+  }
 }
 
 /**
@@ -50,8 +72,8 @@ export function setAuthToken(token: string | null): void {
  * a request comes back 401 and the session could not be refreshed, without
  * importing the store directly (which would be a circular dependency).
  */
-let onUnauthorized: (() => void) | null = null;
-export function setUnauthorizedHandler(fn: (() => void) | null): void {
+let onUnauthorized: ((generation: number) => void) | null = null;
+export function setUnauthorizedHandler(fn: ((generation: number) => void) | null): void {
   onUnauthorized = fn;
 }
 
@@ -61,28 +83,45 @@ export function setUnauthorizedHandler(fn: (() => void) | null): void {
  * expired while the app was backgrounded must not tear down a refreshable
  * session. Resolves to the new token, or null when the session is truly dead.
  */
-let refreshSession: (() => Promise<string | null>) | null = null;
-export function setSessionRefresher(fn: (() => Promise<string | null>) | null): void {
+let refreshSession: ((generation: number) => Promise<string | null>) | null = null;
+export function setSessionRefresher(fn: ((generation: number) => Promise<string | null>) | null): void {
   refreshSession = fn;
 }
 
-// Single-flight: concurrent 401s share one refresh instead of stampeding.
-let refreshInFlight: Promise<string | null> | null = null;
-function refreshOnce(): Promise<string | null> {
-  if (!refreshInFlight) {
-    refreshInFlight = (refreshSession ? refreshSession() : Promise.resolve(null))
-      .catch(() => null)
-      .finally(() => {
-        refreshInFlight = null;
-      });
-  }
-  return refreshInFlight;
+// Single-flight within one generation. A new account must never join a refresh
+// that was started by the account it replaced.
+let refreshInFlight: { generation: number; promise: Promise<string | null> } | null = null;
+function refreshOnce(generation: number): Promise<string | null> {
+  if (refreshInFlight?.generation === generation) return refreshInFlight.promise;
+
+  let promise: Promise<string | null>;
+  promise = (refreshSession ? refreshSession(generation) : Promise.resolve(null))
+    .catch(() => null)
+    .then((fresh) => (authGeneration.isCurrent(generation) ? fresh : null))
+    .finally(() => {
+      if (refreshInFlight?.promise === promise) refreshInFlight = null;
+    });
+  refreshInFlight = { generation, promise };
+  return promise;
 }
 
 /** Abort a request that hangs so the UI never spins forever. */
 const REQUEST_TIMEOUT_MS = 15_000;
 
-async function doFetch(path: string, options: RequestInit, token: string | null): Promise<Response> {
+function staleSessionError(): ApiError {
+  return new ApiError(0, 'stale_session', 'This request belonged to a previous sign-in session.');
+}
+
+function assertCurrentGeneration(generation: number): void {
+  if (!authGeneration.isCurrent(generation)) throw staleSessionError();
+}
+
+async function doFetch(
+  path: string,
+  options: RequestInit,
+  token: string | null,
+  sessionSignal?: AbortSignal,
+): Promise<Response> {
   const headers: Record<string, string> = {
     Accept: 'application/json',
     ...(options.body ? { 'Content-Type': 'application/json' } : {}),
@@ -91,43 +130,72 @@ async function doFetch(path: string, options: RequestInit, token: string | null)
   if (token) headers.Authorization = `Bearer ${token}`;
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const callerSignal = options.signal;
+  const abort = () => controller.abort();
+  let timedOut = false;
+
+  if (sessionSignal?.aborted || callerSignal?.aborted) controller.abort();
+  sessionSignal?.addEventListener('abort', abort, { once: true });
+  callerSignal?.addEventListener('abort', abort, { once: true });
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, REQUEST_TIMEOUT_MS);
   try {
     return await fetch(`${API_BASE}${path}`, { ...options, headers, signal: controller.signal });
   } catch (e) {
-    const aborted = e instanceof Error && e.name === 'AbortError';
+    if (sessionSignal?.aborted) throw staleSessionError();
+    const cancelled = callerSignal?.aborted;
+    const aborted = timedOut || (e instanceof Error && e.name === 'AbortError');
     throw new ApiError(
       0,
-      aborted ? 'timeout' : 'network_error',
-      aborted
-        ? 'The Vollo server took too long to respond. Try again.'
-        : 'Could not reach the Vollo server. Check your connection.',
+      cancelled ? 'request_cancelled' : aborted ? 'timeout' : 'network_error',
+      cancelled
+        ? 'The request was cancelled.'
+        : aborted
+          ? 'The Vollo server took too long to respond. Try again.'
+          : 'Could not reach the Vollo server. Check your connection.',
     );
   } finally {
     clearTimeout(timeout);
+    sessionSignal?.removeEventListener('abort', abort);
+    callerSignal?.removeEventListener('abort', abort);
   }
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  let res = await doFetch(path, options, authToken);
+  const generation = authGeneration.capture();
+  const token = authToken;
+  const sessionSignal = sessionAbortController.signal;
+  let res = await doFetch(path, options, token, sessionSignal);
+  assertCurrentGeneration(generation);
 
-  if (res.status === 401 && authToken) {
-    // The token may simply have expired while the app was backgrounded — try a
-    // refresh and one retry before declaring the session dead and signing out.
-    const fresh = await refreshOnce();
-    // Guard on authToken again: if the user signed out while the refresh was
-    // in flight (setAuthToken(null) via the auth bridge), a late-resolving
-    // refresh must not resurrect the cleared token or trigger a sign-out loop.
-    if (fresh && authToken) {
+  if (res.status === 401 && token) {
+    // The token may simply have expired while the app was backgrounded. Refresh
+    // and retry only inside the generation that dispatched the original call.
+    const fresh = await refreshOnce(generation);
+    assertCurrentGeneration(generation);
+    if (fresh) {
       authToken = fresh;
-      res = await doFetch(path, options, fresh);
+      res = await doFetch(path, options, fresh, sessionSignal);
+      assertCurrentGeneration(generation);
     }
-    if (res.status === 401 && authToken) onUnauthorized?.();
+    if (res.status === 401) {
+      onUnauthorized?.(generation);
+      assertCurrentGeneration(generation);
+    }
   }
 
   if (res.status === 204) return undefined as T;
 
-  const text = await res.text();
+  let text: string;
+  try {
+    text = await res.text();
+  } catch {
+    assertCurrentGeneration(generation);
+    throw new ApiError(res.status, 'bad_response', 'The server returned an unreadable response.');
+  }
+  assertCurrentGeneration(generation);
   let json: unknown = {};
   if (text) {
     try {
@@ -141,6 +209,16 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     throw new ApiError(res.status, err?.code ?? 'error', err?.message ?? 'Request failed');
   }
   return json as T;
+}
+
+/**
+ * Fire-and-forget request used only for old-token cleanup during logout. It
+ * snapshots the bearer and never retries, parses, or exposes its response.
+ */
+function sendBestEffort(path: string, options: RequestInit): void {
+  const token = authToken;
+  if (!token) return;
+  void doFetch(path, options, token).catch(() => {});
 }
 
 /** Encode a URL path segment — user-supplied ids/usernames must never be able
@@ -351,9 +429,10 @@ export const api = {
     ),
   registerPushToken: (token: string, platform: string) =>
     request<{ ok: boolean }>('/users/me/push-token', { method: 'POST', body: JSON.stringify({ token, platform }) }),
-  // Best-effort on logout so a signed-out device stops receiving pushes.
-  unregisterPushToken: (token: string) =>
-    request<{ ok: boolean }>('/users/me/push-token', { method: 'DELETE', body: JSON.stringify({ token }) }),
+  // Detached cleanup: it keeps A's captured bearer, never retries as B, and
+  // cannot delay clearing the local session.
+  unregisterPushTokenBestEffort: (token: string) =>
+    sendBestEffort('/users/me/push-token', { method: 'DELETE', body: JSON.stringify({ token }) }),
 
   // ── Notifications ──
   getNotifications: () =>
