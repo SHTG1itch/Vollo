@@ -6,7 +6,7 @@ BEGIN;
 CREATE SCHEMA IF NOT EXISTS extensions;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 
-SELECT extensions.plan(35);
+SELECT extensions.plan(36);
 
 SELECT extensions.has_table('public', 'geocode_cache', 'geocoder cache exists');
 SELECT extensions.has_table('public', 'outbound_service_limits', 'shared provider limiter exists');
@@ -52,6 +52,14 @@ SELECT extensions.throws_ok(
   '23514',
   'blocked users cannot create a relationship',
   'a blocked pair cannot race a follow into existence'
+);
+
+SELECT extensions.throws_ok(
+  $$INSERT INTO public.follow_requests (requester_id, target_id)
+    VALUES ('03100000-0000-4000-8000-000000000001', '03100000-0000-4000-8000-000000000002')$$,
+  '23514',
+  'blocked users cannot create a relationship',
+  'a blocked pair cannot race a follow request into existence'
 );
 
 DELETE FROM public.blocks

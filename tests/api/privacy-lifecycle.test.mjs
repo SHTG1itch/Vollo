@@ -25,6 +25,10 @@ const migration = readFileSync(
   new URL('../../supabase/migrations/031_privacy_social_and_deletion_lifecycle.sql', import.meta.url),
   'utf8',
 );
+const relationshipGuardMigration = readFileSync(
+  new URL('../../supabase/migrations/040_split_relationship_guard_triggers.sql', import.meta.url),
+  'utf8',
+);
 const mediaMigration = readFileSync(
   new URL('../../supabase/migrations/034_match_media_cleanup.sql', import.meta.url),
   'utf8',
@@ -149,8 +153,20 @@ test('match tags and challenge proposals serialize block and spam-cap checks', (
 
 test('database triggers close cross-table races and repair cascaded club exits', () => {
   assert.match(migration, /pg_advisory_xact_lock[\s\S]*vollo-social:/);
-  assert.match(migration, /CREATE TRIGGER trg_follows_unblocked[\s\S]*guard_unblocked_relationship/);
-  assert.match(migration, /CREATE TRIGGER trg_follow_requests_unblocked[\s\S]*guard_unblocked_relationship/);
+  assert.match(relationshipGuardMigration, /DROP FUNCTION IF EXISTS public\.guard_unblocked_relationship\(\)/);
+  assert.match(relationshipGuardMigration, /CREATE TRIGGER trg_follows_unblocked[\s\S]*guard_unblocked_follow\(\)/);
+  assert.match(
+    relationshipGuardMigration,
+    /CREATE TRIGGER trg_follow_requests_unblocked[\s\S]*guard_unblocked_follow_request\(\)/,
+  );
+  assert.match(
+    relationshipGuardMigration,
+    /assert_unblocked_relationship\(NEW\.follower_id, NEW\.following_id\)/,
+  );
+  assert.match(
+    relationshipGuardMigration,
+    /assert_unblocked_relationship\(NEW\.requester_id, NEW\.target_id\)/,
+  );
   assert.match(migration, /CREATE TRIGGER trg_blocks_sever_relationships[\s\S]*sever_relationships_after_block/);
   assert.match(migration, /UPDATE public\.matches[\s\S]*verification_status = 'rejected'/);
   assert.match(migration, /UPDATE public\.scheduled_matches[\s\S]*status = 'cancelled', match_id = NULL/);
@@ -159,7 +175,6 @@ test('database triggers close cross-table races and repair cascaded club exits',
   assert.match(migration, /CREATE TRIGGER trg_club_members_repair_after_delete[\s\S]*repair_club_after_member_delete/);
   assert.match(migration, /SET role = 'admin'[\s\S]*ORDER BY m\.joined_at ASC, m\.user_id ASC/);
   for (const triggerFunction of [
-    'guard_unblocked_relationship',
     'lock_block_pair',
     'sever_relationships_after_block',
     'accept_requests_for_public_profile',
@@ -170,6 +185,16 @@ test('database triggers close cross-table races and repair cascaded club exits',
       new RegExp(`FUNCTION public\\.${triggerFunction}\\(\\)[^]*SECURITY DEFINER[^]*SET search_path = pg_catalog, public`),
     );
   }
+  for (const triggerFunction of ['guard_unblocked_follow', 'guard_unblocked_follow_request']) {
+    assert.match(
+      relationshipGuardMigration,
+      new RegExp(`FUNCTION public\\.${triggerFunction}\\(\\)[^]*SECURITY DEFINER[^]*SET search_path = pg_catalog, public`),
+    );
+  }
+  assert.match(
+    relationshipGuardMigration,
+    /REVOKE EXECUTE ON FUNCTION public\.assert_unblocked_relationship\(UUID, UUID\)[^]*FROM PUBLIC, anon, authenticated/,
+  );
   const clubRepair = section(
     migration,
     'CREATE OR REPLACE FUNCTION public.repair_club_after_member_delete()',
