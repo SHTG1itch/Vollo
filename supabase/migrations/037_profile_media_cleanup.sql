@@ -24,22 +24,22 @@ SECURITY DEFINER
 SET search_path = pg_catalog, public
 AS $$
 DECLARE
-  marker CONSTANT TEXT := '/storage/v1/object/public/user-media/';
-  object_path TEXT;
+  v_marker CONSTANT TEXT := '/storage/v1/object/public/user-media/';
+  v_object_path TEXT;
 BEGIN
   IF media_url IS NULL OR owner_auth_id IS NULL OR media_kind NOT IN ('avatar', 'cover')
-     OR position(marker IN media_url) = 0 THEN
+     OR position(v_marker IN media_url) = 0 THEN
     RETURN;
   END IF;
-  object_path := split_part(split_part(split_part(media_url, marker, 2), '?', 1), '#', 1);
+  v_object_path := split_part(split_part(split_part(media_url, v_marker, 2), '?', 1), '#', 1);
   IF (
-       object_path ~ ('^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}/profile/' || media_kind || '-[A-Za-z0-9][A-Za-z0-9._-]{0,199}[.]jpg$')
-       OR object_path = owner_auth_id::text || '/' || media_kind || '.jpg'
+       v_object_path ~ ('^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}/profile/' || media_kind || '-[A-Za-z0-9][A-Za-z0-9._-]{0,199}[.]jpg$')
+       OR v_object_path = owner_auth_id::text || '/' || media_kind || '.jpg'
      )
-     AND object_path LIKE (owner_auth_id::text || '/%') THEN
+     AND v_object_path LIKE (owner_auth_id::text || '/%') THEN
     INSERT INTO public.media_object_cleanup_jobs (object_path, auth_id, reason)
-    VALUES (object_path, owner_auth_id, 'deleted')
-    ON CONFLICT (object_path) DO UPDATE
+    VALUES (v_object_path, owner_auth_id, 'deleted')
+    ON CONFLICT ON CONSTRAINT media_object_cleanup_jobs_pkey DO UPDATE
       SET reason = 'deleted', next_attempt_at = now(), locked_until = NULL,
           last_error = NULL, updated_at = now();
   END IF;

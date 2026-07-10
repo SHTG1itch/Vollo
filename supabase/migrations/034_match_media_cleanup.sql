@@ -33,29 +33,29 @@ SECURITY DEFINER
 SET search_path = pg_catalog, public
 AS $$
 DECLARE
-  owner_auth_id UUID;
-  marker CONSTANT TEXT := '/storage/v1/object/public/user-media/';
-  object_path TEXT;
+  v_owner_auth_id UUID;
+  v_marker CONSTANT TEXT := '/storage/v1/object/public/user-media/';
+  v_object_path TEXT;
 BEGIN
-  IF OLD.photo_url IS NULL OR position(marker IN OLD.photo_url) = 0 THEN
+  IF OLD.photo_url IS NULL OR position(v_marker IN OLD.photo_url) = 0 THEN
     RETURN OLD;
   END IF;
 
   -- During a normal match deletion the owner row still exists. During an
   -- account cascade it may not; the whole-account media job handles that case.
-  SELECT u.auth_id INTO owner_auth_id
+  SELECT u.auth_id INTO v_owner_auth_id
     FROM public.users u
    WHERE u.id = OLD.user_id;
-  IF owner_auth_id IS NULL THEN
+  IF v_owner_auth_id IS NULL THEN
     RETURN OLD;
   END IF;
 
-  object_path := split_part(split_part(split_part(OLD.photo_url, marker, 2), '?', 1), '#', 1);
-  IF object_path ~ '^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}/match/[A-Za-z0-9][A-Za-z0-9._-]{0,199}$'
-     AND object_path LIKE (owner_auth_id::text || '/match/%') THEN
+  v_object_path := split_part(split_part(split_part(OLD.photo_url, v_marker, 2), '?', 1), '#', 1);
+  IF v_object_path ~ '^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}/match/[A-Za-z0-9][A-Za-z0-9._-]{0,199}$'
+     AND v_object_path LIKE (v_owner_auth_id::text || '/match/%') THEN
     INSERT INTO public.media_object_cleanup_jobs (object_path, auth_id, reason)
-    VALUES (object_path, owner_auth_id, 'deleted')
-    ON CONFLICT (object_path) DO UPDATE
+    VALUES (v_object_path, v_owner_auth_id, 'deleted')
+    ON CONFLICT ON CONSTRAINT media_object_cleanup_jobs_pkey DO UPDATE
       SET reason = 'deleted', next_attempt_at = now(), locked_until = NULL, last_error = NULL,
           updated_at = now();
   END IF;

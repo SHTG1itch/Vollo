@@ -203,11 +203,13 @@ test('account deletion surfaces Auth failures and durably cleans owned Storage',
 test('owned media lifecycle durably queues and bounds exact-object Storage cleanup', () => {
   assert.match(mediaMigration, /CREATE TABLE IF NOT EXISTS public\.media_object_cleanup_jobs/);
   assert.match(mediaMigration, /AFTER DELETE ON public\.matches[\s\S]*enqueue_deleted_match_media/);
-  assert.match(mediaMigration, /object_path LIKE \(owner_auth_id::text \|\| '\/match\/%'\)/);
+  assert.match(mediaMigration, /v_object_path LIKE \(v_owner_auth_id::text \|\| '\/match\/%'\)/);
+  assert.match(mediaMigration, /ON CONFLICT ON CONSTRAINT media_object_cleanup_jobs_pkey/);
   assert.match(mediaMigration, /REVOKE ALL ON TABLE public\.media_object_cleanup_jobs FROM PUBLIC, anon, authenticated/);
   assert.match(profileMediaMigration, /media_object_cleanup_owned_path_check/);
   assert.match(profileMediaMigration, /CREATE TRIGGER trg_users_enqueue_replaced_media/);
   assert.match(profileMediaMigration, /enqueue_owned_profile_media_url/);
+  assert.match(profileMediaMigration, /ON CONFLICT ON CONSTRAINT media_object_cleanup_jobs_pkey/);
   assert.match(mediaCleanup, /OWNED_MEDIA_OBJECT_RE/);
   assert.match(mediaCleanup, /MAX_OBJECTS_PER_PASS = 200/);
   assert.match(mediaCleanup, /if \(batch\.complete\)[^]*DELETE FROM media_cleanup_jobs/);
