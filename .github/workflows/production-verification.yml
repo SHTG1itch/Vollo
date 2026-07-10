@@ -1,0 +1,129 @@
+name: Production verification
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-verification-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: "true"
+  EXPO_NO_TELEMETRY: "1"
+  EXPO_NONINTERACTIVE: "1"
+
+jobs:
+  app:
+    name: App tests and native bundles
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24.18.0
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Run repository tests
+        run: npm test
+
+      - name: Install mobile dependencies from lockfile
+        run: npm ci --prefix mobile --no-audit --no-fund
+
+      - name: Type-check mobile app
+        run: npm --prefix mobile run typecheck
+
+      - name: Lint mobile app
+        run: npm --prefix mobile run lint
+
+      - name: Reject high-severity runtime dependency advisories
+        run: npm --prefix mobile audit --omit=dev --audit-level=high
+
+      - name: Validate Expo SDK dependency alignment
+        working-directory: mobile
+        run: npx --no-install expo install --check
+
+      - name: Validate public Expo configuration
+        working-directory: mobile
+        run: npx --no-install expo config --type public
+
+      - name: Export Android production bundle
+        working-directory: mobile
+        run: npx --no-install expo export --platform android --output-dir "$RUNNER_TEMP/vollo-android" --clear
+
+      - name: Export iOS production bundle
+        working-directory: mobile
+        run: npx --no-install expo export --platform ios --output-dir "$RUNNER_TEMP/vollo-ios" --clear
+
+  edge:
+    name: Edge runtime type-check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: 2.9.2
+          cache: true
+
+      - name: Type-check with frozen dependencies
+        working-directory: supabase/functions/api
+        run: deno check --frozen --config deno.json --lock=deno.lock index.ts
+
+  database:
+    name: Database migrations and pgTAP
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID: ci-google-client
+      SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET: ci-google-secret
+      SUPABASE_AUTH_EXTERNAL_APPLE_CLIENT_ID: ci-apple-client
+      SUPABASE_AUTH_EXTERNAL_APPLE_SECRET: ci-apple-secret
+      SUPABASE_TELEMETRY_DISABLED: "1"
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24.18.0
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@46f7f98c7f948ad727d22c1e67fab04c223a0520 # v3.0.0
+        with:
+          version: 2.101.0
+
+      - name: Apply every migration to a clean database
+        run: supabase db start
+
+      - name: Run database invariants
+        run: supabase test db
+
+      - name: Lint public database functions
+        run: supabase db lint --local --schema public --level error --fail-on error
+
+      - name: Stop local database
+        if: always()
+        run: supabase stop --no-backup

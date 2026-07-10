@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test tests/**/*.test.mjs"
+    "test": "node --test tests/**/*.test.mjs",
+    "verify": "npm test && npm run verify:mobile && npm run verify:edge",
+    "verify:mobile": "npm --prefix mobile run typecheck && npm --prefix mobile run lint",
+    "verify:edge": "deno check --frozen --config supabase/functions/api/deno.json --lock=supabase/functions/api/deno.lock supabase/functions/api/index.ts",
+    "load:test": "node scripts/read-only-load-test.mjs"
   }
 }
