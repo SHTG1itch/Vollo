@@ -25,6 +25,8 @@ export type TabParamList = {
 export type RootStackParamList = {
   Login: undefined;
   Register: undefined;
+  ForgotPassword: undefined;
+  ResetPassword: undefined;
   Tabs: NavigatorScreenParams<TabParamList> | undefined;
   MatchDetail: { matchId: string };
   Court: { courtId: string };

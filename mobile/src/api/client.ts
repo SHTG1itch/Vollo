@@ -83,20 +83,26 @@ export function setUnauthorizedHandler(fn: ((generation: number) => void) | null
  * expired while the app was backgrounded must not tear down a refreshable
  * session. Resolves to the new token, or null when the session is truly dead.
  */
-let refreshSession: ((generation: number) => Promise<string | null>) | null = null;
-export function setSessionRefresher(fn: ((generation: number) => Promise<string | null>) | null): void {
+// string = refreshed token; null = refresh credentials are definitively dead;
+// undefined = a transient provider/network failure, which must preserve the
+// local session so the user can retry when connectivity returns.
+type SessionRefreshResult = string | null | undefined;
+let refreshSession: ((generation: number) => Promise<SessionRefreshResult>) | null = null;
+export function setSessionRefresher(
+  fn: ((generation: number) => Promise<SessionRefreshResult>) | null,
+): void {
   refreshSession = fn;
 }
 
 // Single-flight within one generation. A new account must never join a refresh
 // that was started by the account it replaced.
-let refreshInFlight: { generation: number; promise: Promise<string | null> } | null = null;
-function refreshOnce(generation: number): Promise<string | null> {
+let refreshInFlight: { generation: number; promise: Promise<SessionRefreshResult> } | null = null;
+function refreshOnce(generation: number): Promise<SessionRefreshResult> {
   if (refreshInFlight?.generation === generation) return refreshInFlight.promise;
 
-  let promise: Promise<string | null>;
+  let promise: Promise<SessionRefreshResult>;
   promise = (refreshSession ? refreshSession(generation) : Promise.resolve(null))
-    .catch(() => null)
+    .catch(() => undefined)
     .then((fresh) => (authGeneration.isCurrent(generation) ? fresh : null))
     .finally(() => {
       if (refreshInFlight?.promise === promise) refreshInFlight = null;
@@ -175,6 +181,13 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     // and retry only inside the generation that dispatched the original call.
     const fresh = await refreshOnce(generation);
     assertCurrentGeneration(generation);
+    if (fresh === undefined) {
+      throw new ApiError(
+        503,
+        'auth_unavailable',
+        'Sign-in could not be refreshed right now. Check your connection and try again.',
+      );
+    }
     if (fresh) {
       authToken = fresh;
       res = await doFetch(path, options, fresh, sessionSignal);
@@ -281,6 +294,7 @@ export interface SessionTokens {
 }
 
 export interface CreateScheduledMatchPayload {
+  client_key?: string;
   opponent_id?: string;
   opponent_name?: string;
   court_id?: string;
@@ -315,6 +329,26 @@ export const api = {
   // ── Matches ──
   createMatch: (body: CreateMatchPayload) =>
     request<{ match: MatchCard }>('/matches', { method: 'POST', body: JSON.stringify(body) }),
+  registerMatchPhotoDraft: (objectPath: string) =>
+    request<{ ok: boolean }>('/media/match-drafts', {
+      method: 'POST',
+      body: JSON.stringify({ object_path: objectPath }),
+    }),
+  discardMatchPhotoDraft: (objectPath: string) =>
+    request<void>('/media/match-drafts', {
+      method: 'DELETE',
+      body: JSON.stringify({ object_path: objectPath }),
+    }),
+  registerProfilePhotoDraft: (objectPath: string) =>
+    request<{ ok: boolean }>('/media/profile-drafts', {
+      method: 'POST',
+      body: JSON.stringify({ object_path: objectPath }),
+    }),
+  discardProfilePhotoDraft: (objectPath: string) =>
+    request<void>('/media/profile-drafts', {
+      method: 'DELETE',
+      body: JSON.stringify({ object_path: objectPath }),
+    }),
   getMatch: (id: string) => request<{ match: MatchCard }>(`/matches/${seg(id)}`),
   deleteMatch: (id: string) => request<void>(`/matches/${seg(id)}`, { method: 'DELETE' }),
   // Matches awaiting my confirmation (I'm the tagged opponent).
@@ -354,7 +388,7 @@ export const api = {
     ),
   getCourtLeaderboard: (id: string) =>
     request<{ leaderboard: LeaderboardEntry[] }>(`/courts/${seg(id)}/leaderboard`),
-  createCourt: (body: { name: string; surface: Surface; lat: number; lng: number; city?: string; address?: string; description?: string; court_count?: number }) =>
+  createCourt: (body: { client_key?: string; name: string; surface: Surface; lat: number; lng: number; city?: string; address?: string; description?: string; court_count?: number }) =>
     request<{ court: Court }>('/courts', { method: 'POST', body: JSON.stringify(body) }),
   geocode: (q: string, limit = 5) => request<{ results: GeocodeResult[] }>(`/courts/geocode${qs({ q, limit })}`),
 
@@ -369,7 +403,7 @@ export const api = {
   // ── Clubs ──
   getClubs: (q?: string, limit = 50) => request<{ clubs: Club[] }>(`/clubs${qs({ q, limit })}`),
   getMyClubs: () => request<{ clubs: Club[] }>('/clubs/mine'),
-  createClub: (body: { name: string; description?: string; city?: string }) =>
+  createClub: (body: { client_key?: string; name: string; description?: string; city?: string }) =>
     request<{ club: Club }>('/clubs', { method: 'POST', body: JSON.stringify(body) }),
   getClub: (id: string) => request<{ club: Club; members: ClubMember[] }>(`/clubs/${seg(id)}`),
   joinClub: (id: string) => request<{ ok: boolean }>(`/clubs/${seg(id)}/join`, { method: 'POST' }),

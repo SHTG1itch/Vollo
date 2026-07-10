@@ -23,6 +23,7 @@ import Constants, { ExecutionEnvironment } from 'expo-constants';
 
 type GoogleModule = typeof import('@react-native-google-signin/google-signin');
 type AppleModule = typeof import('expo-apple-authentication');
+type CryptoModule = typeof import('expo-crypto');
 
 // Deferred loads — only run the native bootstrap when a provider is actually used.
 // Deliberate lazy require()s: the callers need a SYNCHRONOUS load (a dynamic
@@ -36,15 +37,25 @@ function loadApple(): AppleModule {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   return require('expo-apple-authentication') as AppleModule;
 }
+function loadCrypto(): CryptoModule {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require('expo-crypto') as CryptoModule;
+}
 
 const extra = Constants.expoConfig?.extra as
-  | { googleWebClientId?: string; googleIosClientId?: string; googleAuthEnabled?: boolean }
+  | {
+      googleWebClientId?: string;
+      googleIosClientId?: string;
+      googleAuthEnabled?: boolean;
+      appleAuthEnabled?: boolean;
+    }
   | undefined;
 
 // Public OAuth client ids (not secrets). Env wins so a build can inject them
 // without editing app.json; otherwise fall back to expo.extra.
 const GOOGLE_WEB_CLIENT_ID = (process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ?? extra?.googleWebClientId ?? '').trim();
 const GOOGLE_IOS_CLIENT_ID = (process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID ?? extra?.googleIosClientId ?? '').trim();
+const GOOGLE_CLIENT_ID_RE = /^[a-zA-Z0-9_-]+\.apps\.googleusercontent\.com$/;
 
 // Master switch to hide the Google button without dropping the configured client
 // id — e.g. to test the email/username flow on its own. Defaults to enabled;
@@ -53,6 +64,10 @@ const GOOGLE_IOS_CLIENT_ID = (process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID ?? ex
 // untouched either way.
 const GOOGLE_AUTH_ENABLED =
   process.env.EXPO_PUBLIC_GOOGLE_AUTH !== '0' && extra?.googleAuthEnabled !== false;
+// Apple needs paid developer provisioning and a configured Supabase provider.
+// Device capability alone is not proof that those release prerequisites exist.
+const APPLE_AUTH_ENABLED =
+  process.env.EXPO_PUBLIC_APPLE_AUTH === '1' || extra?.appleAuthEnabled === true;
 
 /** Thrown when the user dismisses the provider sheet. Callers treat it as a
  *  no-op (no error shown) rather than a failure. */
@@ -95,12 +110,13 @@ function isGoogleNativeAvailable(): boolean {
  *  the native module is actually available in this binary — drives whether the
  *  "Continue with Google" button is shown at all. In Expo Go this is false (the
  *  native SDK isn't present), so the button is hidden rather than failing on tap.
- *  On iOS the native sheet additionally needs its own iOS client id (the app.json
- *  iosUrlScheme is still a placeholder), so the button stays hidden there until
- *  one is provisioned rather than failing at sign-in time. */
+ *  On iOS the native sheet additionally needs its own valid iOS client id; the
+ *  dynamic Expo config adds its URL scheme only when one is provisioned, so the
+ *  button stays hidden instead of failing at sign-in time. */
 export function isGoogleConfigured(): boolean {
-  if (Platform.OS === 'ios' && GOOGLE_IOS_CLIENT_ID.length === 0) return false;
-  return GOOGLE_AUTH_ENABLED && GOOGLE_WEB_CLIENT_ID.length > 0 && isGoogleNativeAvailable();
+  if (!GOOGLE_CLIENT_ID_RE.test(GOOGLE_WEB_CLIENT_ID)) return false;
+  if (Platform.OS === 'ios' && !GOOGLE_CLIENT_ID_RE.test(GOOGLE_IOS_CLIENT_ID)) return false;
+  return GOOGLE_AUTH_ENABLED && isGoogleNativeAvailable();
 }
 
 let googleConfigured = false;
@@ -151,7 +167,7 @@ export async function getGoogleIdToken(): Promise<string> {
 /** Apple sign-in is iOS-only and needs the device capability (iOS 13+). Returns
  *  false (without loading the native module) on any non-iOS platform. */
 export async function isAppleAvailable(): Promise<boolean> {
-  if (Platform.OS !== 'ios') return false;
+  if (!APPLE_AUTH_ENABLED || Platform.OS !== 'ios') return false;
   try {
     return await loadApple().isAvailableAsync();
   } catch {
@@ -161,6 +177,9 @@ export async function isAppleAvailable(): Promise<boolean> {
 
 export interface AppleCredential {
   identityToken: string;
+  /** Raw nonce Supabase verifies against the SHA-256 value bound into Apple's
+   *  signed token. It prevents a captured identity token from being replayed. */
+  nonce: string;
   /** Apple returns the user's name ONLY on the first authorization, and never in
    *  the identity token — so capture it here while we can. Null afterwards. */
   fullName: string | null;
@@ -169,18 +188,33 @@ export interface AppleCredential {
 export async function getAppleCredential(): Promise<AppleCredential> {
   try {
     const Apple = loadApple();
+    const Crypto = loadCrypto();
+    const rawNonce = Crypto.randomUUID();
+    const hashedNonce = await Crypto.digestStringAsync(
+      Crypto.CryptoDigestAlgorithm.SHA256,
+      rawNonce,
+    );
     const credential = await Apple.signInAsync({
+      nonce: hashedNonce,
       requestedScopes: [
         Apple.AppleAuthenticationScope.FULL_NAME,
         Apple.AppleAuthenticationScope.EMAIL,
       ],
     });
     if (!credential.identityToken) throw new Error('Apple did not return an identity token.');
-    const name = [credential.fullName?.givenName, credential.fullName?.familyName]
+    const name = [
+      credential.fullName?.givenName,
+      credential.fullName?.middleName,
+      credential.fullName?.familyName,
+    ]
       .filter(Boolean)
       .join(' ')
       .trim();
-    return { identityToken: credential.identityToken, fullName: name.length ? name : null };
+    return {
+      identityToken: credential.identityToken,
+      nonce: rawNonce,
+      fullName: name.length ? name : null,
+    };
   } catch (e) {
     // expo-apple-authentication surfaces a dismissal as ERR_REQUEST_CANCELED.
     if (typeof e === 'object' && e !== null && (e as { code?: string }).code === 'ERR_REQUEST_CANCELED') {

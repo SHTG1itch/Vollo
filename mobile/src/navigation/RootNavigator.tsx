@@ -5,6 +5,8 @@ import { useAuth } from '../store/auth';
 import { Tabs } from './Tabs';
 import { LoginScreen } from '../screens/LoginScreen';
 import { RegisterScreen } from '../screens/RegisterScreen';
+import { ForgotPasswordScreen } from '../screens/ForgotPasswordScreen';
+import { ResetPasswordScreen } from '../screens/ResetPasswordScreen';
 import { MatchDetailScreen } from '../screens/MatchDetailScreen';
 import { CourtDetailScreen } from '../screens/CourtDetailScreen';
 import { CourtsScreen } from '../screens/CourtsScreen';
@@ -30,6 +32,8 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export function RootNavigator() {
   const token = useAuth((s) => s.token);
+  const accountId = useAuth((s) => s.accountId);
+  const passwordRecovery = useAuth((s) => s.passwordRecovery);
 
   return (
     <Stack.Navigator
@@ -41,8 +45,12 @@ export function RootNavigator() {
         contentStyle: { backgroundColor: colors.bg },
       }}
     >
-      {token ? (
-        <Stack.Group>
+      {passwordRecovery ? (
+        <Stack.Group screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} />
+        </Stack.Group>
+      ) : token ? (
+        <Stack.Group navigationKey={accountId ?? 'authenticated'}>
           <Stack.Screen name="Tabs" component={Tabs} options={{ headerShown: false }} />
           <Stack.Screen name="MatchDetail" component={MatchDetailScreen} options={{ title: 'Match' }} />
           <Stack.Screen name="Court" component={CourtDetailScreen} options={{ title: 'Court' }} />
@@ -72,6 +80,7 @@ export function RootNavigator() {
         <Stack.Group screenOptions={{ headerShown: false }}>
           <Stack.Screen name="Login" component={LoginScreen} />
           <Stack.Screen name="Register" component={RegisterScreen} />
+          <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
         </Stack.Group>
       )}
     </Stack.Navigator>

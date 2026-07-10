@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
@@ -24,8 +24,12 @@ export function RegisterScreen({ navigation }: Props) {
   const [awaitingConfirmation, setAwaitingConfirmation] = useState(false);
   const [resendNote, setResendNote] = useState<string | null>(null);
   const [resending, setResending] = useState(false);
+  const submitActive = useRef(false);
+  const resendActive = useRef(false);
 
   const submit = async () => {
+    if (submitActive.current || loading) return;
+    submitActive.current = true;
     setError(null);
     setLoading(true);
     try {
@@ -40,11 +44,14 @@ export function RegisterScreen({ navigation }: Props) {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Registration failed');
     } finally {
+      submitActive.current = false;
       setLoading(false);
     }
   };
 
   const resend = async () => {
+    if (resendActive.current || resending) return;
+    resendActive.current = true;
     setResendNote(null);
     setResending(true);
     try {
@@ -53,6 +60,7 @@ export function RegisterScreen({ navigation }: Props) {
     } catch (e) {
       setResendNote(e instanceof Error ? e.message : 'Could not resend right now.');
     } finally {
+      resendActive.current = false;
       setResending(false);
     }
   };
@@ -69,7 +77,7 @@ export function RegisterScreen({ navigation }: Props) {
             </Muted>
           </View>
           <View style={styles.form}>
-            {resendNote ? <Text style={styles.note}>{resendNote}</Text> : null}
+            {resendNote ? <Text style={styles.note} accessibilityRole="alert" accessibilityLiveRegion="polite">{resendNote}</Text> : null}
             <Button label="Resend email" variant="ghost" onPress={resend} loading={resending} />
             <Button label="Back to sign in" onPress={() => navigation.goBack()} />
           </View>
@@ -97,7 +105,7 @@ export function RegisterScreen({ navigation }: Props) {
           </View>
 
           <View style={styles.form}>
-            <Field label="Display name" value={displayName} onChangeText={setDisplayName} placeholder="Srivats I." />
+            <Field label="Display name" value={displayName} onChangeText={setDisplayName} placeholder="Srivats I." autoComplete="name" textContentType="name" maxLength={60} />
             <Field
               label="Username"
               autoCapitalize="none"
@@ -105,6 +113,9 @@ export function RegisterScreen({ navigation }: Props) {
               value={username}
               onChangeText={setUsername}
               placeholder="srivats"
+              autoComplete="username-new"
+              textContentType="username"
+              maxLength={20}
             />
             <Field
               label="Email"
@@ -114,9 +125,22 @@ export function RegisterScreen({ navigation }: Props) {
               value={email}
               onChangeText={setEmail}
               placeholder="you@example.com"
+              autoComplete="email"
+              textContentType="emailAddress"
             />
-            <Field label="Password" secureTextEntry value={password} onChangeText={setPassword} placeholder="min 8 chars" />
-            {error ? <Text style={styles.error}>{error}</Text> : null}
+            <Field
+              label="Password"
+              secureTextEntry
+              value={password}
+              onChangeText={setPassword}
+              placeholder="min 8 chars"
+              autoComplete="new-password"
+              textContentType="newPassword"
+              maxLength={72}
+              returnKeyType="done"
+              onSubmitEditing={submit}
+            />
+            {error ? <Text style={styles.error} accessibilityRole="alert" accessibilityLiveRegion="assertive">{error}</Text> : null}
             <Button label="Create account" onPress={submit} loading={loading} disabled={!valid} />
             <SocialAuth onError={setError} />
             <Button label="I already have an account" variant="ghost" onPress={() => navigation.goBack()} />

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
@@ -12,12 +12,16 @@ type Props = NativeStackScreenProps<RootStackParamList, 'Login'>;
 
 export function LoginScreen({ navigation }: Props) {
   const login = useAuth((s) => s.login);
+  const hydrationError = useAuth((s) => s.hydrationError);
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const loginActive = useRef(false);
 
   const submit = async () => {
+    if (loginActive.current || loading) return;
+    loginActive.current = true;
     setError(null);
     setLoading(true);
     try {
@@ -25,6 +29,7 @@ export function LoginScreen({ navigation }: Props) {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Login failed');
     } finally {
+      loginActive.current = false;
       setLoading(false);
     }
   };
@@ -46,6 +51,9 @@ export function LoginScreen({ navigation }: Props) {
               value={identifier}
               onChangeText={setIdentifier}
               placeholder="srivats"
+              autoComplete="username"
+              textContentType="username"
+              returnKeyType="next"
             />
             <Field
               label="Password"
@@ -53,9 +61,25 @@ export function LoginScreen({ navigation }: Props) {
               value={password}
               onChangeText={setPassword}
               placeholder="••••••••"
+              autoComplete="current-password"
+              textContentType="password"
+              maxLength={72}
+              returnKeyType="done"
+              onSubmitEditing={submit}
             />
-            {error ? <Text style={styles.error}>{error}</Text> : null}
-            <Button label="Sign in" onPress={submit} loading={loading} disabled={!identifier || !password} />
+            {hydrationError ? (
+              <Text style={styles.warning} accessibilityRole="alert" accessibilityLiveRegion="polite">
+                Your saved sign-in could not be restored. Sign in again to continue.
+              </Text>
+            ) : null}
+            {error ? <Text style={styles.error} accessibilityRole="alert" accessibilityLiveRegion="assertive">{error}</Text> : null}
+            <Button label="Sign in" onPress={submit} loading={loading} disabled={!identifier.trim() || !password} />
+            <Button
+              label="Forgot password?"
+              variant="ghost"
+              onPress={() => navigation.navigate('ForgotPassword')}
+              disabled={loading}
+            />
             <SocialAuth onError={setError} />
             <Button label="Create an account" variant="ghost" onPress={() => navigation.navigate('Register')} />
           </View>
@@ -85,6 +109,16 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
     textAlign: 'center',
     backgroundColor: colors.lossSoft,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.md,
+  },
+  warning: {
+    color: colors.text,
+    fontSize: font.small,
+    fontFamily: fonts.body,
+    textAlign: 'center',
+    backgroundColor: colors.surfaceAlt,
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
     borderRadius: radius.md,

@@ -20,10 +20,14 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "app.vollo.mobile",
-      "usesAppleSignIn": true
+      "usesAppleSignIn": false,
+      "config": {
+        "usesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "app.vollo.mobile",
+      "allowBackup": false,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0F7A3D"
@@ -55,9 +59,9 @@
       "expo-asset",
       "expo-font",
       [
-        "@react-native-google-signin/google-signin",
+        "expo-secure-store",
         {
-          "iosUrlScheme": "com.googleusercontent.apps.REPLACE_WITH_REVERSED_IOS_CLIENT_ID"
+          "configureAndroidBackup": true
         }
       ],
       [
@@ -76,6 +80,7 @@
       "googleWebClientId": "958415288431-fol1pk22asmc748feuvbo1gkntcegis2.apps.googleusercontent.com",
       "googleIosClientId": "",
       "googleAuthEnabled": true,
+      "appleAuthEnabled": false,
       "eas": {
         "projectId": "0be07316-2872-4688-afad-404a26ef890d"
       }

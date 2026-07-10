@@ -86,6 +86,7 @@ export default function App() {
   // background refresh, and the setup effect below must not re-run (re-register
   // push, tear down listeners) each time — only on actual sign-in/out.
   const isAuthed = useAuth((s) => s.token != null);
+  const passwordRecovery = useAuth((s) => s.passwordRecovery);
   const coldStartHandled = useRef(false);
   // A deep link that landed while signed out, parked until sign-in (the linking
   // config can't route it — the detail screens aren't mounted yet).
@@ -97,7 +98,10 @@ export default function App() {
   const fontsReady = fontsLoaded || fontError != null;
 
   useEffect(() => {
-    if (!isAuthed) return;
+    // A password-reset callback creates a temporary authenticated session. Do
+    // not register that session for push or load account data until the user has
+    // actually completed the password change.
+    if (!isAuthed || passwordRecovery) return;
     void useAuth.getState().refreshMe();
     void useNotifications.getState().fetch();
     void registerForPush();
@@ -124,31 +128,44 @@ export default function App() {
       tapSub.remove();
       recvSub.remove();
     };
-  }, [isAuthed]);
+  }, [isAuthed, passwordRecovery]);
 
-  // While signed out, park any incoming vollo:// link instead of losing it.
+  // Consume reset credentials before navigation can retain them. While signed
+  // out, park any other vollo:// link instead of losing its destination.
   useEffect(() => {
-    if (isAuthed) return;
+    let active = true;
+    const handleUrl = async (url: string) => {
+      const consumed = await useAuth.getState().beginPasswordRecovery(url);
+      if (!active) return;
+      if (consumed) {
+        pendingLink.current = null;
+      } else if (!useAuth.getState().token) {
+        pendingLink.current = url;
+      }
+    };
     // The launch URL is only relevant once — don't re-park it after a logout.
     if (!initialUrlChecked.current) {
       initialUrlChecked.current = true;
       void Linking.getInitialURL().then((url) => {
-        if (url && !useAuth.getState().token) pendingLink.current = url;
+        if (url) void handleUrl(url);
       });
     }
     const sub = Linking.addEventListener('url', ({ url }) => {
-      pendingLink.current = url;
+      void handleUrl(url);
     });
-    return () => sub.remove();
-  }, [isAuthed]);
+    return () => {
+      active = false;
+      sub.remove();
+    };
+  }, []);
 
   // …and replay it as soon as the user is signed in and the authed stack exists.
   useEffect(() => {
-    if (!isAuthed || !pendingLink.current) return;
+    if (!isAuthed || passwordRecovery || !pendingLink.current) return;
     const url = pendingLink.current;
     pendingLink.current = null;
     replayDeepLink(url);
-  }, [isAuthed]);
+  }, [isAuthed, passwordRecovery]);
 
   if (!hydrated || !fontsReady) {
     return (

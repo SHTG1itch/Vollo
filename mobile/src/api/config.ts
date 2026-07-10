@@ -1,3 +1,4 @@
+import 'react-native-url-polyfill/auto';
 import Constants from 'expo-constants';
 
 /**
@@ -22,5 +23,19 @@ if (!configured && !__DEV__) {
   );
 }
 
-export const API_URL = configured ?? 'http://localhost:54321/functions/v1';
+const candidate = (configured ?? 'http://localhost:54321/functions/v1').replace(/\/+$/, '');
+let parsed: URL;
+try {
+  parsed = new URL(candidate);
+} catch {
+  throw new Error('Vollo API URL must be a valid absolute URL.');
+}
+if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+  throw new Error('Vollo API URL must use HTTP or HTTPS.');
+}
+if (!__DEV__ && parsed.protocol !== 'https:') {
+  throw new Error('Vollo API URL must use HTTPS in a release build.');
+}
+
+export const API_URL = candidate;
 export const API_BASE = `${API_URL}/api`;

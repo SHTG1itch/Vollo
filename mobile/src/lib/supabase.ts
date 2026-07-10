@@ -2,13 +2,14 @@
 //
 // Auth (sign-up / sign-in / session refresh) goes straight to Supabase Auth from
 // the device; the resulting access token is sent as the bearer to our Edge
-// Function API. The session is persisted in AsyncStorage and auto-refreshed, so
-// users stay signed in across launches without us hand-rolling token storage.
+// Function API. Native refresh tokens are persisted in the OS Keychain/Keystore
+// (with a one-time migration from the old AsyncStorage value) and auto-refreshed,
+// so users stay signed in across launches without exposing tokens in plaintext.
 import 'react-native-url-polyfill/auto';
 import { AppState } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
 import Constants from 'expo-constants';
+import { authStorage } from './authStorage';
 
 const extra = Constants.expoConfig?.extra as
   | { supabaseUrl?: string; supabaseAnonKey?: string }
@@ -23,11 +24,28 @@ if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
   throw new Error('Supabase URL/anon key missing — set expo.extra.supabaseUrl / supabaseAnonKey.');
 }
 
+let parsedSupabaseUrl: URL;
+try {
+  parsedSupabaseUrl = new URL(SUPABASE_URL);
+} catch {
+  throw new Error('Supabase URL must be a valid absolute URL.');
+}
+if (parsedSupabaseUrl.protocol !== 'http:' && parsedSupabaseUrl.protocol !== 'https:') {
+  throw new Error('Supabase URL must use HTTP or HTTPS.');
+}
+if (!__DEV__ && parsedSupabaseUrl.protocol !== 'https:') {
+  throw new Error('Supabase URL must use HTTPS in a release build.');
+}
+
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
-    storage: AsyncStorage,
+    storage: authStorage,
     autoRefreshToken: true,
     persistSession: true,
+    // Mobile deep links can be claimed by another installed app. PKCE keeps an
+    // intercepted callback code useless without the verifier stored on the
+    // device that initiated the confirmation or recovery flow.
+    flowType: 'pkce',
     // Mobile uses native deep links, not URL-based session detection.
     detectSessionInUrl: false,
   },

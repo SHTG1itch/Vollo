@@ -33,18 +33,20 @@ export function SettingsScreen() {
 
   const togglePrivate = async (next: boolean) => {
     if (!user || privateSaving) return;
+    const accountId = user.id;
     tapLight();
     setPrivateSaving(true);
     // Optimistic: flip locally, revert if the save fails.
     setUser({ ...user, is_private: next });
     try {
       const res = await api.updateProfile({ is_private: next });
-      setUser(res.user);
+      const current = useAuth.getState().user;
+      if (current?.id === accountId) setUser({ ...current, is_private: res.user.is_private });
     } catch (e) {
       // Revert from the store's CURRENT user — the `user` captured above may be
       // stale if anything else updated the profile while the save was in flight.
       const current = useAuth.getState().user;
-      if (current) setUser({ ...current, is_private: !next });
+      if (current?.id === accountId) setUser({ ...current, is_private: !next });
       showToast(e instanceof ApiError ? e.message : 'Could not update privacy — please try again.', 'error');
     } finally {
       setPrivateSaving(false);
@@ -53,16 +55,20 @@ export function SettingsScreen() {
 
   const toggleCompetitive = async (next: boolean) => {
     if (!user || competitiveSaving) return;
+    const accountId = user.id;
     tapLight();
     setCompetitiveSaving(true);
     // Optimistic: flip locally, revert from the store's current user on failure.
     setUser({ ...user, show_competitive: next });
     try {
       const res = await api.updateProfile({ show_competitive: next });
-      setUser(res.user);
+      const current = useAuth.getState().user;
+      if (current?.id === accountId) {
+        setUser({ ...current, show_competitive: res.user.show_competitive });
+      }
     } catch (e) {
       const current = useAuth.getState().user;
-      if (current) setUser({ ...current, show_competitive: !next });
+      if (current?.id === accountId) setUser({ ...current, show_competitive: !next });
       showToast(e instanceof ApiError ? e.message : 'Could not update visibility — please try again.', 'error');
     } finally {
       setCompetitiveSaving(false);
@@ -117,7 +123,7 @@ export function SettingsScreen() {
       <Card style={{ gap: spacing.sm }}>
         <SectionHeader title="Account" />
         {user ? <Muted>Signed in as @{user.username}</Muted> : null}
-        <Button label="Edit profile" variant="secondary" onPress={() => navigation.navigate('EditProfile')} />
+        <Button label="Edit profile" variant="secondary" disabled={!user} onPress={() => navigation.navigate('EditProfile')} />
         <Button label="Find players" variant="secondary" onPress={() => navigation.navigate('UserSearch')} />
       </Card>
 
@@ -134,6 +140,8 @@ export function SettingsScreen() {
             value={user?.is_private ?? false}
             onValueChange={togglePrivate}
             disabled={privateSaving}
+            accessibilityLabel="Private account"
+            accessibilityHint="Limits your matches and stats to approved followers"
             trackColor={{ true: colors.primary, false: colors.border }}
             thumbColor={colors.white}
           />
@@ -151,6 +159,8 @@ export function SettingsScreen() {
             value={user?.show_competitive ?? true}
             onValueChange={toggleCompetitive}
             disabled={competitiveSaving}
+            accessibilityLabel="Territory and leaderboard visibility"
+            accessibilityHint="Shows competitive map and leaderboard results to everyone"
             trackColor={{ true: colors.primary, false: colors.border }}
             thumbColor={colors.white}
           />
