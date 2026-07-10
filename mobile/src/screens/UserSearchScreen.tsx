@@ -4,7 +4,7 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { api, type UserSearchResult } from '../api/client';
-import { Avatar, Button, EmptyState, Field, Screen } from '../components/ui';
+import { Avatar, Button, EmptyState, ErrorState, Field, Screen } from '../components/ui';
 import { Icon } from '../components/icons';
 import { colors, font, fonts, radius, shadow, spacing } from '../theme';
 
@@ -17,6 +17,7 @@ export function UserSearchScreen() {
   const [results, setResults] = useState<UserSearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
+  const [error, setError] = useState(false);
   const token = useRef(0);
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -26,10 +27,12 @@ export function UserSearchScreen() {
     if (!query) {
       setResults([]);
       setSearched(false);
+      setError(false);
       setLoading(false);
       return;
     }
     setLoading(true);
+    setError(false);
     try {
       const { users } = await api.searchUsers(query);
       if (t === token.current) {
@@ -37,9 +40,12 @@ export function UserSearchScreen() {
         setSearched(true);
       }
     } catch {
+      // A failed request is NOT "no such player" — mark it as an error so the
+      // user can retry rather than wrongly concluding the account doesn't exist.
       if (t === token.current) {
         setResults([]);
         setSearched(true);
+        setError(true);
       }
     } finally {
       if (t === token.current) setLoading(false);
@@ -133,6 +139,14 @@ export function UserSearchScreen() {
           loading ? (
             <View style={{ paddingTop: spacing.xxl }}>
               <ActivityIndicator color={colors.primary} />
+            </View>
+          ) : error ? (
+            <View style={{ paddingTop: spacing.xxl }}>
+              <ErrorState
+                title="Search failed"
+                message="Check your connection and try again."
+                onRetry={() => void run(q)}
+              />
             </View>
           ) : searched ? (
             <EmptyState icon="🔍" title="No players found" subtitle="Try a different name or username." />

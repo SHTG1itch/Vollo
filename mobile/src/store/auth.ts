@@ -34,6 +34,10 @@ interface AuthState {
   hydrationError: string | null;
   passwordRecovery: boolean;
   passwordRecoveryError: string | null;
+  /** True when the most recent `/auth/me` load failed while no profile was yet
+   *  loaded. Lets the Me tab offer a retry instead of spinning forever; a
+   *  transient failure that still has a cached `user` leaves this false. */
+  meError: boolean;
   login: (identifier: string, password: string) => Promise<void>;
   /** Native Google / Apple sign-in. Both exchange a provider ID token for a
    *  Supabase session, which flows back through onAuthStateChange like any other
@@ -61,6 +65,7 @@ export const useAuth = create<AuthState>()((set, get) => ({
   hydrationError: null,
   passwordRecovery: false,
   passwordRecoveryError: null,
+  meError: false,
 
   // Sign-in is proxied server-side so a typed username never has to be turned
   // into an email on the client. The proxy returns the session, which we install
@@ -235,12 +240,15 @@ export const useAuth = create<AuthState>()((set, get) => ({
     if (!get().token) return;
     try {
       const { user } = await api.me();
-      set({ user });
+      set({ user, meError: false });
     } catch {
-      // Swallow everything: a network blip on cold start must NOT nuke a valid
-      // session, and a real 401 has already been handled by the client's
-      // setUnauthorizedHandler (which owns the sign-out path) — calling
-      // logout() here too would duplicate the teardown.
+      // Swallow the failure for session lifetime: a network blip on cold start
+      // must NOT nuke a valid session, and a real 401 has already been handled
+      // by the client's setUnauthorizedHandler (which owns the sign-out path).
+      // But if we still have no profile to show, surface an error flag so the Me
+      // tab can offer a retry instead of an indefinite spinner. A transient
+      // failure that still has a cached user stays silent.
+      if (!get().user) set({ meError: true });
     }
   },
 }));
@@ -272,7 +280,7 @@ function applySession(token: string | null, accountId: string | null): void {
   if (changedSession) {
     // Drop the previous profile and account-owned caches before rendering the
     // signed-in replacement (or the signed-out navigator).
-    useAuth.setState({ token, accountId, user: null });
+    useAuth.setState({ token, accountId, user: null, meError: false });
     useFeed.getState().reset();
     useNotifications.getState().reset();
   } else {

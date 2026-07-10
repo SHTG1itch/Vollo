@@ -591,11 +591,34 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
 
 export function MeScreen() {
   const user = useAuth((s) => s.user);
+  const meError = useAuth((s) => s.meError);
+  const refreshMe = useAuth((s) => s.refreshMe);
   const insets = useSafeAreaInsets();
+  const [retrying, setRetrying] = useState(false);
+  const retry = useCallback(async () => {
+    setRetrying(true);
+    try {
+      await refreshMe();
+    } finally {
+      setRetrying(false);
+    }
+  }, [refreshMe]);
   // The Me tab has no navigation header — pad past the status bar/notch.
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg, paddingTop: insets.top }}>
-      {user ? <ProfileView username={user.username} isSelf /> : <Loading />}
+      {user ? (
+        <ProfileView username={user.username} isSelf />
+      ) : meError && !retrying ? (
+        // A valid session whose /auth/me load failed (offline cold start etc.)
+        // must not spin forever — offer a retry instead.
+        <ErrorState
+          title="Couldn't load your profile"
+          message="Check your connection and try again."
+          onRetry={retry}
+        />
+      ) : (
+        <Loading />
+      )}
     </View>
   );
 }

@@ -87,6 +87,9 @@ export function LogMatchScreen() {
   const [showStats, setShowStats] = useState(false);
   const [stats, setStats] = useState<MatchStats>(emptyStats);
   const [courts, setCourts] = useState<Court[]>([]);
+  // Distinguish "the court list failed to load" from "no courts nearby" so the
+  // picker can offer a retry instead of implying the area is genuinely empty.
+  const [courtsError, setCourtsError] = useState(false);
   // Bumped on every court (re)load and when a freshly-added court is injected, so
   // a slow background discovery refresh can't clobber a newer list/selection.
   const courtsToken = useRef(0);
@@ -137,6 +140,7 @@ export function LogMatchScreen() {
   const loadCourts = useCallback(async () => {
     const here = coords.current;
     const t = ++courtsToken.current;
+    if (t === courtsToken.current) setCourtsError(false);
     try {
       if (here) {
         // Show the nearby DB courts immediately (no Overpass wait)…
@@ -159,7 +163,9 @@ export function LogMatchScreen() {
       const { courts: all } = await api.getCourts({ limit: 30 });
       if (t === courtsToken.current) setCourts(all);
     } catch {
-      /* offline / no courts */
+      // Both the location-scoped and the fallback fetch failed — the list is
+      // unknown, not confirmed empty. Flag it so the picker says so.
+      if (t === courtsToken.current) setCourtsError(true);
     }
   }, []);
 
@@ -600,7 +606,13 @@ export function LogMatchScreen() {
           ))}
         </ScrollView>
         {courts.length === 0 ? (
-          <Muted>No nearby courts yet — tap ＋ Add court to drop one on the map.</Muted>
+          courtsError ? (
+            <Pressable onPress={() => void loadCourts()} accessibilityRole="button" accessibilityLabel="Retry loading courts">
+              <Muted>Couldn&apos;t load nearby courts — tap to retry, or ＋ Add court to drop one on the map.</Muted>
+            </Pressable>
+          ) : (
+            <Muted>No nearby courts yet — tap ＋ Add court to drop one on the map.</Muted>
+          )
         ) : null}
       </Section>
 
