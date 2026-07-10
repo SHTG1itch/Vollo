@@ -78,6 +78,14 @@ test('sensitive errors are non-cacheable and UUIDs fail at the HTTP boundary', (
   assert.match(cursor, /UUID_RE\.test\(parsed\.id\)/);
 });
 
+test('transient database saturation is retryable without leaking internals', () => {
+  assert.match(source, /'53300',\s*\/\/ too_many_connections/);
+  assert.match(source, /'57P01', '57P02', '57P03'/);
+  assert.match(source, /if \(isTransientDatabaseError\(err\)\)/);
+  assert.match(source, /c\.header\('Retry-After', '1'\)/);
+  assert.match(source, /code: 'service_unavailable'.*Vollo is briefly busy/s);
+});
+
 test('one match guard hides unresolved matches before enforcing privacy and blocks', () => {
   const guard = section('async function assertCanViewMatch', "app.get('/api/matches/:id'");
   const statusCheck = guard.indexOf("match.verification_status !== 'auto'");

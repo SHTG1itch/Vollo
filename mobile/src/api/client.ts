@@ -199,6 +199,21 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     }
   }
 
+  // A transaction-pooler spike is safe to retry once for reads. Never replay a
+  // mutation here: create routes have explicit idempotency where needed, but a
+  // generic transport layer must not assume every POST/PATCH/DELETE is safe.
+  const method = (options.method ?? 'GET').toUpperCase();
+  if (res.status === 503 && (method === 'GET' || method === 'HEAD')) {
+    const advertisedSeconds = Number.parseFloat(res.headers.get('Retry-After') ?? '');
+    const delayMs = Number.isFinite(advertisedSeconds)
+      ? Math.min(1_500, Math.max(100, advertisedSeconds * 1_000))
+      : 400;
+    await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+    assertCurrentGeneration(generation);
+    res = await doFetch(path, options, authToken, sessionSignal);
+    assertCurrentGeneration(generation);
+  }
+
   if (res.status === 204) return undefined as T;
 
   let text: string;

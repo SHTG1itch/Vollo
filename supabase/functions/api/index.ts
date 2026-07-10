@@ -2847,6 +2847,21 @@ app.notFound(() => {
   throw ApiError.notFound('Route not found');
 });
 
+const TRANSIENT_DATABASE_CODES = new Set([
+  '08000', '08001', '08003', '08004', '08006', '08007', '08P01',
+  '53300', // too_many_connections
+  '57P01', '57P02', '57P03', // shutdown / cannot_connect_now
+  'CONNECTION_CLOSED', 'CONNECT_TIMEOUT', 'ECONNRESET', 'ETIMEDOUT',
+]);
+
+function isTransientDatabaseError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const code = 'code' in error ? String((error as { code?: unknown }).code ?? '') : '';
+  if (TRANSIENT_DATABASE_CODES.has(code)) return true;
+  const message = error instanceof Error ? error.message : '';
+  return /too many clients|remaining connection slots|max client connections|connection (?:closed|terminated)|connect timeout/i.test(message);
+}
+
 app.onError((err, c) => {
   if (err instanceof ApiError) {
     if (err.status === 429) {
@@ -2857,6 +2872,17 @@ app.onError((err, c) => {
   }
   if (err instanceof ZodError) {
     return c.json({ error: { code: 'validation_error', message: 'Request validation failed', details: err.flatten() } }, 400);
+  }
+  if (isTransientDatabaseError(err)) {
+    c.header('Retry-After', '1');
+    console.warn('[database] transient failure', {
+      request_id: c.get('requestId'),
+      code: typeof err === 'object' && err !== null && 'code' in err ? String(err.code) : 'unknown',
+    });
+    return c.json(
+      { error: { code: 'service_unavailable', message: 'Vollo is briefly busy. Please retry.' } },
+      503,
+    );
   }
   // Map common Postgres SQLSTATE codes to sensible client errors.
   if (typeof err === 'object' && err !== null && 'code' in err) {
