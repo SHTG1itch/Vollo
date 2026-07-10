@@ -61,6 +61,8 @@ test('migration files preserve the production ledger and timestamp ordering', as
     readFile(new URL('../../supabase/migrations/20260710075733_033_batched_sweeps_and_cron.sql', import.meta.url), 'utf8'),
   ]);
   assert.doesNotMatch(cronBaseline, /https:\/\/[a-z0-9]{20}\.supabase\.co/);
+  assert.match(cronBaseline, /CREATE EXTENSION IF NOT EXISTS pg_cron/);
+  assert.match(cronBaseline, /CREATE EXTENSION IF NOT EXISTS pg_net/);
   assert.match(boundedSweeps, /CREATE EXTENSION IF NOT EXISTS pg_cron/);
   assert.match(boundedSweeps, /CREATE EXTENSION IF NOT EXISTS pg_net/);
 });
