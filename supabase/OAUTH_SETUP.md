@@ -12,9 +12,9 @@ be done in a console with your own developer accounts: create the OAuth clients,
 enable the providers in Supabase, and paste the client ids back into the app.
 
 > The buttons are **capability-gated**: until you complete the steps below the
-> Google button is hidden (no `googleWebClientId`) and the Apple button only
-> appears on a real iOS build. So a half-finished setup never breaks the
-> existing sign-in screen.
+> Google button is hidden (no `googleWebClientId`) and the Apple button requires
+> both a real iOS build and the explicit `appleAuthEnabled` release flag. So a
+> half-finished setup never breaks the existing sign-in screen.
 
 > **You need a custom dev build, not Expo Go.** Both providers are native
 > modules, so test on an EAS dev build / TestFlight / a release build — not Expo
@@ -33,7 +33,7 @@ enable the providers in Supabase, and paste the client ids back into the app.
 | Web OAuth client | **Vollo Web** — `958415288431-fol1pk22asmc748feuvbo1gkntcegis2.apps.googleusercontent.com`; redirect URI = the Supabase callback |
 | Android OAuth client | **Vollo Android** — `958415288431-ui589sqprbac8v4e87h1f143m5qq5gtu.apps.googleusercontent.com`; package `app.vollo.mobile`, SHA-1 `9B:1A:88:97:8F:1B:29:D4:0E:CA:8A:75:EC:F8:65:27:8C:2D:CF:D9` (EAS `development` keystore) |
 | Supabase Google provider | **Enabled** with the Web client id + secret (verified live: `GET /auth/v1/settings` → `external.google: true`) |
-| App config | `expo.extra.googleWebClientId` set in `mobile/app.json`; **`googleAuthEnabled: true`** (master switch ON → button shown); EAS project linked (`eas.json` + `extra.eas.projectId`) |
+| App config | `expo.extra.googleWebClientId` set in `mobile/app.json`; **`googleAuthEnabled: true`**; EAS project linked (`eas.json` + `extra.eas.projectId`). The button still requires a native build, and iOS additionally requires a valid iOS client id. |
 | DB provisioning | Migration `015`'s `handle_new_auth_user()` confirmed live and proven end-to-end against the project (simulated Google identity → `public.users` row with derived handle/display/avatar + `user_streaks`, collisions suffixed; email sign-up's explicit username/display\_name still win) |
 
 **To use it:** build & install the Android dev client signed with that same
@@ -71,8 +71,8 @@ OAuth client in the Vollo project (§2d), or Google returns `DEVELOPER_ERROR`.
 
 **Apple sign-in is intentionally not set up** — Sign In with Apple requires the
 Apple Developer Program ($99/yr), which conflicts with the $0 constraint. The
-Apple button stays hidden automatically; revisit §3 only if you ever pay for that
-program.
+Apple button stays hidden because `extra.appleAuthEnabled` is explicitly false;
+revisit §3 only if you ever pay for that program.
 
 ---
 
@@ -88,9 +88,9 @@ You'll fill the Google and Apple panels with values produced in steps 2–3.
 
 ## 2. Google
 
-> **§2a–2c are already done** (see "Live status" above) — the Web client exists,
-> Supabase is configured, and `app.json` is set. The only outstanding piece is the
-> **Android** client in **§2d**. §2a–2c remain here for reference / disaster recovery.
+> **§2a–2d are already done for the current Android EAS keystore** (see "Live
+> status" above). They remain here for reference, disaster recovery, and any
+> future signing key.
 
 ### 2a. Google Cloud — OAuth consent screen + client ids
 In <https://console.cloud.google.com> → APIs & Services:
@@ -112,23 +112,22 @@ In <https://console.cloud.google.com> → APIs & Services:
   the native id token's audience is the iOS/Android client id, and Supabase
   rejects it unless that id is listed here.*
 
-### 2c. App config — `mobile/app.json`
+### 2c. App config — `mobile/app.json` + `mobile/app.config.js`
 | Where | Value |
 | --- | --- |
 | `expo.extra.googleWebClientId` | the **Web** client id |
 | `expo.extra.googleIosClientId` | the **iOS** client id |
-| `expo.plugins → @react-native-google-signin/google-signin → iosUrlScheme` | the **iOS** client id **reversed**, e.g. `com.googleusercontent.apps.1234-abcd` |
+| Dynamic Google plugin | `mobile/app.config.js` derives the reversed iOS URL scheme only when the iOS client id is valid. Do not commit a placeholder. |
 
 (Or inject `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` / `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID`
 at build time instead of editing `app.json`.)
 
-The Google button appears once `googleWebClientId` is non-empty **and** the
-`expo.extra.googleAuthEnabled` master switch is `true` (its default). Set that
-switch to `false` — or build with `EXPO_PUBLIC_GOOGLE_AUTH=0` — to hide the
-button for email-only testing without dropping the configured client id; the
-Google Cloud / Supabase setup stays untouched either way.
+The Google button appears only in a binary containing the native module, with a
+valid web client id and `expo.extra.googleAuthEnabled` enabled. iOS also requires
+a valid iOS client id. Set the switch to `false` — or build with
+`EXPO_PUBLIC_GOOGLE_AUTH=0` — to hide it for email-only testing.
 
-### 2d. Android OAuth client (the remaining step) — needs your SHA-1
+### 2d. Android OAuth client — repeat for any new signing key
 Android sign-in only works if the Vollo project has an **Android** OAuth client
 whose package + SHA-1 match the installed app. To get the SHA-1 from your EAS
 build keystore (free):
@@ -154,16 +153,18 @@ variant's SHA-1, since they can use different keystores.)
 ## 3. Apple (iOS) — deferred (not free)
 
 > Skipped under the $0 constraint: Sign In with Apple requires the **Apple
-> Developer Program ($99/yr)**. The Apple button stays hidden until both a native
-> iOS build and the steps below exist. Do this only if you later pay for that
-> program.
+> Developer Program ($99/yr)**. The Apple button stays hidden while
+> `extra.appleAuthEnabled` is false. Do this only if you later pay for that
+> program, then enable the Supabase provider and set the flag (or build with
+> `EXPO_PUBLIC_APPLE_AUTH=1`).
 
 Requires a paid **Apple Developer** account. For **native iOS** the minimum is:
 
 1. **Certificates, Identifiers & Profiles → Identifiers →** your App ID
    (`app.vollo.mobile`) → enable the **Sign In with Apple** capability.
-   (`ios.usesAppleSignIn: true` in `app.json` already requests the matching
-   entitlement at build time.)
+   (Setting `appleAuthEnabled: true` makes `app.config.js` add Expo's Apple
+   config plugin and the matching `ios.usesAppleSignIn` entitlement at build
+   time; disabled builds request neither.)
 2. **Supabase → Apple provider → Enabled**, and add the bundle id
    `app.vollo.mobile` to **Authorized Client IDs** — for native iOS the id
    token's audience is the bundle id, so that's all GoTrue needs to trust it.

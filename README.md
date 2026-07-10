@@ -96,6 +96,24 @@ with `EXPO_PUBLIC_API_URL` to target a different deployment.
 ### Backend (Supabase)
 
 - **Migrations** live in `supabase/migrations` (applied via the Supabase MCP/CLI).
+- **Database runtime:** set the Edge secret `DATABASE_POOL_URL` to the project’s
+  transaction-pooler connection string (port 6543) for production traffic. The
+  function falls back to Supabase’s built-in `SUPABASE_DB_URL` for local/initial
+  setup, and uses one connection per Edge isolate with prepared statements off.
+- **Per-environment cron endpoint:** before or after migration `033`, store that
+  environment's project base URL in Vault. Clean local/CI databases deliberately
+  leave this absent, so their cron jobs cannot send traffic to a deployed project:
+
+  ```sql
+  select vault.create_secret(
+    'https://<20-character-project-ref>.supabase.co',
+    'project_url',
+    'Vollo maintenance Edge Function base URL'
+  );
+  ```
+
+  The scheduled statements accept only an HTTPS `*.supabase.co` project URL and
+  become safe no-ops until it is provisioned.
 - **Deploy** the edge function: bundle `supabase/functions/api` and deploy as the
   `api` function with `verify_jwt` disabled (the function does its own Supabase
   token validation, and `/auth/login` + `/auth/username-available` must be
@@ -117,7 +135,8 @@ MatchScore = (gamesWon − gamesLost) × StreakModifier
 ### Temporal heat index (streaks)
 Activity is bucketed into rolling 7-day windows. The streak is the run of consecutive
 windows with ≥1 match; the modifier scales up `+0.1` per maintained week, capped at
-`×2.0`. A 6-hourly sweep decays modifiers the moment a window lapses.
+`×2.0`. A bounded sweep runs every 15 minutes and decays modifiers soon after a
+window lapses without attempting to process the entire user base in one function.
 
 ### Match verification (competitive integrity)
 A match logged against a **registered Vollo player** starts `pending` and counts for
@@ -136,7 +155,8 @@ controller's score at a court inside their territory, the controller gets a
 **⚔️ Turf War Initiated** alert.
 
 ### The Domination Engine (concave hull)
-On every counting match (and on a 6-hourly sweep) the engine, for each affected player:
+On every counting match (plus a bounded 30-minute maintenance sweep) the engine,
+for each affected player:
 
 1. pulls **controlled courts** (rank ≤ 2 in the 30-day window),
 2. **clusters** them by the 10 km radius (single-linkage),
@@ -193,12 +213,15 @@ verified-match gate keeps that honest).
   territory, you get a "⚔️ Turf War Initiated" alert so control is a constant fight.
 - **Challenge a player** — a ⚔️ Challenge button on any profile (or on a domination
   zone's card) proposes a schedulable match; the opponent gets a challenge push.
-- **Share to story** — a Strava-style share sheet rasterises a match card at story
-  resolution for Instagram/Snapchat, or copies it to the clipboard.
+- **Share to story + sticker** — a Strava-style share sheet produces an exact
+  1080×1920 story image in Photo or Court mode, plus a transparent PNG Sticker
+  containing the match metrics for compositing over another photo. It can open
+  the native share sheet or copy the rendered image to the clipboard.
 - **Photos everywhere** — profile, cover and proof-of-play match photos via
   Supabase Storage.
-- **Native Google / Apple sign-in** — ID-token flow into Supabase Auth; username
-  login is proxied server-side so emails never leave the backend.
+- **Native Google / Apple sign-in** — ID-token flow into Supabase Auth with Apple
+  nonce binding; native refresh tokens live in the device Keychain/Keystore and
+  username login is proxied server-side so emails never leave the backend.
 - **Fast, crash-free map** — courts paint instantly from the DB while new ones
   import from OSM in the background; native overlays are capped, unmount during
   gestures, and remount on the idle frame.
@@ -259,10 +282,69 @@ All routes live under `https://<project>.supabase.co/functions/v1/api`.
 
 ## Testing
 
-```bash
-cd mobile && npm run typecheck
-cd mobile && npm run lint
-```
+The production verification workflow runs on every push and pull request. It
+uses read-only repository permissions and checks the repository tests, a clean
+mobile lockfile install, TypeScript, ESLint, public Expo configuration, Android
+and iOS production exports, the Edge function against its frozen Deno lockfile,
+and every database migration on a clean local Supabase instance followed by
+pgTAP invariants and PL/pgSQL linting.
+
+Run the same fast checks locally:
+
+    npm test
+    npm run verify:mobile
+    npm run verify:edge
+
+The Edge command requires Deno 2.9.2. CI pins Node.js 24.18.0, Deno 2.9.2, and
+the exact commit SHA for every GitHub Action used by the workflow.
+
+### Read-only API load test
+
+The load runner never accepts an arbitrary path or HTTP method. It can only GET
+the bounded public health, feed, and courts endpoints; it rejects redirects and
+non-HTTPS remote URLs, validates each successful JSON response shape, applies
+per-request timeouts and response-size caps, and stops early when a sustained
+outage opens its circuit breaker. It does not run automatically in CI, so
+production is only exercised intentionally.
+
+Start with the default health-only probe (40 requests, concurrency 4):
+
+    VOLLO_API_URL=https://<project>.supabase.co/functions/v1/api npm run load:test
+
+PowerShell:
+
+    $env:VOLLO_API_URL='https://<project>.supabase.co/functions/v1/api'; npm.cmd run load:test
+
+Exercise all allowlisted public reads with explicit thresholds:
+
+    npm run load:test -- --endpoint health,feed,courts --requests 200 --concurrency 10 --timeout-ms 5000 --max-p95-ms 2500 --max-error-rate 1
+
+Run npm run load:test -- --help for the limits and all options. Keep production
+runs deliberate and increase traffic gradually; use a staging deployment for
+larger capacity experiments.
+
+## Release checklist
+
+Code-level production checks are automated, but a store release still depends on
+environment-owned credentials and policies that do not belong in this private
+repository:
+
+- Require a green `Production verification` workflow, then apply every migration
+  and deploy the matching Edge function from the same commit. Provision the
+  environment-specific Vault `project_url` and `DATABASE_POOL_URL` first.
+- Keep email confirmation enabled, allow-list `vollo://reset-password`, and set up
+  a production SMTP provider, abuse limits, and provider credentials in Supabase
+  Auth. Apple remains hidden until its App ID/capability/provider are provisioned;
+  iOS Google remains hidden until its iOS client ID is supplied.
+- Configure APNs/FCM credentials for the EAS project and exercise registration,
+  foreground/background delivery, dead-token pruning, and logout on real devices.
+- Complete App Store/Play signing, privacy/support/terms URLs, data-safety labels,
+  account-deletion disclosures, screenshots, and store metadata.
+- On at least one current iPhone and Android device, smoke-test sign-up/sign-in,
+  recovery, logging/verifying/deleting a match, photo/profile uploads, privacy and
+  blocks, courts/territories, notifications, and all Photo/Court/Sticker share modes.
+- Connect mobile crash reporting and an Edge log drain; preserve `X-Request-Id`
+  when correlating client reports with backend failures.
 
 ---
 

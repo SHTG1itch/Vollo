@@ -19,7 +19,24 @@ talks to the production Supabase Edge Function configured in `app.json → extra
   `extra.apiUrl`, the deployed Supabase functions URL). Point it at
   `http://<lan-ip>:54321/functions/v1` when running `supabase functions serve`.
 - `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` / `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID` —
-  optional native Google sign-in client ids (fall back to `extra`).
+  optional native Google sign-in client ids (fall back to `extra`). The dynamic
+  Expo config adds the iOS URL-scheme plugin only when the iOS id is valid; an
+  empty id safely hides Google sign-in on iOS instead of shipping a placeholder.
+- `EXPO_PUBLIC_APPLE_AUTH=1` (or `extra.appleAuthEnabled: true`) — enables the
+  Apple button only after the Apple capability and Supabase provider are both
+  provisioned. It is deliberately off in the committed configuration.
+
+For password recovery, add `vollo://reset-password` to the Supabase Auth redirect
+URL allow list. Reset callbacks are consumed in-app for both implicit-token and
+PKCE links, and their credentials are never stored in navigation routes. The
+Supabase client itself uses PKCE, so a captured callback code cannot be
+exchanged on a different device.
+
+On iOS and Android, Supabase sessions are stored in the OS Keychain/Keystore via
+`expo-secure-store`. The adapter atomically chunks large sessions, is serialized
+against refresh races, and migrates the previous AsyncStorage value only after a
+complete secure write. Android application backup is disabled. Apple ID-token
+sign-in also binds a SHA-256 nonce and passes the raw nonce to Supabase.
 
 ## Structure
 
@@ -35,8 +52,8 @@ talks to the production Supabase Edge Function configured in `app.json → extra
 
 ## Map / OSM
 
-iOS renders `react-native-maps` (Apple Maps engine) with OSM raster tiles via
-`<UrlTile/>`; Android renders a keyless Leaflet-in-WebView OSM map (`OsmMap`) —
+iOS renders `react-native-maps` with the native Apple Maps base; Android renders
+a keyless Leaflet-in-WebView OSM map (`OsmMap`) —
 react-native-maps on Android would require a Google Maps API key and crash without
 one. Territory polygons are GeoJSON from the API rendered as semi-transparent
 brand-green overlays.

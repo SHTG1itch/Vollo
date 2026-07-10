@@ -9,7 +9,7 @@ no paid resources:
 | API | Express (Node) web service | **Edge Function `api`** (Deno + Hono) |
 | Background jobs | `node-cron` in the web process | **pg_cron + pg_net** sweeps |
 | Auth | Custom HS256 JWT (bcrypt) | **Supabase Auth** (token validated in-function) |
-| Secrets | env vars | private `app_secrets` table (RLS-sealed) |
+| Secrets | env vars | Edge secrets + private `app_secrets` table (RLS-sealed) |
 
 Project ref: `pfophuqopwfupxjonsty` · region `us-east-1`.
 
@@ -17,29 +17,26 @@ Project ref: `pfophuqopwfupxjonsty` · region `us-east-1`.
 
 - Postgres, PostGIS, Edge Functions, pg_cron and pg_net are all included in the
   free tier.
-- The Edge Function connects to Postgres over the **direct connection**
-  (`SUPABASE_DB_URL`, auto-injected), which bypasses RLS — so all access is
-  funnelled through the function's own authorization and the public PostgREST/anon
-  API stays sealed (every app table has RLS enabled with no policies).
+- The Edge Function uses one bounded connection per isolate through the
+  **transaction pooler** (`DATABASE_POOL_URL`, port 6543, prepared statements
+  disabled). It falls back to `SUPABASE_DB_URL` for local/bootstrap use. Database
+  access bypasses RLS, so authorization stays in the function while the public
+  PostgREST/anon API remains sealed.
 - Auth is **Supabase Auth**: the client signs in with the JS SDK and sends the
   resulting access token as the bearer; the function validates it with the
   service-role client (`adminClient.auth.getUser`) and resolves it to the app
   profile via `users.auth_id`.
 - The function is deployed with `verify_jwt = false` because it validates tokens
-  itself and serves genuinely public routes (feed, resolve-email, courts reads).
+  itself and serves genuinely public routes such as health, login, feed, and
+  court reads.
 
 ## Layout
 
 ```
 supabase/
   config.toml              # project id + functions.api.verify_jwt = false
-  migrations/              # 001-005 (app) + 006 (secrets) + 007 (cron)
-                           # + 008/009 (RLS seal + security-invoker views)
-                           # + 010 (court source/osm dedup + user equipment)
-                           # + 011 (court sectors: one facility = one court)
-                           # + 012 (Supabase Auth: auth_id + signup trigger)
-                           # + 013 (player colour) + 014 (scheduled matches)
-                           # + 015 (OAuth-aware profile provisioning: Google/Apple)
+  migrations/              # ordered schema/history, currently 001-039
+  tests/                   # pgTAP production invariants
   functions/api/           # the entire API, ported to Deno + Hono
     index.ts               # Hono app: every /api/* route, auth, error handling, sweep endpoint
     db.ts                  # postgres.js adapter (query/queryOne/withTransaction/pool)
@@ -47,7 +44,7 @@ supabase/
     config.ts types.ts validation.ts errors.ts mappers.ts geo.ts
     overpass.ts            # OpenStreetMap discovery: names + groups pitches into sectors
     scoring.ts rating.ts streak.ts territory.ts analytics.ts
-    achievements.ts notifications.ts geocoding.ts sweeps.ts
+    achievements.ts notifications.ts geocoding.ts sweeps.ts mediaCleanup.ts
     deno.json              # import map (hono, postgres, zod, @supabase/supabase-js)
 ```
 
@@ -102,15 +99,17 @@ against the project); Apple stays dormant until its paid program is set up.
 **Setup walk-through: [`OAUTH_SETUP.md`](./OAUTH_SETUP.md)** (and the
 `[auth.external.*]` blocks in `config.toml`).
 
-## Status: LIVE
+## Production endpoint
 
-The function is deployed and verified end-to-end (auth, match logging, feed,
-leaderboard, Elo, streak, PostGIS territories, achievements, notifications,
-kudos/comments/follows, search, and the pg_cron sweep path all pass):
+The deployed health endpoint is:
 
 ```
 https://pfophuqopwfupxjonsty.supabase.co/functions/v1/api/health  ->  {"status":"ok"}
 ```
+
+Treat the repository commit—not a previously deployed bundle—as canonical. Apply
+its migrations and deploy its function together, then run the smoke/load checks
+from the root README before calling that release current.
 
 ## Court discovery, naming & sectors
 
@@ -154,28 +153,9 @@ supabase functions deploy api --project-ref pfophuqopwfupxjonsty
 
 `verify_jwt = false` is taken from `config.toml`; no `--no-verify-jwt` needed.
 
-### How the current live version was bootstrapped (and re-deployed without a token)
-
-Deploys done without a CLI token use a bundle-and-load trick: the `functions/api/`
-source is bundled into one ESM file (esbuild, deps kept as `npm:` specifiers),
-hosted on a public gist, and imported by a one-line loader `index.ts`. The
-Supabase deploy bundler fetches that URL and **inlines it at build time**, so the
-deployed function is fully self-contained (it does NOT fetch the gist at runtime —
-and the build sandbox only allows fetches from allowlisted hosts like
-`gist.githubusercontent.com`, not arbitrary file hosts). The bundle contains no
-secrets (the DB URL and JWT/sweep secrets load from env / the `app_secrets` table
-at runtime, and the service-role key / DB URL are auto-injected env), so the gist
-is safe to be public.
-
-To reproduce the bundle: esbuild `index.ts` with `bundle:true, format:'esm'`,
-mapping the six bare deps to their `npm:` specifiers as `external`. Running the
-canonical CLI deploy above instead builds direct-from-source and makes the gist
-irrelevant. (The import map now bundles `@supabase/supabase-js` for token
-validation; `jose`/`bcryptjs` are gone with the old custom-JWT auth.)
-
 ## Migrations
 
-Already applied to the live project. To reproduce on a fresh project:
+To apply the committed history to a linked project:
 
 ```bash
 supabase db push --project-ref <ref>
@@ -185,13 +165,29 @@ supabase db push --project-ref <ref>
 
 | Job | Schedule (UTC) | Action |
 | --- | --- | --- |
-| `vollo-streak-sweep` | daily 03:00 | recompute every user's streak (decay) |
-| `vollo-territory-sweep` | every 6 h | recompute territories + achievements |
+| `vollo-streak-sweep` | every 15 min | claim/recompute one bounded user batch |
+| `vollo-territory-sweep` | every 30 min | claim/recompute one bounded user batch |
+| `vollo-media-cleanup` | every 5 min | delete one bounded batch of queued Storage objects |
 
-Both POST to `…/api/internal/sweep` via `pg_net`, authenticated with the shared
-`internal_secret` from `app_secrets`. Inspect runs:
+All POST to `…/api/internal/sweep` via `pg_net`, authenticated with the shared
+`internal_secret` from `app_secrets`. The destination comes from the
+environment-specific Vault secret named `project_url`; without it, local/CI jobs
+are deliberate no-ops. Inspect runs:
 
 ```sql
 SELECT * FROM cron.job;
 SELECT * FROM cron.job_run_details ORDER BY start_time DESC LIMIT 20;
+```
+
+## Database verification
+
+GitHub Actions starts a clean local Supabase stack, applies all migrations, runs
+`supabase test db`, and lints public PL/pgSQL functions at error level. Locally,
+the equivalent commands require Docker and the pinned Supabase CLI:
+
+```bash
+supabase db start
+supabase test db
+supabase db lint --local --schema public --level error --fail-on error
+supabase stop --no-backup
 ```
