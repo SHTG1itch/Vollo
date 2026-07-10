@@ -13,7 +13,10 @@ const BUCKET = 'user-media';
 
 /** Reject absurdly large picks up front — the bucket/CDN shouldn't be fed
  *  multi-hundred-MB originals, and mobile uploads of them mostly time out. */
-const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
+// Must match storage.buckets.file_size_limit (migration 018). Keeping the client
+// ceiling identical avoids accepting an 8–10 MB file only for Storage to reject
+// it later with a much less useful error.
+const MAX_UPLOAD_BYTES = 8 * 1024 * 1024; // 8 MB
 
 /** supabase-js storage has no abort hook, so cap the wall-clock time ourselves —
  *  the underlying request keeps going, but the UI gets a clear error instead of
@@ -58,7 +61,7 @@ async function uploadAsset(
 ): Promise<string> {
   const bytes = await new File(asset.uri).bytes();
   if (bytes.byteLength > MAX_UPLOAD_BYTES) {
-    throw new Error('That photo is too large — please pick an image under 10 MB.');
+    throw new Error('That photo is too large — please pick an image under 8 MB.');
   }
   const { error } = await withTimeout(
     supabase.storage.from(BUCKET).upload(path, bytes, {

@@ -53,14 +53,26 @@ function normalizeEquipment(v: unknown): Equipment {
 }
 
 /**
- * Public view of a user — never exposes the private `email`. Used for everyone
- * except the authenticated account owner so GET /users/:username can't be used
- * to harvest email addresses.
+ * Public view of a user. Email and the saved home location are account settings,
+ * not profile data: a geocoder result can be a street address, and exact
+ * coordinates must never leave the owner-only /auth/me response.
+ *
+ * Keep the three home fields as null instead of removing them so the mobile DTO
+ * remains backward-compatible while older clients learn nothing sensitive.
  */
 export function mapPublicUser(r: Record<string, unknown>): Omit<User, 'email'> {
-  const { email: _email, ...rest } = mapUser(r);
+  const {
+    email: _email,
+    home_lat: _homeLat,
+    home_lng: _homeLng,
+    home_label: _homeLabel,
+    ...rest
+  } = mapUser(r);
   void _email;
-  return rest;
+  void _homeLat;
+  void _homeLng;
+  void _homeLabel;
+  return { ...rest, home_lat: null, home_lng: null, home_label: null };
 }
 
 export function mapCourt(r: Record<string, unknown>): Court {
