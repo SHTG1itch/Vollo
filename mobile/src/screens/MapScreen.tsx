@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { InteractionManager, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
-import MapView, { Marker, Polygon, UrlTile, type Region } from 'react-native-maps';
+import { InteractionManager, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import MapView, { Marker, Polygon, type Region } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import { useFocusEffect, useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
@@ -12,6 +12,7 @@ import { OsmMap, type LatLng, type OsmMapHandle, type OsmMarker, type OsmPolygon
 import { Icon } from '../components/icons';
 import { colors, font, fonts, radius, shadow, spacing, surfaceColors, TERRITORY_STROKE } from '../theme';
 import type { Court, Territory } from '../types';
+import { regionToBbox } from '../utils/mapRegion';
 
 // Android can't run react-native-maps without a Google Maps API key (it would
 // crash), so there it renders the same OSM map via a keyless Leaflet WebView.
@@ -250,12 +251,7 @@ export function MapScreen() {
       const zoom = r.latitudeDelta <= MAX_COURT_DELTA;
       setZoomedIn(zoom);
       const seq = ++loadSeq.current;
-      const bbox = {
-        min_lng: r.longitude - r.longitudeDelta,
-        min_lat: r.latitude - r.latitudeDelta,
-        max_lng: r.longitude + r.longitudeDelta,
-        max_lat: r.latitude + r.latitudeDelta,
-      };
+      const bbox = regionToBbox(r);
       // 1) Instant paint: territories + courts straight from the DB (no Overpass),
       //    so overlays appear immediately and panning never waits on the network.
       try {
@@ -420,6 +416,10 @@ export function MapScreen() {
   // debounce the data reload for the new viewport.
   const onRegionChangeComplete = useCallback(
     (r: Region) => {
+      // Update immediately so "Add court" cannot use the old centre during the
+      // network-load debounce window.
+      liveRegion.current = r;
+      lastRegion.current = r;
       if (settleTimer.current) clearTimeout(settleTimer.current);
       interactingRef.current = false;
       setInteracting(false);
@@ -535,7 +535,10 @@ export function MapScreen() {
           onTouchStart={() => { touchingRef.current = true; }}
           onTouchEnd={() => { touchingRef.current = false; }}
           onTouchCancel={() => { touchingRef.current = false; }}
-          mapType="none"
+          // Use Apple's native base map on iOS. This avoids unidentified native
+          // requests to the community OSM raster-tile service; OSM still powers
+          // the court data and is attributed below.
+          mapType="standard"
           showsUserLocation
           rotateEnabled={false}
           pitchEnabled={false}
@@ -549,8 +552,6 @@ export function MapScreen() {
           // Don't animate to the user dot on first fix; we drive the camera ourselves.
           followsUserLocation={false}
         >
-          <UrlTile urlTemplate={OSM_TILE_URL} maximumZ={19} minimumZ={1} flipY={false} zIndex={-1} />
-
           {polygons.map(({ t, coords, fill, stroke }) => (
             <Polygon
               key={t.id}
@@ -570,6 +571,15 @@ export function MapScreen() {
           ))}
         </MapView>
       )}
+
+      <Pressable
+        style={styles.attribution}
+        onPress={() => void Linking.openURL('https://www.openstreetmap.org/copyright')}
+        accessibilityRole="link"
+        accessibilityLabel="OpenStreetMap copyright and contributors"
+      >
+        <Text style={styles.attributionText}>© OpenStreetMap contributors</Text>
+      </Pressable>
 
       {/* Zoomed too far out to show pins without choking the map */}
       {!zoomedIn && !locationOff ? (
@@ -823,4 +833,14 @@ const styles = StyleSheet.create({
     ...shadow.card,
   },
   addCourtText: { color: colors.onPrimary, fontSize: font.small, fontFamily: fonts.bold },
+  attribution: {
+    position: 'absolute',
+    right: 4,
+    bottom: 4,
+    backgroundColor: 'rgba(255,255,255,0.88)',
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderRadius: 3,
+  },
+  attributionText: { color: '#245D8A', fontSize: 9, textDecorationLine: 'underline' },
 });

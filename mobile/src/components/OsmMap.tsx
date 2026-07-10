@@ -68,7 +68,8 @@ function buildHtml(region: Region, minZoom: number, maxZoom: number, tileUrl: st
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-<link rel="stylesheet" href="${LEAFLET_CSS}" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https://unpkg.com; style-src 'unsafe-inline' https://unpkg.com; img-src data: https:; connect-src https:;" />
+<link rel="stylesheet" href="${LEAFLET_CSS}" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous" />
 <style>
   html, body, #map { height: 100%; width: 100%; margin: 0; padding: 0; background: #F4F6F3; }
   .leaflet-container { background: #F4F6F3; outline: none; -webkit-tap-highlight-color: transparent; font: 13px/1.4 -apple-system, Roboto, sans-serif; }
@@ -80,7 +81,7 @@ function buildHtml(region: Region, minZoom: number, maxZoom: number, tileUrl: st
 </head>
 <body>
 <div id="map"></div>
-<script src="${LEAFLET_JS}"></script>
+<script src="${LEAFLET_JS}" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
 <script>
 (function () {
   var CONFIG = ${cfg};
@@ -95,6 +96,8 @@ function buildHtml(region: Region, minZoom: number, maxZoom: number, tileUrl: st
 
   var map = L.map('map', {
     zoomControl: false,
+    // The native screen renders one always-visible attribution link above this
+    // WebView, shared with the iOS map path.
     attributionControl: false,
     minZoom: CONFIG.minZoom,
     maxZoom: CONFIG.maxZoom,
@@ -117,8 +120,7 @@ function buildHtml(region: Region, minZoom: number, maxZoom: number, tileUrl: st
   }
 
   // Report the viewport using react-native-maps' Region semantics: latitudeDelta /
-  // longitudeDelta are the FULL visible span (north-south / east-west), so the
-  // app's existing bbox math and zoom thresholds work unchanged.
+  // longitudeDelta are the FULL visible span (north-south / east-west).
   function regionOf() {
     var c = map.getCenter();
     var b = map.getBounds();
@@ -343,8 +345,12 @@ export const OsmMap = forwardRef<OsmMapHandle, Props>(function OsmMap(
         ref={webRef}
         style={StyleSheet.absoluteFill}
         source={{ html }}
-        originWhitelist={['*']}
+        originWhitelist={['about:blank', 'data:*']}
         onMessage={onMessage}
+        onError={() => setFailed(true)}
+        onHttpError={() => setFailed(true)}
+        onContentProcessDidTerminate={() => setFailed(true)}
+        applicationNameForUserAgent="Vollo/0.1.0"
         javaScriptEnabled
         domStorageEnabled
         scrollEnabled={false}
