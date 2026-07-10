@@ -323,6 +323,28 @@ Run npm run load:test -- --help for the limits and all options. Keep production
 runs deliberate and increase traffic gradually; use a staging deployment for
 larger capacity experiments.
 
+#### Production capacity baseline
+
+The 2026-07-10 production baseline, after routing the Edge Function through the
+transaction pooler, established the following raw API envelope. These are
+capacity observations for the current Supabase project, not a permanent SLA:
+
+| Workload | Result | Observed p95 |
+| --- | --- | --- |
+| 200 mixed health/feed/courts reads, concurrency 10 | 200/200, 0 errors | 983 ms |
+| 300 feed/courts reads, concurrency 15 | 300/300, 0 errors | 1,006 ms |
+| 400 feed/courts reads, concurrency 20 | 399/400; one controlled HTTP 503 | 1,127 ms |
+| 500 feed/courts reads, concurrency 25 | 6.2-7.2% controlled HTTP 503 | 991-1,089 ms |
+
+Treat concurrency 15 (about 22 database reads/second in this dataset) as the
+verified zero-error envelope. Saturation is fail-safe: the API returns a
+sanitized `service_unavailable` response with `Retry-After`, and the mobile
+client retries a safe GET/HEAD once without replaying mutations. Before traffic
+regularly approaches this boundary, re-run the same test against staging and
+raise Supavisor/compute capacity based on measured database headroom; do not
+raise PostgreSQL connection limits blindly. Re-baseline after plan, region,
+schema, query, or pooler changes.
+
 ## Release checklist
 
 Code-level production checks are automated, but a store release still depends on

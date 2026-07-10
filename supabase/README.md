@@ -35,7 +35,7 @@ Project ref: `pfophuqopwfupxjonsty` · region `us-east-1`.
 ```
 supabase/
   config.toml              # project id + functions.api.verify_jwt = false
-  migrations/              # ordered schema/history, currently 001-039
+  migrations/              # production-timestamped schema/history through 040
   tests/                   # pgTAP production invariants
   functions/api/           # the entire API, ported to Deno + Hono
     index.ts               # Hono app: every /api/* route, auth, error handling, sweep endpoint
@@ -175,11 +175,16 @@ supabase db push --project-ref <ref>
 | `vollo-streak-sweep` | every 15 min | claim/recompute one bounded user batch |
 | `vollo-territory-sweep` | every 30 min | claim/recompute one bounded user batch |
 | `vollo-media-cleanup` | every 5 min | delete one bounded batch of queued Storage objects |
+| `vollo-login-attempt-retention` | hourly at minute 7 | delete one bounded batch older than 24 hours |
+| `vollo-notification-retention` | hourly at minute 17 | delete one bounded batch past the read/unread retention window |
+| `vollo-geocode-cache-cleanup` | Sundays at 04:15 | remove expired geocoder and court-discovery cache rows |
 
-All POST to `…/api/internal/sweep` via `pg_net`, authenticated with the shared
-`internal_secret` from `app_secrets`. The destination comes from the
-environment-specific Vault secret named `project_url`; without it, local/CI jobs
-are deliberate no-ops. Inspect runs:
+The three Edge-backed sweeps POST to `…/api/internal/sweep` via `pg_net`,
+authenticated with the shared `internal_secret` from `app_secrets`. The
+destination comes from the environment-specific Vault secret named
+`project_url`; without it, local/CI Edge jobs are deliberate no-ops. The three
+database-local cleanup jobs run bounded SQL directly in PostgreSQL. Inspect
+runs:
 
 ```sql
 SELECT * FROM cron.job;
