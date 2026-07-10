@@ -182,12 +182,16 @@ SELECT * FROM cron.job_run_details ORDER BY start_time DESC LIMIT 20;
 ## Database verification
 
 GitHub Actions starts a clean local Supabase stack, applies all migrations, runs
-`supabase test db`, and lints public PL/pgSQL functions at error level. Locally,
-the equivalent commands require Docker and the pinned Supabase CLI:
+`supabase test db`, and lints first-party public PL/pgSQL functions at error
+level. Extension-owned routines are identified from PostgreSQL's catalogs and
+excluded because PostGIS ships legacy helpers that require runtime-only state.
+Locally, the equivalent commands require Docker, `psql`, and the pinned
+Supabase CLI:
 
 ```bash
 supabase db start
 supabase test db
-supabase db lint --local --schema public --level error --fail-on error
+PGPASSWORD=postgres psql --host 127.0.0.1 --port 54322 --username postgres \
+  --dbname postgres --file supabase/lint/public_app_functions.sql
 supabase stop --no-backup
 ```

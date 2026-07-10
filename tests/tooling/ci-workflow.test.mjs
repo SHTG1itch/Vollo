@@ -3,9 +3,13 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const workflowUrl = new URL('../../.github/workflows/production-verification.yml', import.meta.url);
+const databaseLintUrl = new URL('../../supabase/lint/public_app_functions.sql', import.meta.url);
 
 test('production workflow pins runtimes, actions, and frozen dependency checks', async () => {
-  const workflow = await readFile(workflowUrl, 'utf8');
+  const [workflow, databaseLint] = await Promise.all([
+    readFile(workflowUrl, 'utf8'),
+    readFile(databaseLintUrl, 'utf8'),
+  ]);
 
   assert.match(workflow, /permissions:\s*\n\s+contents: read/);
   assert.match(workflow, /actions\/checkout@[0-9a-f]{40} # v6\.0\.2/g);
@@ -28,6 +32,11 @@ test('production workflow pins runtimes, actions, and frozen dependency checks',
   assert.match(workflow, /version: 2\.101\.0/);
   assert.match(workflow, /supabase db start/);
   assert.match(workflow, /supabase test db/);
-  assert.match(workflow, /supabase db lint --local --schema public --level error --fail-on error/);
+  assert.match(workflow, /psql[^]*--file supabase\/lint\/public_app_functions\.sql/);
+  assert.match(databaseLint, /plpgsql_check_function_tb/);
+  assert.match(databaseLint, /namespace\.nspname = 'public'/);
+  assert.match(databaseLint, /dependency\.deptype = 'e'/);
+  assert.match(databaseLint, /lower\(issue\.level\) = 'error'/);
+  assert.match(databaseLint, /RAISE EXCEPTION 'Vollo PL\/pgSQL lint failed/);
   assert.doesNotMatch(workflow, /contents: write|pull-requests: write|npm run load:test/);
 });

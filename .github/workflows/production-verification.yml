@@ -125,8 +125,12 @@ jobs:
       - name: Run database invariants
         run: supabase test db
 
-      - name: Lint public database functions
-        run: supabase db lint --local --schema public --level error --fail-on error
+      - name: Lint first-party public database functions
+        env:
+          PGPASSWORD: postgres
+        run: >-
+          psql --host 127.0.0.1 --port 54322 --username postgres
+          --dbname postgres --file supabase/lint/public_app_functions.sql
 
       - name: Stop local database
         if: always()
