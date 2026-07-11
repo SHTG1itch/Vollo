@@ -2,7 +2,7 @@
 // (Deno). Mirrors the original Express `config` but reads from `Deno.env`.
 // Authentication is handled by Supabase Auth (validated via the service-role
 // client in supabaseAdmin.ts); the internal sweep token still lives in the
-// private `app_secrets` table and is loaded lazily via db.ts/getSecret().
+// private `app_secrets` table and is read by db.ts/getSecret() on cron calls.
 import { resolveDatabaseUrl } from './databaseUrl.ts';
 
 function num(value: string | undefined, fallback: number): number {

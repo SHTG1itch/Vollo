@@ -81,17 +81,15 @@ export async function withTransaction<T>(
   }) as T;
 }
 
-// ─── Backend secrets (JWT signing key, internal sweep token) ────────────────
-// Stored in the RLS-sealed app_secrets table; loaded once per cold start.
-let secretsCache: Record<string, string> | null = null;
-
+// ─── Backend secrets (internal sweep token) ────────────────────────────────
+// Read only the requested value from the RLS-sealed table. This path runs on
+// cron requests, not user traffic, and a live lookup lets rotations take effect
+// immediately instead of leaving warm Edge isolates pinned to stale plaintext.
 export async function getSecret(key: string): Promise<string> {
-  if (!secretsCache) {
-    const rows = await query<{ key: string; value: string }>('SELECT key, value FROM app_secrets');
-    secretsCache = {};
-    for (const r of rows) secretsCache[r.key] = r.value;
-  }
-  const v = secretsCache[key];
-  if (!v) throw new Error(`Missing app secret: ${key}`);
-  return v;
+  const row = await queryOne<{ value: string }>(
+    'SELECT value FROM app_secrets WHERE key = $1',
+    [key],
+  );
+  if (!row?.value) throw new Error(`Missing app secret: ${key}`);
+  return row.value;
 }

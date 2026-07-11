@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const source = readFileSync(new URL('../../supabase/functions/api/index.ts', import.meta.url), 'utf8');
+const dbSource = readFileSync(new URL('../../supabase/functions/api/db.ts', import.meta.url), 'utf8');
 
 function section(start, end) {
   const startAt = source.indexOf(start);
@@ -11,6 +12,12 @@ function section(start, end) {
   assert.notEqual(endAt, -1, `missing source marker: ${end}`);
   return source.slice(startAt, endAt);
 }
+
+test('internal secrets are keyed live lookups so rotation does not strand warm isolates', () => {
+  assert.match(dbSource, /SELECT value FROM app_secrets WHERE key = \$1/);
+  assert.match(dbSource, /\[key\]/);
+  assert.doesNotMatch(dbSource, /secretsCache|SELECT key, value FROM app_secrets/);
+});
 
 test('malformed JSON is never coerced into a successful empty-object mutation', () => {
   const parser = section('async function jsonBody', 'const UUID_RE');
