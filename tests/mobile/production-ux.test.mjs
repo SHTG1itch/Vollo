@@ -162,6 +162,12 @@ test('password recovery is a complete in-app flow and callback credentials are c
   assert.match(login, /label="Forgot password\?"/);
 });
 
+test('optional native cold-start lookups cannot reject unhandled', async () => {
+  const app = await read('mobile/App.tsx');
+  assert.match(app, /getLastNotificationResponseAsync\(\)\.then\([\s\S]*?\)\.catch\(\(\) => \{/);
+  assert.match(app, /Linking\.getInitialURL\(\)\.then\([\s\S]*?\)\.catch\(\(\) => \{/);
+});
+
 test('settings saves stay scoped to the account that initiated them', async () => {
   const source = await read('mobile/src/screens/SettingsScreen.tsx');
   assert.match(source, /const accountId = user\.id/g);

@@ -121,6 +121,9 @@ export default function App() {
       coldStartHandled.current = true;
       void Notifications.getLastNotificationResponseAsync().then((resp) => {
         if (resp) navigateFromPush(resp.notification.request.content.data as Record<string, unknown>);
+      }).catch(() => {
+        // Optional native state can be unavailable during a cold-start race.
+        // The live response listener remains active for subsequent taps.
       });
     }
 
@@ -148,6 +151,9 @@ export default function App() {
       initialUrlChecked.current = true;
       void Linking.getInitialURL().then((url) => {
         if (url) void handleUrl(url);
+      }).catch(() => {
+        // A launch-URL lookup failure must not become an unhandled rejection;
+        // the runtime URL listener below still handles future links.
       });
     }
     const sub = Linking.addEventListener('url', ({ url }) => {
