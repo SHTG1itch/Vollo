@@ -65,6 +65,10 @@ async function jsonBody<T = Record<string, unknown>>(c: Context): Promise<T> {
 }
 
 const UUID_RE = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+const DAILY_MATCH_CAP = 100;
+const DAILY_SCHEDULE_CAP = 100;
+const DAILY_COMMENT_CAP = 500;
+const PUSH_TOKEN_CAP = 20;
 
 /** Reject malformed UUID path values at the HTTP boundary. Letting PostgreSQL
  * cast attacker-controlled text would turn a client 400 into a noisy 500. */
@@ -966,6 +970,27 @@ app.post('/api/matches', requireAuth, async (c) => {
   let matchId: string;
   try {
     matchId = await withTransaction(async (client) => {
+    // A durable per-account ceiling protects rating replay and database growth.
+    // Serialize count + insert so concurrent requests cannot all pass at 99.
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended('match-create:' || $1, 0))", [userId]);
+    // The fast idempotency lookup above can race the first request's commit.
+    // Recheck after the account lock and let the outer recovery path return it;
+    // otherwise a retry arriving at the exact cap would incorrectly get 429.
+    if (body.client_key) {
+      const duplicate = await client.query<{ id: string }>(
+        'SELECT id FROM matches WHERE user_id = $1 AND client_key = $2',
+        [userId, body.client_key],
+      );
+      if (duplicate.rows.length > 0) throw new Error('idempotent match retry');
+    }
+    const recentMatches = await client.query<{ c: string }>(
+      `SELECT COUNT(*) AS c FROM matches
+        WHERE user_id = $1 AND created_at >= clock_timestamp() - interval '24 hours'`,
+      [userId],
+    );
+    if (Number(recentMatches.rows[0]?.c ?? 0) >= DAILY_MATCH_CAP) {
+      throw ApiError.tooManyRequests('Daily match logging limit reached; try again later');
+    }
     if (body.opponent_id) {
       // Serialize the block check and pending-cap check with block/unblock and
       // every other tag for this pair. Concurrent requests cannot all observe
@@ -1433,14 +1458,26 @@ app.post('/api/matches/:id/comments', requireAuth, async (c) => {
   await assertCanInteractWithMatch(match, userId);
   const { body } = commentSchema.parse(await jsonBody(c));
 
-  const comment = await queryOne(
-    `WITH inserted AS (
-       INSERT INTO comments (match_id, user_id, body) VALUES ($1, $2, $3) RETURNING *
-     )
-     SELECT i.id, i.body, i.created_at, i.user_id, u.username, u.display_name, u.avatar_url
-       FROM inserted i JOIN users u ON u.id = i.user_id`,
-    [id, userId, body],
-  );
+  const comment = await withTransaction(async (client) => {
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended('comment-create:' || $1, 0))", [userId]);
+    const recentComments = await client.query<{ c: string }>(
+      `SELECT COUNT(*) AS c FROM comments
+        WHERE user_id = $1 AND created_at >= clock_timestamp() - interval '24 hours'`,
+      [userId],
+    );
+    if (Number(recentComments.rows[0]?.c ?? 0) >= DAILY_COMMENT_CAP) {
+      throw ApiError.tooManyRequests('Daily comment limit reached; try again later');
+    }
+    const inserted = await client.query(
+      `WITH inserted AS (
+         INSERT INTO comments (match_id, user_id, body) VALUES ($1, $2, $3) RETURNING *
+       )
+       SELECT i.id, i.body, i.created_at, i.user_id, u.username, u.display_name, u.avatar_url
+         FROM inserted i JOIN users u ON u.id = i.user_id`,
+      [id, userId, body],
+    );
+    return inserted.rows[0] ?? null;
+  });
 
   if (match.user_id !== userId) {
     await notify({
@@ -1512,6 +1549,22 @@ app.post('/api/scheduled-matches', requireAuth, async (c) => {
   let scheduledId: string;
   try {
     scheduledId = await withTransaction(async (client) => {
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended('schedule-create:' || $1, 0))", [userId]);
+    if (b.client_key) {
+      const duplicate = await client.query<{ id: string }>(
+        'SELECT id FROM scheduled_matches WHERE creator_id = $1 AND client_key = $2',
+        [userId, b.client_key],
+      );
+      if (duplicate.rows.length > 0) throw new Error('idempotent schedule retry');
+    }
+    const recentSchedules = await client.query<{ c: string }>(
+      `SELECT COUNT(*) AS c FROM scheduled_matches
+        WHERE creator_id = $1 AND created_at >= clock_timestamp() - interval '24 hours'`,
+      [userId],
+    );
+    if (Number(recentSchedules.rows[0]?.c ?? 0) >= DAILY_SCHEDULE_CAP) {
+      throw ApiError.tooManyRequests('Daily scheduling limit reached; try again later');
+    }
     if (b.opponent_id) {
       await lockSocialPair(client, userId, b.opponent_id);
       if (await socialPairIsBlocked(client, userId, b.opponent_id)) {
@@ -2401,11 +2454,22 @@ app.get('/api/users/search', requireAuth, async (c) => {
 app.post('/api/users/me/push-token', requireAuth, async (c) => {
   const userId = uid(c);
   const { token, platform } = pushTokenSchema.parse(await jsonBody(c));
-  await query(
-    `INSERT INTO push_tokens (user_id, token, platform) VALUES ($1, $2, $3)
-     ON CONFLICT (token) DO UPDATE SET user_id = EXCLUDED.user_id, platform = EXCLUDED.platform, created_at = now()`,
-    [userId, token, platform ?? 'expo'],
-  );
+  await withTransaction(async (client) => {
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended('push-token:' || $1, 0))", [userId]);
+    const tokenState = await client.query<{ c: string; already_registered: boolean }>(
+      `SELECT COUNT(*) AS c, COALESCE(BOOL_OR(token = $2), false) AS already_registered
+         FROM push_tokens WHERE user_id = $1`,
+      [userId, token],
+    );
+    if (!tokenState.rows[0]?.already_registered && Number(tokenState.rows[0]?.c ?? 0) >= PUSH_TOKEN_CAP) {
+      throw ApiError.tooManyRequests('Too many devices registered for push notifications');
+    }
+    await client.query(
+      `INSERT INTO push_tokens (user_id, token, platform) VALUES ($1, $2, $3)
+       ON CONFLICT (token) DO UPDATE SET user_id = EXCLUDED.user_id, platform = EXCLUDED.platform, created_at = now()`,
+      [userId, token, platform ?? 'expo'],
+    );
+  });
   return c.json({ ok: true }, 201);
 });
 

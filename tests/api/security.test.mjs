@@ -135,3 +135,25 @@ test('new kudos and comments enforce the block-aware interaction guard', () => {
     assert.match(route, /SELECT user_id, opponent_id, verification_status FROM matches/);
   }
 });
+
+test('high-growth account mutations have serialized durable ceilings', () => {
+  const matchCreate = section("app.post('/api/matches'", "app.get('/api/matches/pending'");
+  assert.match(matchCreate, /hashtextextended\('match-create:' \|\| \$1, 0\)/);
+  assert.match(matchCreate, /created_at >= clock_timestamp\(\) - interval '24 hours'/);
+  assert.match(matchCreate, /DAILY_MATCH_CAP/);
+  assert.match(matchCreate, /idempotent match retry/);
+
+  const comments = section("app.post('/api/matches/:id/comments'", "app.get('/api/scheduled-matches'");
+  assert.match(comments, /hashtextextended\('comment-create:' \|\| \$1, 0\)/);
+  assert.match(comments, /DAILY_COMMENT_CAP/);
+
+  const schedules = section("app.post('/api/scheduled-matches'", "app.patch('/api/scheduled-matches/:id'");
+  assert.match(schedules, /hashtextextended\('schedule-create:' \|\| \$1, 0\)/);
+  assert.match(schedules, /DAILY_SCHEDULE_CAP/);
+  assert.match(schedules, /idempotent schedule retry/);
+
+  const pushTokens = section("app.post('/api/users/me/push-token'", "app.delete('/api/users/me/push-token'");
+  assert.match(pushTokens, /hashtextextended\('push-token:' \|\| \$1, 0\)/);
+  assert.match(pushTokens, /already_registered/);
+  assert.match(pushTokens, /PUSH_TOKEN_CAP/);
+});
