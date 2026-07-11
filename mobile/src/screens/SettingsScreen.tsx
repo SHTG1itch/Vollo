@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -22,14 +22,26 @@ export function SettingsScreen() {
   const [privateSaving, setPrivateSaving] = useState(false);
   const [competitiveSaving, setCompetitiveSaving] = useState(false);
   const [blocked, setBlocked] = useState<BlockedUser[]>([]);
+  const [blockedLoading, setBlockedLoading] = useState(true);
+  const [blockedError, setBlockedError] = useState<string | null>(null);
   const [unblocking, setUnblocking] = useState<string | null>(null);
 
-  useEffect(() => {
-    void api
-      .getBlockedUsers()
-      .then((r) => setBlocked(r.users))
-      .catch(() => {}); // section just stays empty on a transient failure
+  const loadBlockedUsers = useCallback(async () => {
+    setBlockedLoading(true);
+    setBlockedError(null);
+    try {
+      const response = await api.getBlockedUsers();
+      setBlocked(response.users);
+    } catch {
+      setBlockedError('Could not load blocked players.');
+    } finally {
+      setBlockedLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void loadBlockedUsers();
+  }, [loadBlockedUsers]);
 
   const togglePrivate = async (next: boolean) => {
     if (!user || privateSaving) return;
@@ -166,7 +178,14 @@ export function SettingsScreen() {
           />
         </View>
 
-        {blocked.length > 0 ? (
+        {blockedLoading ? (
+          <Muted style={{ textAlign: 'left' }}>Loading blocked playersâ€¦</Muted>
+        ) : blockedError ? (
+          <View style={styles.blockedLoadError} accessibilityLiveRegion="assertive">
+            <Muted style={{ textAlign: 'left' }}>{blockedError}</Muted>
+            <Button label="Try again" variant="secondary" onPress={loadBlockedUsers} />
+          </View>
+        ) : blocked.length > 0 ? (
           <View style={{ gap: spacing.sm, marginTop: spacing.sm }}>
             <Text style={styles.subsection}>Blocked players</Text>
             {blocked.map((u) => (
@@ -217,6 +236,7 @@ const styles = StyleSheet.create({
   switchRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   switchLabel: { color: colors.text, fontFamily: fonts.bold, fontSize: font.body },
   blockedRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  blockedLoadError: { gap: spacing.sm, alignItems: 'flex-start' },
   blockedName: { color: colors.text, fontFamily: fonts.bold, fontSize: font.small },
   blockedHandle: { color: colors.textFaint, fontSize: font.tiny },
 });

@@ -104,6 +104,20 @@ test('settings saves stay scoped to the account that initiated them', async () =
   assert.match(source, /accessibilityLabel="Territory and leaderboard visibility"/);
 });
 
+test('privacy relationship queues distinguish load failures from an empty queue', async () => {
+  const [settings, notifications] = await Promise.all([
+    read('mobile/src/screens/SettingsScreen.tsx'),
+    read('mobile/src/screens/NotificationsScreen.tsx'),
+  ]);
+  assert.match(settings, /setBlockedError\('Could not load blocked players\.'\)/);
+  assert.match(settings, /blockedError[\s\S]*label="Try again"[\s\S]*onPress=\{loadBlockedUsers\}/);
+  assert.doesNotMatch(settings, /getBlockedUsers\(\)[\s\S]{0,120}\.catch\(\(\) => \{\}\)/);
+  assert.match(notifications, /setRequestsError\('Could not load follow requests\.'\)/);
+  assert.match(notifications, /error=\{requestsError\}/);
+  assert.match(notifications, /onRetry=\{\(\) => void loadFollowRequests\(\)\}/);
+  assert.doesNotMatch(notifications, /getFollowRequests\(\)[\s\S]{0,160}\.catch\(\(\) => \{\}\)/);
+});
+
 test('transient session refresh failures never sign the user out', async () => {
   const [client, auth] = await Promise.all([
     read('mobile/src/api/client.ts'),

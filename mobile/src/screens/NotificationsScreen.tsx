@@ -8,7 +8,7 @@ import type { RootStackParamList } from '../navigation/types';
 import { navigateFromPush } from '../navigation/ref';
 import { api } from '../api/client';
 import { useNotifications } from '../store/notifications';
-import { Avatar, Button, EmptyState, ErrorState, Loading } from '../components/ui';
+import { Avatar, Button, EmptyState, ErrorState, Loading, Muted } from '../components/ui';
 import { showToast } from '../components/Toast';
 import { tapMedium } from '../lib/haptics';
 import { colors, font, fonts, radius, shadow, spacing } from '../theme';
@@ -20,9 +20,15 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 /** Incoming follow requests (private accounts) pinned above the activity list. */
 function FollowRequestsCard({
   requests,
+  loading,
+  error,
+  onRetry,
   onResolved,
 }: {
   requests: FollowRequest[];
+  loading: boolean;
+  error: string | null;
+  onRetry: () => void;
   onResolved: (requestId: string) => void;
 }) {
   const navigation = useNavigation<Nav>();
@@ -30,7 +36,7 @@ function FollowRequestsCard({
   // each get their own loading spinner.
   const [busy, setBusy] = useState<{ id: string; action: 'accept' | 'decline' } | null>(null);
 
-  if (requests.length === 0) return null;
+  if (requests.length === 0 && !loading && !error) return null;
 
   const respond = async (r: FollowRequest, action: 'accept' | 'decline') => {
     tapMedium();
@@ -49,6 +55,13 @@ function FollowRequestsCard({
   return (
     <View style={styles.requestsCard}>
       <Text style={styles.requestsTitle}>FOLLOW REQUESTS</Text>
+      {loading ? <Muted style={{ textAlign: 'left' }}>Loading follow requestsâ€¦</Muted> : null}
+      {error ? (
+        <View style={styles.requestLoadError} accessibilityLiveRegion="assertive">
+          <Muted style={{ textAlign: 'left' }}>{error}</Muted>
+          <Button label="Try again" variant="secondary" onPress={onRetry} />
+        </View>
+      ) : null}
       {requests.map((r) => (
         <View key={r.id} style={styles.requestRow}>
           <Pressable
@@ -87,6 +100,23 @@ export function NotificationsScreen() {
   const insets = useSafeAreaInsets();
   const { items, loading, refreshing, error, fetch, markAllRead } = useNotifications();
   const [requests, setRequests] = useState<FollowRequest[]>([]);
+  const [requestsLoading, setRequestsLoading] = useState(true);
+  const [requestsError, setRequestsError] = useState<string | null>(null);
+  const requestSequence = React.useRef(0);
+
+  const loadFollowRequests = React.useCallback(async () => {
+    const sequence = ++requestSequence.current;
+    setRequestsLoading(true);
+    setRequestsError(null);
+    try {
+      const response = await api.getFollowRequests();
+      if (sequence === requestSequence.current) setRequests(response.requests);
+    } catch {
+      if (sequence === requestSequence.current) setRequestsError('Could not load follow requests.');
+    } finally {
+      if (sequence === requestSequence.current) setRequestsLoading(false);
+    }
+  }, []);
 
   // Refetch every time the tab gains focus so the badge/list reflect reality,
   // then mark everything read shortly after. The mark-read timer starts only
@@ -100,18 +130,13 @@ export function NotificationsScreen() {
         if (!cancelled) t = setTimeout(() => void markAllRead(), 1200);
       });
       // Pending follow requests ride along with each focus refresh.
-      void api
-        .getFollowRequests()
-        .then((r) => {
-          if (!cancelled) setRequests(r.requests);
-        })
-        .catch(() => {});
+      void loadFollowRequests();
       return () => {
         cancelled = true;
+        requestSequence.current += 1;
         if (t) clearTimeout(t);
       };
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []),
+    }, [fetch, loadFollowRequests, markAllRead]),
   );
 
   // Route a tapped notification to the relevant screen using its data payload.
@@ -135,6 +160,9 @@ export function NotificationsScreen() {
           ListHeaderComponent={
             <FollowRequestsCard
               requests={requests}
+              loading={requestsLoading}
+              error={requestsError}
+              onRetry={() => void loadFollowRequests()}
               onResolved={(requestId) => setRequests((list) => list.filter((r) => r.id !== requestId))}
             />
           }
@@ -188,6 +216,7 @@ const styles = StyleSheet.create({
     ...shadow.card,
   },
   requestsTitle: { color: colors.textDim, fontFamily: fonts.bold, fontSize: font.tiny, letterSpacing: 0.5 },
+  requestLoadError: { gap: spacing.sm, alignItems: 'flex-start' },
   requestRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   requestUser: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flex: 1 },
   requestName: { color: colors.text, fontFamily: fonts.bold, fontSize: font.small },
