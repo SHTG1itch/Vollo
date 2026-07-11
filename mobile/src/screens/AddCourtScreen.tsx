@@ -112,7 +112,7 @@ export function AddCourtScreen({ route, navigation }: Props) {
       setUserLoc({ latitude: r.latitude, longitude: r.longitude });
       mapRef.current?.animateToRegion(r, 350);
     } catch {
-      /* ignore */
+      showToast('Could not get your location. Check location services and try again.', 'error');
     } finally {
       setLocating(false);
     }

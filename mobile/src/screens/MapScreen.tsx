@@ -10,6 +10,7 @@ import { api } from '../api/client';
 import { useAuth } from '../store/auth';
 import { OsmMap, type LatLng, type OsmMapHandle, type OsmMarker, type OsmPolygon } from '../components/OsmMap';
 import { Icon } from '../components/icons';
+import { showToast } from '../components/Toast';
 import { colors, font, fonts, radius, shadow, spacing, surfaceColors, TERRITORY_STROKE } from '../theme';
 import type { Court, Territory } from '../types';
 import { regionToBbox } from '../utils/mapRegion';
@@ -360,7 +361,7 @@ export function MapScreen() {
       mapRef.current?.animateToRegion(region, 600);
       void load(region, { force: true });
     } catch {
-      /* keep current view */
+      showToast('Could not get your location. Check location services and try again.', 'error');
     }
   }, [load]);
 

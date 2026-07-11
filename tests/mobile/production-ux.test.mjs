@@ -95,6 +95,18 @@ test('map preserves partial overlay results and makes primary load failures retr
   assert.match(source, /load\(lastRegion\.current, \{ force: true \}\)/);
 });
 
+test('user-triggered location failures are visible instead of silent', async () => {
+  const [addCourt, map] = await Promise.all([
+    read('mobile/src/screens/AddCourtScreen.tsx'),
+    read('mobile/src/screens/MapScreen.tsx'),
+  ]);
+  const message = /Could not get your location\. Check location services and try again\./;
+  assert.match(addCourt, message);
+  assert.match(map, message);
+  assert.doesNotMatch(addCourt, /const recenter = async \(\) => \{[\s\S]*?catch \{\s*\/\* ignore \*\//);
+  assert.doesNotMatch(map, /const recenter = useCallback\(async \(\) => \{[\s\S]*?catch \{\s*\/\* keep current view \*\//);
+});
+
 test('profile photos remain local drafts until save and all clear actions are explicit', async () => {
   const [source, uploads] = await Promise.all([
     read('mobile/src/screens/EditProfileScreen.tsx'),
