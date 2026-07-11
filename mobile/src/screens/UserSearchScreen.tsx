@@ -119,6 +119,8 @@ export function UserSearchScreen() {
           <Pressable
             style={({ pressed }) => [styles.row, pressed && { opacity: 0.9 }]}
             onPress={() => navigation.navigate('UserProfile', { username: item.username })}
+            accessibilityRole="button"
+            accessibilityLabel={`View ${item.display_name}, @${item.username}`}
           >
             <Avatar name={item.display_name} uri={item.avatar_url} size={40} />
             <View style={{ flex: 1 }}>

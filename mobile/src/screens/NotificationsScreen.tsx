@@ -179,6 +179,9 @@ export function NotificationsScreen() {
                 disabled={!tappable}
                 onPress={() => openTarget(data)}
                 style={({ pressed }) => [styles.row, !item.read && styles.unread, pressed && tappable && { opacity: 0.85 }]}
+                accessibilityRole={tappable ? 'button' : undefined}
+                accessibilityLabel={tappable ? `${item.title}. ${item.body}` : undefined}
+                accessibilityHint={tappable ? 'Opens related activity' : undefined}
               >
                 {!item.read ? <View style={styles.dot} /> : <View style={styles.dotPlaceholder} />}
                 <View style={{ flex: 1 }}>

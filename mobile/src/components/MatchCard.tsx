@@ -23,10 +23,22 @@ export function MatchCard({
     match.opponent_display_name ?? match.opponent_name ?? 'an unrecorded opponent';
 
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.card, pressed && { opacity: 0.92 }]}>
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.card, pressed && { opacity: 0.92 }]}
+      accessibilityRole="button"
+      accessibilityLabel={`${win ? 'Win' : 'Loss'} against ${opponent}. ${formatScoreLine(match.score_array)}`}
+      accessibilityHint="Opens match details"
+    >
       {/* Header */}
       <View style={styles.header}>
-        <Pressable style={styles.authorRow} onPress={onPressAuthor} hitSlop={6}>
+        <Pressable
+          style={styles.authorRow}
+          onPress={onPressAuthor}
+          hitSlop={6}
+          accessibilityRole="button"
+          accessibilityLabel={`View ${match.author_display_name}'s profile`}
+        >
           <Avatar name={match.author_display_name} uri={match.author_avatar_url} size={38} />
           <View>
             <Text style={styles.author}>{match.author_display_name}</Text>

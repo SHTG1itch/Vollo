@@ -145,7 +145,13 @@ export function CourtsScreen() {
           keyExtractor={(c) => c.id}
           contentContainerStyle={{ padding: spacing.lg, paddingTop: 0, gap: spacing.sm }}
           renderItem={({ item }) => (
-            <Pressable style={styles.courtRow} onPress={() => navigation.navigate('Court', { courtId: item.id })}>
+            <Pressable
+              style={styles.courtRow}
+              onPress={() => navigation.navigate('Court', { courtId: item.id })}
+              accessibilityRole="button"
+              accessibilityLabel={`${item.name}, ${item.city ?? 'unknown city'}`}
+              accessibilityHint="Opens court details"
+            >
               <View style={{ flex: 1 }}>
                 <Text style={styles.courtName}>{item.name}</Text>
                 <Text style={styles.courtSub}>

@@ -1,8 +1,48 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 const read = (path) => readFile(new URL(`../../${path}`, import.meta.url), 'utf8');
+
+async function tsxFiles(directory) {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const nested = await Promise.all(entries.map((entry) => {
+    const target = path.join(directory, entry.name);
+    return entry.isDirectory() ? tsxFiles(target) : entry.name.endsWith('.tsx') ? [target] : [];
+  }));
+  return nested.flat();
+}
+
+// Extract JSX opening tags without mistaking the `>` in an arrow-function
+// attribute for the end of the tag. This keeps the accessibility audit
+// dependency-free so it runs before the mobile npm install in CI.
+function pressableOpeningTags(source) {
+  const tags = [];
+  let start = source.indexOf('<Pressable');
+  while (start !== -1) {
+    let braces = 0;
+    let quote = null;
+    let escaped = false;
+    for (let index = start + '<Pressable'.length; index < source.length; index += 1) {
+      const char = source[index];
+      if (quote) {
+        if (escaped) escaped = false;
+        else if (char === '\\') escaped = true;
+        else if (char === quote) quote = null;
+      } else if (char === '"' || char === "'" || char === '`') quote = char;
+      else if (char === '{') braces += 1;
+      else if (char === '}') braces -= 1;
+      else if (char === '>' && braces === 0) {
+        tags.push({ source: source.slice(start, index + 1), offset: start });
+        break;
+      }
+    }
+    start = source.indexOf('<Pressable', start + 1);
+  }
+  return tags;
+}
 
 test('shared form controls expose accessible semantics and touch targets', async () => {
   const [source, boundary] = await Promise.all([
@@ -17,6 +57,22 @@ test('shared form controls expose accessible semantics and touch targets', async
   assert.match(source, /setTimeout\(\(\) => \{[\s\S]*pressLocked\.current = false[\s\S]*\}, 400\)/);
   assert.match(boundary, /__DEV__/);
   assert.match(boundary, /An unexpected error occurred\. Please try again\./);
+});
+
+test('every interactive Pressable exposes an accessibility role', async () => {
+  const sourceRoot = fileURLToPath(new URL('../../mobile/src/', import.meta.url));
+  const files = await tsxFiles(sourceRoot);
+  const missing = [];
+  for (const file of files) {
+    const source = await readFile(file, 'utf8');
+    for (const tag of pressableOpeningTags(source)) {
+      if (!/\baccessibilityRole=/.test(tag.source)) {
+        const line = source.slice(0, tag.offset).split('\n').length;
+        missing.push(`${path.relative(sourceRoot, file)}:${line}`);
+      }
+    }
+  }
+  assert.deepEqual(missing, []);
 });
 
 test('court placement uses Apple native tiles on iOS and visibly attributes OSM data', async () => {

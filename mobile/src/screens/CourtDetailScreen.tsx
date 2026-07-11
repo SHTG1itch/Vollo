@@ -149,7 +149,14 @@ export function CourtDetailScreen({ route, navigation }: Props) {
           const medal = e.rank === 1 ? '🥇' : e.rank === 2 ? '🥈' : e.rank === 3 ? '🥉' : null;
           const isYou = e.user_id === user?.id;
           return (
-            <Pressable key={e.user_id} style={[styles.row, isYou && styles.rowYou]} onPress={() => navigation.navigate('UserProfile', { username: e.username })}>
+            <Pressable
+              key={e.user_id}
+              style={[styles.row, isYou && styles.rowYou]}
+              onPress={() => navigation.navigate('UserProfile', { username: e.username })}
+              accessibilityRole="button"
+              accessibilityLabel={`Rank ${e.rank}, ${e.display_name}, ${e.score} points`}
+              accessibilityHint="Opens player profile"
+            >
               <Text style={[styles.rank, e.rank === 1 && { color: colors.primary }]}>{medal ?? `#${e.rank}`}</Text>
               <Avatar name={e.display_name} uri={e.avatar_url} size={32} />
               <View style={{ flex: 1 }}>

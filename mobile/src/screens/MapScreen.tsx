@@ -677,6 +677,8 @@ export function MapScreen() {
               <Pressable
                 onPress={() => navigation.navigate('UserProfile', { username: selected.owner_username! })}
                 style={[styles.detailBtn, { flex: 1 }]}
+                accessibilityRole="button"
+                accessibilityLabel={`View @${selected.owner_username}'s profile`}
               >
                 <Text style={styles.detailBtnText}>View player</Text>
               </Pressable>
@@ -692,6 +694,8 @@ export function MapScreen() {
                   })
                 }
                 style={[styles.detailBtn, styles.detailBtnPrimary, { flex: 1 }]}
+                accessibilityRole="button"
+                accessibilityLabel={`Challenge @${selected.owner_username}`}
               >
                 <Text style={[styles.detailBtnText, styles.detailBtnTextPrimary]}>⚔️ Challenge</Text>
               </Pressable>

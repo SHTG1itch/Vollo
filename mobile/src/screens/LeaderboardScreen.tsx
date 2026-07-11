@@ -68,7 +68,13 @@ export function LeaderboardScreen({ route, navigation }: Props) {
         const medal = item.rank === 1 ? '🥇' : item.rank === 2 ? '🥈' : item.rank === 3 ? '🥉' : null;
         const isYou = item.user_id === user?.id;
         return (
-          <Pressable style={[styles.row, item.rank <= 2 && styles.rowControlled, isYou && styles.rowYou]} onPress={() => navigation.navigate('UserProfile', { username: item.username })}>
+          <Pressable
+            style={[styles.row, item.rank <= 2 && styles.rowControlled, isYou && styles.rowYou]}
+            onPress={() => navigation.navigate('UserProfile', { username: item.username })}
+            accessibilityRole="button"
+            accessibilityLabel={`Rank ${item.rank}, ${item.display_name}, ${item.score} points`}
+            accessibilityHint="Opens player profile"
+          >
             <Text style={styles.rank}>{medal ?? `#${item.rank}`}</Text>
             <Avatar name={item.display_name} uri={item.avatar_url} size={36} />
             <View style={{ flex: 1 }}>

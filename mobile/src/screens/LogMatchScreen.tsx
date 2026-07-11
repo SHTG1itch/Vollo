@@ -538,6 +538,8 @@ export function LogMatchScreen() {
                   setOppResults([]);
                 }}
                 style={styles.oppResult}
+                accessibilityRole="button"
+                accessibilityLabel={`Select ${u.display_name}, @${u.username}`}
               >
                 <Avatar name={u.display_name} uri={u.avatar_url} size={28} />
                 <View style={{ flex: 1 }}>
@@ -586,7 +588,12 @@ export function LogMatchScreen() {
               setCourtId(null);
             }}
           />
-          <Pressable onPress={openAddCourt} style={[styles.courtChip, styles.addCourtChip]}>
+          <Pressable
+            onPress={openAddCourt}
+            style={[styles.courtChip, styles.addCourtChip]}
+            accessibilityRole="button"
+            accessibilityLabel="Add a court"
+          >
             <Text style={styles.addCourtChipText}>＋ Add court</Text>
           </Pressable>
           {courts.map((c) => (
@@ -766,7 +773,13 @@ function StatGroup({ title, children }: { title: string; children: React.ReactNo
 
 function CourtChip({ label, sub, active, onPress }: { label: string; sub?: string; active: boolean; onPress: () => void }) {
   return (
-    <Pressable onPress={onPress} style={[styles.courtChip, active && styles.courtChipActive]}>
+    <Pressable
+      onPress={onPress}
+      style={[styles.courtChip, active && styles.courtChipActive]}
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
+      accessibilityLabel={sub ? `${label}, ${sub}` : label}
+    >
       <Text style={[styles.courtChipText, active && { color: colors.onPrimary }]} numberOfLines={1}>
         {label}
       </Text>

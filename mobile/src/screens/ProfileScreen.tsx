@@ -573,7 +573,14 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
             action={{ label: 'Calendar →', onPress: () => navigation.navigate('TrainingLog', { username }) }}
           />
           {recent.map((m) => (
-            <Pressable key={m.id} style={styles.matchRow} onPress={() => navigation.navigate('MatchDetail', { matchId: m.id })}>
+            <Pressable
+              key={m.id}
+              style={styles.matchRow}
+              onPress={() => navigation.navigate('MatchDetail', { matchId: m.id })}
+              accessibilityRole="button"
+              accessibilityLabel={`${m.result === 'win' ? 'Win' : 'Loss'}, ${formatScoreLine(m.score_array)}, ${m.court_name ?? m.surface}`}
+              accessibilityHint="Opens match details"
+            >
               <Text style={[styles.matchResult, { color: m.result === 'win' ? colors.win : colors.loss }]}>
                 {m.result === 'win' ? 'W' : 'L'}
               </Text>

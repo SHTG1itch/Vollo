@@ -226,6 +226,8 @@ export function MatchDetailScreen({ route, navigation }: Props) {
             <Pressable
               style={({ pressed }) => [{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexShrink: 1 }, pressed && { opacity: 0.7 }]}
               onPress={() => goToUser(match.author_username)}
+              accessibilityRole="button"
+              accessibilityLabel={`View ${match.author_display_name}'s profile`}
             >
               <Avatar name={match.author_display_name} uri={match.author_avatar_url} size={42} />
               <View>
