@@ -35,7 +35,7 @@ Project ref: `pfophuqopwfupxjonsty` · region `us-east-1`.
 ```
 supabase/
   config.toml              # project id + functions.api.verify_jwt = false
-  migrations/              # production-timestamped schema/history through 043
+  migrations/              # production-timestamped schema/history through 044
   tests/                   # pgTAP production invariants
   functions/api/           # the entire API, ported to Deno + Hono
     index.ts               # Hono app: every /api/* route, auth, error handling, sweep endpoint
