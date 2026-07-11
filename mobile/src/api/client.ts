@@ -240,13 +240,13 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 /**
- * Fire-and-forget request used only for old-token cleanup during logout. It
- * snapshots the bearer and never retries, parses, or exposes its response.
+ * Snapshot-auth request used only for old-token cleanup during logout. It never
+ * retries and remains bound to the account that initiated the sign-out.
  */
-function sendBestEffort(path: string, options: RequestInit): void {
+async function sendWithTokenSnapshot(path: string, options: RequestInit): Promise<void> {
   const token = authToken;
   if (!token) return;
-  void doFetch(path, options, token).catch(() => {});
+  await doFetch(path, options, token).then(() => undefined);
 }
 
 /** Encode a URL path segment — user-supplied ids/usernames must never be able
@@ -480,8 +480,8 @@ export const api = {
     request<{ ok: boolean }>('/users/me/push-token', { method: 'POST', body: JSON.stringify({ token, platform }) }),
   // Detached cleanup: it keeps A's captured bearer, never retries as B, and
   // cannot delay clearing the local session.
-  unregisterPushTokenBestEffort: (token: string) =>
-    sendBestEffort('/users/me/push-token', { method: 'DELETE', body: JSON.stringify({ token }) }),
+  unregisterPushToken: (token: string) =>
+    sendWithTokenSnapshot('/users/me/push-token', { method: 'DELETE', body: JSON.stringify({ token }) }),
 
   // ── Notifications ──
   getNotifications: () =>

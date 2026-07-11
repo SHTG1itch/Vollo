@@ -273,6 +273,20 @@ test('transient session refresh failures never sign the user out', async () => {
   assert.match(auth, /clearTimeout\(hydrationWatchdog\)/);
 });
 
+test('logout gives push-token removal a bounded authenticated completion window', async () => {
+  const [auth, client, push] = await Promise.all([
+    read('mobile/src/store/auth.ts'),
+    read('mobile/src/api/client.ts'),
+    read('mobile/src/services/push.ts'),
+  ]);
+  assert.match(push, /function takeRegisteredPushToken[\s\S]*lastRegisteredToken = null/);
+  assert.match(client, /sendWithTokenSnapshot[\s\S]*const token = authToken/);
+  assert.match(auth, /const unregister = pushToken[\s\S]*api\.unregisterPushToken\(pushToken\)/);
+  assert.ok(auth.indexOf('applySession(null, null)') < auth.indexOf('Promise.race(['));
+  assert.match(auth, /new Promise<void>\(\(resolve\) => setTimeout\(resolve, 2_000\)\)/);
+  assert.ok(auth.indexOf('Promise.race([') < auth.indexOf('supabase.auth.signOut()'));
+});
+
 test('the authenticated navigation tree is isolated per account', async () => {
   const [auth, navigator, settings] = await Promise.all([
     read('mobile/src/store/auth.ts'),

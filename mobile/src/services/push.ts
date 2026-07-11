@@ -25,8 +25,10 @@ let lastRegisteredToken: string | null = null;
 
 /** The Expo push token registered this session, or null if registration never
  *  succeeded (Expo Go, denied permission, simulator…). */
-export function getRegisteredPushToken(): string | null {
-  return lastRegisteredToken;
+export function takeRegisteredPushToken(): string | null {
+  const token = lastRegisteredToken;
+  lastRegisteredToken = null;
+  return token;
 }
 
 /**

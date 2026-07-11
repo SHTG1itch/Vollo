@@ -11,7 +11,7 @@ import {
 } from '../api/client';
 import { supabase } from '../lib/supabase';
 import { getAppleCredential, getGoogleIdToken, OAuthCancelled } from '../lib/oauth';
-import { getRegisteredPushToken } from '../services/push';
+import { takeRegisteredPushToken } from '../services/push';
 import { useFeed } from './feed';
 import { useNotifications } from './notifications';
 import type { User } from '../types';
@@ -222,15 +222,22 @@ export const useAuth = create<AuthState>()((set, get) => ({
     // Idempotent: the client's unauthorized handler may already have torn the
     // session down — a second call must not re-run the sign-out side effects.
     if (!get().token) return;
-    // Snapshot and dispatch old-token push cleanup without awaiting it. This
-    // detached request never retries under a subsequent account.
-    const pushToken = getRegisteredPushToken();
-    if (pushToken) api.unregisterPushTokenBestEffort(pushToken);
+    // Consume the old token once and dispatch cleanup with a bearer snapshot.
+    // The UI session is cleared immediately below, but sign-out gives this
+    // privacy-sensitive deletion a short bounded window to reach the server.
+    const pushToken = takeRegisteredPushToken();
+    const unregister = pushToken
+      ? api.unregisterPushToken(pushToken).catch(() => undefined)
+      : Promise.resolve();
 
     // Clear navigation state, the API bearer, and account-owned caches before
     // Supabase's network revocation. The UI must not remain signed in while a
     // slow or offline sign-out request is pending.
     applySession(null, null);
+    await Promise.race([
+      unregister,
+      new Promise<void>((resolve) => setTimeout(resolve, 2_000)),
+    ]);
     await supabase.auth.signOut().catch(() => {});
   },
 
