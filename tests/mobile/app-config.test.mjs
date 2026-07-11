@@ -19,8 +19,13 @@ test('mobile config blocks unused camera, microphone, and background-location ac
   assert.equal(config.android.allowBackup, false);
   assert.equal(config.ios.config.usesNonExemptEncryption, false);
   assert.deepEqual(config.android.permissions.sort(), ['ACCESS_COARSE_LOCATION', 'ACCESS_FINE_LOCATION']);
-  assert.equal(config.android.blockedPermissions.includes('android.permission.CAMERA'), true);
-  assert.equal(config.android.blockedPermissions.includes('android.permission.RECORD_AUDIO'), true);
+  assert.deepEqual(config.android.blockedPermissions.sort(), [
+    'android.permission.CAMERA',
+    'android.permission.READ_EXTERNAL_STORAGE',
+    'android.permission.RECORD_AUDIO',
+    'android.permission.SYSTEM_ALERT_WINDOW',
+    'android.permission.WRITE_EXTERNAL_STORAGE',
+  ]);
 
   const location = config.plugins.find((plugin) => Array.isArray(plugin) && plugin[0] === 'expo-location')[1];
   assert.equal(location.isIosBackgroundLocationEnabled, false);
