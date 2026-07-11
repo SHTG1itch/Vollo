@@ -236,6 +236,19 @@ test('failed optimistic social actions visibly revert instead of failing silentl
   assert.match(feed, /Could not load more matches — please try again\./);
 });
 
+test('partial profile and club failures are not misreported as empty sections', async () => {
+  const [profile, club] = await Promise.all([
+    read('mobile/src/screens/ProfileScreen.tsx'),
+    read('mobile/src/screens/ClubDetailScreen.tsx'),
+  ]);
+  assert.match(profile, /setSectionsError\(\[a, r, ach, st, terr, hh, feed, gl\]\.some/);
+  assert.match(profile, /Some profile details couldn&apos;t refresh\. Pull down to try again\./);
+  assert.match(club, /else setLeaderboardError\(true\)/);
+  assert.match(club, /else setFeedError\(true\)/);
+  assert.match(club, /Couldn&apos;t refresh the club leaderboard/);
+  assert.match(club, /feedError \? \([\s\S]*Couldn&apos;t refresh recent club matches/);
+});
+
 test('transient session refresh failures never sign the user out', async () => {
   const [client, auth] = await Promise.all([
     read('mobile/src/api/client.ts'),

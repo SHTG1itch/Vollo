@@ -52,6 +52,7 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sectionsError, setSectionsError] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
   // Adjust state during render when the fetch key changes, so the fetch effect
@@ -61,6 +62,7 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
     const differentProfile = prevFetch.username !== username;
     setPrevFetch({ username, reloadKey });
     setError(null);
+    setSectionsError(false);
     if (differentProfile) {
       // React Navigation can reuse this screen with new params. Never render
       // the previous player's identity or private sections under the new URL.
@@ -118,6 +120,7 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
           setTerritories([]);
           setH2h([]);
           setRecent([]);
+          setSectionsError(false);
           return;
         }
 
@@ -141,6 +144,7 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
         if (terr.status === 'fulfilled') setTerritories(terr.value.territories);
         if (hh.status === 'fulfilled') setH2h(hh.value.head_to_head);
         if (feed.status === 'fulfilled') setRecent(feed.value.matches);
+        setSectionsError([a, r, ach, st, terr, hh, feed, gl].some((result) => result.status === 'rejected'));
       } catch (e) {
         // getProfile failed — distinguish a transient network error from a 404.
         if (active) setError(e instanceof Error ? e.message : 'Failed to load profile');
@@ -362,6 +366,10 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
               : `Request to follow ${profile.user.display_name} to see their matches and stats.`}
           </Muted>
         </Card>
+      ) : null}
+
+      {sectionsError && !profile.restricted && !profile.viewer_has_blocked ? (
+        <Muted>Some profile details couldn&apos;t refresh. Pull down to try again.</Muted>
       ) : null}
 
       {/* Vollo rating + streak (hidden while the profile's content is inaccessible) */}

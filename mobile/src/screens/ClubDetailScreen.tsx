@@ -24,6 +24,8 @@ export function ClubDetailScreen({ route }: NativeStackScreenProps<RootStackPara
   const [leaderboard, setLeaderboard] = useState<ClubLeaderboardEntry[]>([]);
   const [matches, setMatches] = useState<MatchCardType[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [leaderboardError, setLeaderboardError] = useState(false);
+  const [feedError, setFeedError] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
@@ -35,6 +37,8 @@ export function ClubDetailScreen({ route }: NativeStackScreenProps<RootStackPara
     const differentClub = prevFetch.clubId !== clubId;
     setPrevFetch({ clubId, reloadKey });
     setError(null);
+    setLeaderboardError(false);
+    setFeedError(false);
     if (differentClub) {
       // Route params can change without remounting this screen. Remove all
       // club-keyed data before the next render to avoid cross-club leakage.
@@ -61,7 +65,9 @@ export function ClubDetailScreen({ route }: NativeStackScreenProps<RootStackPara
         ]);
         if (!active) return;
         if (lb.status === 'fulfilled') setLeaderboard(lb.value.leaderboard);
+        else setLeaderboardError(true);
         if (feed.status === 'fulfilled') setMatches(feed.value.matches);
+        else setFeedError(true);
       } catch (e) {
         if (active) setError(e instanceof ApiError ? e.message : 'Failed to load the club');
       } finally {
@@ -198,6 +204,7 @@ export function ClubDetailScreen({ route }: NativeStackScreenProps<RootStackPara
         )}
       </Card>
 
+      {leaderboardError ? <Muted>Couldn&apos;t refresh the club leaderboard. Pull down to try again.</Muted> : null}
       {leaderboard.length > 0 ? (
         <Card style={{ gap: spacing.sm }}>
           <SectionHeader title="This month's leaderboard" />
@@ -237,7 +244,9 @@ export function ClubDetailScreen({ route }: NativeStackScreenProps<RootStackPara
       ) : null}
 
       <SectionHeader title="Recent club matches" />
-      {matches.length === 0 ? (
+      {feedError ? (
+        <Muted>Couldn&apos;t refresh recent club matches. Pull down to try again.</Muted>
+      ) : matches.length === 0 ? (
         <Muted>No matches from club members yet.</Muted>
       ) : (
         matches.map((m) => (
