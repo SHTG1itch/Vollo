@@ -20,11 +20,19 @@ const android = config?._internal?.modResults?.android;
 assert.ok(ios?.infoPlist && ios?.entitlements, 'Expo introspection omitted iOS native results');
 assert.ok(android?.manifest?.manifest, 'Expo introspection omitted Android native results');
 assert.equal(typeof ios.infoPlist.NSLocationWhenInUseUsageDescription, 'string');
+assert.equal(typeof ios.infoPlist.NSPhotoLibraryUsageDescription, 'string');
+assert.equal(ios.infoPlist.NSPhotoLibraryAddUsageDescription, undefined);
 assert.equal(ios.infoPlist.NSLocationAlwaysUsageDescription, undefined);
 assert.equal(ios.infoPlist.NSLocationAlwaysAndWhenInUseUsageDescription, undefined);
 assert.equal(ios.infoPlist.NSCameraUsageDescription, undefined);
 assert.equal(ios.infoPlist.NSMicrophoneUsageDescription, undefined);
 assert.equal(ios.entitlements['com.apple.developer.applesignin'], undefined);
+assert.equal(ios.infoPlist.ITSAppUsesNonExemptEncryption, false);
+assert.equal(typeof ios.entitlements['aps-environment'], 'string');
+const urlSchemes = (ios.infoPlist.CFBundleURLTypes ?? [])
+  .flatMap((entry) => entry.CFBundleURLSchemes ?? []);
+assert.equal(urlSchemes.includes('vollo'), true);
+assert.equal(urlSchemes.some((scheme) => /placeholder|replace_with/i.test(scheme)), false);
 assert.equal(
   Array.isArray(ios.infoPlist.UIBackgroundModes)
     && ios.infoPlist.UIBackgroundModes.includes('location'),
