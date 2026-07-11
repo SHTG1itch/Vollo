@@ -7,6 +7,12 @@ BEGIN;
 
 CREATE SCHEMA IF NOT EXISTS extensions;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
+-- Supabase's temporary CLI login intentionally has a minimal search_path.
+-- Relocated pgTAP functions call private helpers such as `_set` by their
+-- unqualified names, so keep the trusted extension schema visible for this
+-- transaction only. The final ROLLBACK restores the session state as well as
+-- removing any temporary extension/schema creation above.
+SET LOCAL search_path = pg_catalog, public, extensions;
 
 SELECT extensions.plan(22);
 
@@ -35,10 +41,24 @@ SELECT extensions.ok(
   ),
   'PUBLIC has no application-schema usage'
 );
+WITH expected(name) AS (
+  SELECT unnest(ARRAY[
+    'users', 'courts', 'matches', 'match_stats', 'kudos', 'comments',
+    'follows', 'user_streaks', 'territories', 'user_ratings', 'achievements',
+    'notifications', 'push_tokens', 'app_secrets', 'scheduled_matches',
+    'blocks', 'goals', 'clubs', 'club_members', 'follow_requests',
+    'geocode_cache', 'outbound_service_limits', 'court_discovery_cells',
+    'sweep_state', 'media_cleanup_jobs', 'media_object_cleanup_jobs',
+    'push_receipts'
+  ]::text[])
+)
 SELECT extensions.ok(
   NOT EXISTS (
-    SELECT 1 FROM information_schema.role_table_grants
-     WHERE table_schema = 'public' AND grantee IN ('anon', 'authenticated')
+    SELECT 1
+      FROM information_schema.role_table_grants g
+      JOIN expected e ON e.name = g.table_name
+     WHERE g.table_schema = 'public'
+       AND g.grantee IN ('anon', 'authenticated')
   ),
   'client roles have no direct application-table grants'
 );
