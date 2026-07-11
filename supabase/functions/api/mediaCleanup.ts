@@ -26,6 +26,16 @@ export interface MediaCleanupResult {
   failed: number;
 }
 
+function safeFailureKind(error: unknown): string {
+  if (typeof error !== 'object' || error === null) return 'unknown_error';
+  for (const key of ['code', 'statusCode', 'status', 'name'] as const) {
+    if (!(key in error)) continue;
+    const value = String((error as Record<string, unknown>)[key] ?? '');
+    if (/^[A-Za-z0-9_.-]{1,64}$/.test(value)) return value;
+  }
+  return 'unknown_error';
+}
+
 function withTimeout<T>(promise: PromiseLike<T>, operation: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
   const timeout = new Promise<never>((_, reject) => {
@@ -233,9 +243,9 @@ export async function processMediaCleanupJobs(
           WHERE auth_id = $1`,
         [job.auth_id, delaySeconds, message],
       ).catch((dbError) => {
-        console.error('[media-cleanup] failed to release job', dbError);
+        console.error('[media-cleanup] failed to release job', safeFailureKind(dbError));
       });
-      console.warn('[media-cleanup] storage cleanup failed', job.auth_id, message);
+      console.warn('[media-cleanup] storage cleanup failed', safeFailureKind(error));
     }
   }
 
@@ -256,9 +266,9 @@ export async function processMediaCleanupJobs(
           WHERE object_path = $1`,
         [job.object_path, delaySeconds, message],
       ).catch((dbError) => {
-        console.error('[media-cleanup] failed to release object job', dbError);
+        console.error('[media-cleanup] failed to release object job', safeFailureKind(dbError));
       });
-      console.warn('[media-cleanup] object cleanup failed', job.object_path, message);
+      console.warn('[media-cleanup] object cleanup failed', safeFailureKind(error));
     }
   }
 

@@ -1358,7 +1358,7 @@ app.delete('/api/matches/:id', requireAuth, async (c) => {
     try {
       await recomputeAfterMatch({ courtId, loggerUserId: userId, previousControllerId });
     } catch (err) {
-      console.error('post-delete territory recompute failed', err);
+      console.error('post-delete territory recompute failed', err instanceof Error ? err.message : err);
     }
   }
   return c.body(null, 204);

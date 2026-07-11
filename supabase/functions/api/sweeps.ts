@@ -106,7 +106,7 @@ export async function runStreakSweep(nowMs = Date.now()): Promise<number> {
       await withTransaction((client) => recomputeUserStreak(userId, client, nowMs));
       ok++;
     } catch (err) {
-      console.error(`[sweep] streak recompute failed for ${userId}`, err instanceof Error ? err.message : err);
+      console.error('[sweep] streak recompute failed', err instanceof Error ? err.message : err);
     }
   }
   await finishSweepBatch('streak', batch);
@@ -129,7 +129,7 @@ export async function runTerritorySweep(): Promise<number> {
       await evaluateAchievements(userId);
       ok++;
     } catch (err) {
-      console.error(`[sweep] territory recompute failed for ${userId}`, err instanceof Error ? err.message : err);
+      console.error('[sweep] territory recompute failed', err instanceof Error ? err.message : err);
     }
   }
   await finishSweepBatch('territory', batch);
@@ -152,7 +152,7 @@ export async function runRatingSweep(): Promise<number> {
       await withTransaction((client) => recomputeUserRatings(client, userId));
       ok++;
     } catch (err) {
-      console.error(`[sweep] rating recompute failed for ${userId}`, err instanceof Error ? err.message : err);
+      console.error('[sweep] rating recompute failed', err instanceof Error ? err.message : err);
     }
   }
   await finishSweepBatch('ratings', batch);
@@ -195,7 +195,7 @@ export async function runCourtNameSweep(limit = 20): Promise<number> {
         named++;
       }
     } catch (err) {
-      console.error(`[sweep] court naming failed for ${c.id}`, err instanceof Error ? err.message : err);
+      console.error('[sweep] court naming failed', err instanceof Error ? err.message : err);
     }
     if (i < courts.length - 1) await new Promise((r) => setTimeout(r, 1100));
   }
