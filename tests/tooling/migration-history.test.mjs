@@ -32,6 +32,23 @@ const productionVersions = [
   '20260704203621',
   '20260705185729',
   '20260706001818',
+  '20260710025341',
+  '20260710034401',
+  '20260710034500',
+  '20260710075731',
+  '20260710075732',
+  '20260710075733',
+  '20260710075734',
+  '20260710075735',
+  '20260710075736',
+  '20260710075737',
+  '20260710075738',
+  '20260710075739',
+  '20260710185343',
+  '20260710232353',
+  '20260710232519',
+  '20260711052500',
+  '20260711061500',
 ];
 
 test('migration files preserve the production ledger and timestamp ordering', async () => {
@@ -44,9 +61,7 @@ test('migration files preserve the production ledger and timestamp ordering', as
   });
 
   assert.equal(new Set(versions).size, versions.length, 'migration versions must be unique');
-  for (const version of productionVersions) {
-    assert.ok(versions.includes(version), `missing production migration ${version}`);
-  }
+  assert.deepEqual(versions, productionVersions, 'local migrations must exactly represent the production ledger');
   assert.ok(
     migrationFiles.includes('20260627030000_007_cron_sweeps_baseline.sql'),
     'the unrecorded legacy cron baseline must remain ordered before migrations 008/009',
