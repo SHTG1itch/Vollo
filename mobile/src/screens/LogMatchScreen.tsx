@@ -94,6 +94,9 @@ export function LogMatchScreen() {
   // Bumped on every court (re)load and when a freshly-added court is injected, so
   // a slow background discovery refresh can't clobber a newer list/selection.
   const courtsToken = useRef(0);
+  const courtLookupToken = useRef(0);
+  const [courtLookupError, setCourtLookupError] = useState<string | null>(null);
+  const [courtLookupLoading, setCourtLookupLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   // Idempotency key for the in-flight/retried submission (see submit()).
   const clientKeyRef = useRef<string | null>(null);
@@ -134,6 +137,7 @@ export function LogMatchScreen() {
     return () => {
       mounted.current = false;
       if (oppDebounce.current) clearTimeout(oppDebounce.current);
+      courtLookupToken.current += 1;
       uploadGuard.invalidate();
       const staged = stagedPhoto.current;
       if (staged && !submissionInFlight.current && !photoMayBeCommitted.current) {
@@ -192,27 +196,37 @@ export function LogMatchScreen() {
     })();
   }, [loadCourts]);
 
+  const loadCourtIntoPicker = useCallback(async (id: string) => {
+    const token = ++courtLookupToken.current;
+    setCourtLookupError(null);
+    setCourtLookupLoading(true);
+    try {
+      const { court } = await api.getCourt(id);
+      if (!mounted.current || token !== courtLookupToken.current) return;
+      courtsToken.current += 1;
+      setCourts((prev) => (prev.some((c) => c.id === court.id) ? prev : [court, ...prev]));
+      // Select only after the court is visible in the picker. This prevents a
+      // failed route-prefill lookup from submitting an invisible court_id.
+      setCourtId(court.id);
+      setCourtLookupLoading(false);
+    } catch {
+      if (mounted.current && token === courtLookupToken.current) {
+        setCourtLookupError(id);
+        setCourtLookupLoading(false);
+      }
+    }
+  }, []);
+
   // When a court is added via the Log flow it's handed back as a route param —
   // pull it into the list and auto-select it, then clear the param.
   useEffect(() => {
     const newId = route.params?.newCourtId;
     if (!newId) return;
-    void (async () => {
-      try {
-        const { court } = await api.getCourt(newId);
-        // Invalidate any in-flight discovery refresh so it can't drop this court.
-        courtsToken.current++;
-        setCourts((prev) => (prev.some((c) => c.id === court.id) ? prev : [court, ...prev]));
-        // Only select once the court is in the list, so the selection always has
-        // a visible chip (don't ship a court_id with nothing shown as picked).
-        setCourtId(newId);
-      } catch {
-        /* couldn't load the new court — leave the selection unchanged */
-      }
-      // Clear the param so re-focusing the tab doesn't re-select it.
-      (navigation.setParams as (p: { newCourtId?: string }) => void)({ newCourtId: undefined });
-    })();
-  }, [route.params?.newCourtId, navigation]);
+    void loadCourtIntoPicker(newId);
+    // Clear the param so re-focusing the tab doesn't re-select it. A failed
+    // lookup remains retryable through courtLookupError instead.
+    (navigation.setParams as (p: { newCourtId?: string }) => void)({ newCourtId: undefined });
+  }, [route.params?.newCourtId, navigation, loadCourtIntoPicker]);
 
   // Prefill from "Log result" on a scheduled match: seed opponent/court/surface
   // and remember the schedule id so the result links back. The synchronous
@@ -239,7 +253,9 @@ export function LogMatchScreen() {
       setSurfaceTouched(true);
     }
     if (p.scheduledMatchId) setScheduledMatchId(p.scheduledMatchId);
-    if (p.prefillCourtId) setCourtId(p.prefillCourtId);
+    // Clear an older selection immediately, but do not select the route id until
+    // its court has loaded into the visible picker.
+    if (p.prefillCourtId) setCourtId(null);
   }
 
   // Side effects of the prefill (fetch the court into the picker, clear the
@@ -260,16 +276,7 @@ export function LogMatchScreen() {
     oppToken.current += 1;
 
     if (p?.prefillCourtId) {
-      const cid = p.prefillCourtId;
-      void (async () => {
-        try {
-          const { court } = await api.getCourt(cid);
-          courtsToken.current++;
-          setCourts((prev) => (prev.some((c) => c.id === court.id) ? prev : [court, ...prev]));
-        } catch {
-          /* leave selection as-is */
-        }
-      })();
+      void loadCourtIntoPicker(p.prefillCourtId);
     }
     (navigation.setParams as (params: Partial<Record<string, undefined>>) => void)({
       prefillOpponentId: undefined,
@@ -278,7 +285,7 @@ export function LogMatchScreen() {
       prefillSurface: undefined,
       scheduledMatchId: undefined,
     });
-  }, [route.params, navigation]);
+  }, [route.params, navigation, loadCourtIntoPicker]);
 
   const preview = useMemo(() => analyzeLocal(score, tiebreakFinal), [score, tiebreakFinal]);
   const result = preview.result;
@@ -328,6 +335,10 @@ export function LogMatchScreen() {
 
   const submit = async () => {
     if (submitActive.current || submitting) return;
+    if (courtLookupLoading) {
+      showToast('Wait for the selected court to finish loading before logging.', 'error');
+      return;
+    }
     if (photoUploadGuard.current.active) {
       showToast('Wait for the photo upload to finish before logging.', 'error');
       return;
@@ -605,6 +616,9 @@ export function LogMatchScreen() {
             active={courtId === null}
             onPress={() => {
               if (courtId !== null) tapLight();
+              courtLookupToken.current += 1;
+              setCourtLookupError(null);
+              setCourtLookupLoading(false);
               setCourtId(null);
             }}
           />
@@ -624,6 +638,9 @@ export function LogMatchScreen() {
               active={courtId === c.id}
               onPress={() => {
                 if (courtId !== c.id) tapLight();
+                courtLookupToken.current += 1;
+                setCourtLookupError(null);
+                setCourtLookupLoading(false);
                 setCourtId(c.id);
                 // Adopt the court's surface only if the user hasn't picked one
                 // themselves, so selecting a court can't silently override it.
@@ -640,6 +657,16 @@ export function LogMatchScreen() {
           ) : (
             <Muted>No nearby courts yet — tap ＋ Add court to drop one on the map.</Muted>
           )
+        ) : null}
+        {courtLookupLoading ? <Muted>Loading the selected court…</Muted> : null}
+        {courtLookupError ? (
+          <Pressable
+            onPress={() => void loadCourtIntoPicker(courtLookupError)}
+            accessibilityRole="button"
+            accessibilityLabel="Retry loading selected court"
+          >
+            <Muted>Couldn&apos;t load the selected court — tap to retry or choose another court.</Muted>
+          </Pressable>
         ) : null}
       </Section>
 
@@ -749,11 +776,11 @@ export function LogMatchScreen() {
       ) : null}
 
       <Button
-        label={uploadingPhoto ? 'Uploading photo…' : 'Log match'}
+        label={courtLookupLoading ? 'Loading court…' : uploadingPhoto ? 'Uploading photo…' : 'Log match'}
         onPress={submit}
         loading={submitting}
         disabled={
-          !canSubmitLogMatch({
+          courtLookupLoading || !canSubmitLogMatch({
             scoreValid,
             submitting,
             photoUploadActive: uploadingPhoto,

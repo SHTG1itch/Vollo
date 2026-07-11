@@ -210,6 +210,18 @@ test('match opponent lookup distinguishes search failure from no registered play
   assert.doesNotMatch(source, /if \(query\.length < 2 \|\| opponentId\)/);
 });
 
+test('route-prefilled courts are visible before selection and remain retryable', async () => {
+  const source = await read('mobile/src/screens/LogMatchScreen.tsx');
+  assert.match(source, /const loadCourtIntoPicker = useCallback/);
+  assert.match(source, /setCourts\([\s\S]*setCourtId\(court\.id\)/);
+  assert.match(source, /if \(p\.prefillCourtId\) setCourtId\(null\)/);
+  assert.doesNotMatch(source, /if \(p\.prefillCourtId\) setCourtId\(p\.prefillCourtId\)/);
+  assert.match(source, /accessibilityLabel="Retry loading selected court"/);
+  assert.match(source, /courtLookupToken\.current \+= 1;[\s\S]*setCourtId\(null\)/);
+  assert.match(source, /courtLookupLoading \|\| !canSubmitLogMatch/);
+  assert.match(source, /Wait for the selected court to finish loading before logging\./);
+});
+
 test('transient session refresh failures never sign the user out', async () => {
   const [client, auth] = await Promise.all([
     read('mobile/src/api/client.ts'),
