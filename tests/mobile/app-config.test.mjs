@@ -5,6 +5,7 @@ import test from 'node:test';
 
 const config = JSON.parse(await readFile(new URL('../../mobile/app.json', import.meta.url), 'utf8')).expo;
 const eas = JSON.parse(await readFile(new URL('../../mobile/eas.json', import.meta.url), 'utf8'));
+const mobilePackage = JSON.parse(await readFile(new URL('../../mobile/package.json', import.meta.url), 'utf8'));
 const require = createRequire(import.meta.url);
 const dynamicConfig = require('../../mobile/app.config.js');
 
@@ -38,6 +39,11 @@ test('mobile config blocks unused camera, microphone, and background-location ac
 
   const secureStore = config.plugins.find((plugin) => Array.isArray(plugin) && plugin[0] === 'expo-secure-store');
   assert.deepEqual(secureStore, ['expo-secure-store', { configureAndroidBackup: true }]);
+});
+
+test('the declared system appearance has its required native implementation', () => {
+  assert.equal(config.userInterfaceStyle, 'light');
+  assert.match(mobilePackage.dependencies['expo-system-ui'], /^~6\.0\./);
 });
 
 test('Google iOS configuration never ships a placeholder URL scheme', () => {
