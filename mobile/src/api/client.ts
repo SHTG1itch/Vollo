@@ -34,10 +34,13 @@ import type {
 export class ApiError extends Error {
   status: number;
   code: string;
-  constructor(status: number, code: string, message: string) {
+  /** Sanitized Edge request id for support/log correlation, when a response existed. */
+  requestId?: string;
+  constructor(status: number, code: string, message: string, requestId?: string) {
     super(message);
     this.status = status;
     this.code = code;
+    this.requestId = requestId;
   }
 }
 
@@ -113,6 +116,13 @@ function refreshOnce(generation: number): Promise<SessionRefreshResult> {
 
 /** Abort a request that hangs so the UI never spins forever. */
 const REQUEST_TIMEOUT_MS = 15_000;
+const REQUEST_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/** Never retain an arbitrary proxy-controlled header as diagnostic context. */
+function responseRequestId(response: Response): string | undefined {
+  const value = response.headers.get('X-Request-Id')?.trim();
+  return value && REQUEST_ID_RE.test(value) ? value.toLowerCase() : undefined;
+}
 
 function staleSessionError(): ApiError {
   return new ApiError(0, 'stale_session', 'This request belonged to a previous sign-in session.');
@@ -221,7 +231,12 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     text = await res.text();
   } catch {
     assertCurrentGeneration(generation);
-    throw new ApiError(res.status, 'bad_response', 'The server returned an unreadable response.');
+    throw new ApiError(
+      res.status,
+      'bad_response',
+      'The server returned an unreadable response.',
+      responseRequestId(res),
+    );
   }
   assertCurrentGeneration(generation);
   let json: unknown = {};
@@ -229,12 +244,22 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     try {
       json = JSON.parse(text);
     } catch {
-      throw new ApiError(res.status, 'bad_response', 'The server returned an unexpected response.');
+      throw new ApiError(
+        res.status,
+        'bad_response',
+        'The server returned an unexpected response.',
+        responseRequestId(res),
+      );
     }
   }
   if (!res.ok) {
     const err = (json as { error?: { code?: string; message?: string } }).error;
-    throw new ApiError(res.status, err?.code ?? 'error', err?.message ?? 'Request failed');
+    throw new ApiError(
+      res.status,
+      err?.code ?? 'error',
+      err?.message ?? 'Request failed',
+      responseRequestId(res),
+    );
   }
   return json as T;
 }

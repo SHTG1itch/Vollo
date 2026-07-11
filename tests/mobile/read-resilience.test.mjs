@@ -17,3 +17,19 @@ test('mobile retries one retryable safe read without replaying mutations', () =>
   assert.equal((retryBlock.match(/await doFetch\(/g) ?? []).length, 1);
   assert.doesNotMatch(retryBlock, /method === 'POST'|method === 'PATCH'|method === 'DELETE'/);
 });
+
+test('mobile preserves only trusted Edge request ids on response errors', () => {
+  assert.match(client, /requestId\?: string/);
+  assert.match(client, /response\.headers\.get\('X-Request-Id'\)/);
+  assert.match(client, /REQUEST_ID_RE\.test\(value\) \? value\.toLowerCase\(\) : undefined/);
+
+  const responseHandling = client.slice(
+    client.indexOf('let text: string'),
+    client.indexOf('/**\n * Snapshot-auth request'),
+  );
+  assert.equal(
+    (responseHandling.match(/responseRequestId\(res\)/g) ?? []).length,
+    3,
+    'unreadable, malformed, and non-2xx responses must retain correlation ids',
+  );
+});
