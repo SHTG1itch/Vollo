@@ -174,6 +174,14 @@ test('privacy relationship queues distinguish load failures from an empty queue'
   assert.doesNotMatch(notifications, /getFollowRequests\(\)[\s\S]{0,160}\.catch\(\(\) => \{\}\)/);
 });
 
+test('match opponent lookup distinguishes search failure from no registered player', async () => {
+  const source = await read('mobile/src/screens/LogMatchScreen.tsx');
+  assert.match(source, /setOppSearchError\(true\)/);
+  assert.match(source, /Player search is unavailable\. Try again before logging if this opponent uses Vollo\./);
+  assert.match(source, /label="Retry player search"[\s\S]*onPress=\{\(\) => searchOpponents\(opponentName\)\}/);
+  assert.doesNotMatch(source, /if \(query\.length < 2 \|\| opponentId\)/);
+});
+
 test('transient session refresh failures never sign the user out', async () => {
   const [client, auth] = await Promise.all([
     read('mobile/src/api/client.ts'),

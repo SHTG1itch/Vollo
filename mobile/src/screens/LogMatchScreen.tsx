@@ -65,6 +65,7 @@ export function LogMatchScreen() {
   const [opponentName, setOpponentName] = useState('');
   const [opponentId, setOpponentId] = useState<string | null>(null);
   const [oppResults, setOppResults] = useState<UserSearchResult[]>([]);
+  const [oppSearchError, setOppSearchError] = useState(false);
   const oppToken = useRef(0);
   const oppDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [score, setScore] = useState<ScoreArray>([[6, 4]]);
@@ -106,16 +107,23 @@ export function LogMatchScreen() {
     // request resolves stale and can't clobber the latest query's results.
     const t = ++oppToken.current;
     const query = term.trim();
-    if (query.length < 2 || opponentId) {
+    setOppSearchError(false);
+    if (query.length < 2) {
       setOppResults([]);
       return;
     }
     oppDebounce.current = setTimeout(async () => {
       try {
         const { users } = await api.searchUsers(query, 6);
-        if (t === oppToken.current) setOppResults(users);
+        if (t === oppToken.current) {
+          setOppResults(users);
+          setOppSearchError(false);
+        }
       } catch {
-        if (t === oppToken.current) setOppResults([]);
+        if (t === oppToken.current) {
+          setOppResults([]);
+          setOppSearchError(true);
+        }
       }
     }, 300);
   };
@@ -224,6 +232,7 @@ export function LogMatchScreen() {
       setOpponentId(nextOpponent.opponentId);
       setOpponentName(nextOpponent.opponentName);
       setOppResults([]);
+      setOppSearchError(false);
     }
     if (p.prefillSurface) {
       setSurface(p.prefillSurface);
@@ -394,6 +403,7 @@ export function LogMatchScreen() {
       setOpponentName('');
       setOpponentId(null);
       setOppResults([]);
+      setOppSearchError(false);
       setScheduledMatchId(null);
       setRpe(null);
       setDuration(0);
@@ -508,6 +518,7 @@ export function LogMatchScreen() {
               onPress={() => {
                 setOpponentId(null);
                 setOpponentName('');
+                setOppSearchError(false);
               }}
               hitSlop={8}
               accessibilityRole="button"
@@ -536,6 +547,7 @@ export function LogMatchScreen() {
                   setOpponentId(u.id);
                   setOpponentName(u.display_name);
                   setOppResults([]);
+                  setOppSearchError(false);
                 }}
                 style={styles.oppResult}
                 accessibilityRole="button"
@@ -548,6 +560,14 @@ export function LogMatchScreen() {
                 </View>
               </Pressable>
             ))}
+            {oppSearchError ? (
+              <View style={styles.oppSearchError} accessibilityLiveRegion="assertive">
+                <Muted style={{ textAlign: 'left' }}>
+                  Player search is unavailable. Try again before logging if this opponent uses Vollo.
+                </Muted>
+                <Button label="Retry player search" variant="secondary" onPress={() => searchOpponents(opponentName)} />
+              </View>
+            ) : null}
           </>
         )}
         {opponentId ? (
@@ -862,6 +882,7 @@ const styles = StyleSheet.create({
   },
   oppResultName: { color: colors.text, fontFamily: fonts.bold, fontSize: font.small },
   oppResultHandle: { color: colors.textFaint, fontSize: font.tiny },
+  oppSearchError: { gap: spacing.sm, alignItems: 'flex-start' },
   dayChip: {
     paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.md,
     backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border,
