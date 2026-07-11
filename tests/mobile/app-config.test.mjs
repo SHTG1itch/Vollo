@@ -4,8 +4,16 @@ import { createRequire } from 'node:module';
 import test from 'node:test';
 
 const config = JSON.parse(await readFile(new URL('../../mobile/app.json', import.meta.url), 'utf8')).expo;
+const eas = JSON.parse(await readFile(new URL('../../mobile/eas.json', import.meta.url), 'utf8'));
 const require = createRequire(import.meta.url);
 const dynamicConfig = require('../../mobile/app.config.js');
+
+test('production builds use an exact validated EAS CLI contract', () => {
+  assert.match(eas.cli.version, /^\d+\.\d+\.\d+$/);
+  assert.equal(eas.cli.version, '20.5.1');
+  assert.equal(eas.cli.appVersionSource, 'remote');
+  assert.equal(eas.build.production.autoIncrement, true);
+});
 
 test('mobile config blocks unused camera, microphone, and background-location access', () => {
   assert.equal(config.android.allowBackup, false);
