@@ -9,7 +9,8 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src App.tsx index.ts"
+    "lint": "eslint src App.tsx index.ts",
+    "verify:native-config": "expo config --type introspect --json | node ../scripts/verify-native-config.mjs"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",

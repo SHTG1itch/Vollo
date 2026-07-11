@@ -36,6 +36,10 @@ module.exports = ({ config }) => {
     ]);
   }
   if (appleEnabled) plugins.push('expo-apple-authentication');
+  plugins.unshift([
+    './plugins/with-production-capabilities',
+    { appleEnabled, backgroundLocationEnabled: false },
+  ]);
 
   return {
     ...config,

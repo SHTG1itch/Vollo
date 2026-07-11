@@ -63,6 +63,9 @@ jobs:
         working-directory: mobile
         run: npx --no-install expo config --type public
 
+      - name: Verify generated native capabilities
+        run: npm --prefix mobile run verify:native-config
+
       - name: Export Android production bundle
         working-directory: mobile
         run: npx --no-install expo export --platform android --output-dir "$RUNNER_TEMP/vollo-android" --clear

@@ -27,6 +27,7 @@ test('production workflow pins runtimes, actions, and frozen dependency checks',
   assert.match(workflow, /npx --no-install expo install --check/);
   assert.match(workflow, /npx --yes expo-doctor@1\.20\.0/);
   assert.match(workflow, /npx --no-install expo config --type public/);
+  assert.match(workflow, /npm --prefix mobile run verify:native-config/);
   assert.match(workflow, /npx --no-install expo export --platform android/);
   assert.match(workflow, /npx --no-install expo export --platform ios/);
   assert.match(workflow, /version: 2\.101\.0/);

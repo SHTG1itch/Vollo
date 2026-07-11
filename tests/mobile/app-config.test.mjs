@@ -78,11 +78,19 @@ test('unprovisioned Apple auth is disabled and email callbacks use PKCE', async 
   const disabled = dynamicConfig({ config });
   assert.equal(disabled.ios.usesAppleSignIn, false);
   assert.equal(disabled.plugins.includes('expo-apple-authentication'), false);
+  assert.deepEqual(disabled.plugins[0], [
+    './plugins/with-production-capabilities',
+    { appleEnabled: false, backgroundLocationEnabled: false },
+  ]);
   const enabled = dynamicConfig({
     config: { ...config, extra: { ...config.extra, appleAuthEnabled: true } },
   });
   assert.equal(enabled.ios.usesAppleSignIn, true);
   assert.equal(enabled.plugins.includes('expo-apple-authentication'), true);
+  assert.deepEqual(enabled.plugins[0], [
+    './plugins/with-production-capabilities',
+    { appleEnabled: true, backgroundLocationEnabled: false },
+  ]);
   assert.match(oauth, /if \(!APPLE_AUTH_ENABLED \|\| Platform\.OS !== 'ios'\) return false/);
   assert.match(oauth, /CryptoDigestAlgorithm\.SHA256/);
   assert.match(oauth, /nonce: hashedNonce/);
