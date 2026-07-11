@@ -207,3 +207,11 @@ PGPASSWORD=postgres psql --host 127.0.0.1 --port 54322 --username postgres \
   --dbname postgres --file supabase/lint/public_app_functions.sql
 supabase stop --no-backup
 ```
+
+The production-linked audit is catalog-only and rolls back its temporary pgTAP
+setup. Run it separately (it intentionally checks that production Vault is
+provisioned, while the clean-local suite checks the opposite):
+
+```bash
+supabase test db --linked supabase/linked-tests/production_readonly_test.sql
+```
