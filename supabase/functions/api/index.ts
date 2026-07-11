@@ -57,10 +57,12 @@ const USER_SELECT = `
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 async function jsonBody<T = Record<string, unknown>>(c: Context): Promise<T> {
+  const raw = (await c.req.text()).trim();
+  if (!raw) return {} as T;
   try {
-    return (await c.req.json()) as T;
+    return JSON.parse(raw) as T;
   } catch {
-    return {} as T;
+    throw ApiError.badRequest('Request body must be valid JSON');
   }
 }
 

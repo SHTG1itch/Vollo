@@ -12,6 +12,14 @@ function section(start, end) {
   return source.slice(startAt, endAt);
 }
 
+test('malformed JSON is never coerced into a successful empty-object mutation', () => {
+  const parser = section('async function jsonBody', 'const UUID_RE');
+  assert.match(parser, /const raw = \(await c\.req\.text\(\)\)\.trim\(\)/);
+  assert.match(parser, /if \(!raw\) return \{\} as T/);
+  assert.match(parser, /throw ApiError\.badRequest\('Request body must be valid JSON'\)/);
+  assert.doesNotMatch(parser, /return \(await c\.req\.json\(\)\)|catch \{\s*return \{\} as T/);
+});
+
 test('optional auth distinguishes anonymous, invalid, and transient credentials', () => {
   const parser = section('async function authFromHeader', 'function throwAuthFailure');
   assert.match(parser, /header === undefined[^]*hadToken: false/);
