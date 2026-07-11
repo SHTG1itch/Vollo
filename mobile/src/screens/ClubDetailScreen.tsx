@@ -155,6 +155,7 @@ export function ClubDetailScreen({ route }: NativeStackScreenProps<RootStackPara
             : x,
         ),
       );
+      showToast('Could not update kudos — please try again.', 'error');
     } finally {
       kudosInFlight.current.delete(matchId);
     }

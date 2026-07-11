@@ -6,6 +6,7 @@ import type { RootStackParamList } from '../navigation/types';
 import { api, type UserSearchResult } from '../api/client';
 import { Avatar, Button, EmptyState, ErrorState, Field, Screen } from '../components/ui';
 import { Icon } from '../components/icons';
+import { showToast } from '../components/Toast';
 import { colors, font, fonts, radius, shadow, spacing } from '../theme';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -85,6 +86,7 @@ export function UserSearchScreen() {
       }
     } catch {
       patchResult(u.id, was);
+      showToast('Could not update this follow — please try again.', 'error');
     } finally {
       setFollowBusy((b) => {
         const { [u.id]: _done, ...rest } = b;

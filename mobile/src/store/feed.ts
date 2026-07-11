@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { api, getAuthGeneration, isAuthGenerationCurrent } from '../api/client';
 import { RequestGeneration } from '../utils/sessionGeneration';
 import type { MatchCard } from '../types';
+import { showToast } from '../components/Toast';
 
 type Scope = 'global' | 'following';
 
@@ -91,7 +92,7 @@ export const useFeed = create<FeedState>((set, get) => ({
       // Append onto the CURRENT list, not the one captured before the await.
       set({ matches: [...get().matches, ...res.matches], cursor: res.next_cursor });
     } catch {
-      /* keep what we have */
+      if (isCurrent(token, session)) showToast('Could not load more matches — please try again.', 'error');
     } finally {
       if (isCurrent(token, session)) set({ loadingMore: false });
     }
@@ -136,6 +137,7 @@ export const useFeed = create<FeedState>((set, get) => ({
       if (!isCurrentState(state, session) || kudosInFlight.get(matchId) !== operation) return;
       // Revert just this item — don't clobber concurrent feed updates.
       applyDelta(wasKudosed);
+      showToast('Could not update kudos — please try again.', 'error');
     } finally {
       if (kudosInFlight.get(matchId) === operation) kudosInFlight.delete(matchId);
     }

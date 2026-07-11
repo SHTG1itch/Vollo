@@ -138,6 +138,7 @@ export function MatchDetailScreen({ route, navigation }: Props) {
       syncFeedKudos(res.kudos_count, res.viewer_has_kudos);
     } catch {
       setMatch((cur) => (cur ? { ...cur, viewer_has_kudos: was, kudos_count: Math.max(0, cur.kudos_count + (was ? 1 : -1)) } : cur));
+      showToast('Could not update kudos — please try again.', 'error');
     } finally {
       kudosInFlight.current = false;
     }

@@ -222,6 +222,20 @@ test('route-prefilled courts are visible before selection and remain retryable',
   assert.match(source, /Wait for the selected court to finish loading before logging\./);
 });
 
+test('failed optimistic social actions visibly revert instead of failing silently', async () => {
+  const [search, club, match, feed] = await Promise.all([
+    read('mobile/src/screens/UserSearchScreen.tsx'),
+    read('mobile/src/screens/ClubDetailScreen.tsx'),
+    read('mobile/src/screens/MatchDetailScreen.tsx'),
+    read('mobile/src/store/feed.ts'),
+  ]);
+  assert.match(search, /patchResult\(u\.id, was\);\s*showToast\('Could not update this follow/);
+  assert.match(club, /Could not update kudos — please try again\./);
+  assert.match(match, /Could not update kudos — please try again\./);
+  assert.match(feed, /applyDelta\(wasKudosed\);\s*showToast\('Could not update kudos/);
+  assert.match(feed, /Could not load more matches — please try again\./);
+});
+
 test('transient session refresh failures never sign the user out', async () => {
   const [client, auth] = await Promise.all([
     read('mobile/src/api/client.ts'),
