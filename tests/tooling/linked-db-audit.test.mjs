@@ -15,7 +15,7 @@ test('the linked production audit remains rollback-only and non-mutating', async
     .filter(Boolean);
 
   assert.match(sql, /^-- Linked-project production audit[\s\S]*\bBEGIN;/);
-  assert.match(sql, /SELECT extensions\.plan\(21\);/);
+  assert.match(sql, /SELECT extensions\.plan\(22\);/);
   assert.match(sql, /SELECT \* FROM extensions\.finish\(\);\s*ROLLBACK;\s*$/);
   assert.equal(
     statements.some((statement) => /^(?:INSERT|UPDATE|DELETE|TRUNCATE|ALTER|DROP)\b/i.test(statement)),

@@ -6,13 +6,14 @@ BEGIN;
 CREATE SCHEMA IF NOT EXISTS extensions;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 
-SELECT extensions.plan(36);
+SELECT extensions.plan(39);
 
 SELECT extensions.has_table('public', 'geocode_cache', 'geocoder cache exists');
 SELECT extensions.has_table('public', 'outbound_service_limits', 'shared provider limiter exists');
 SELECT extensions.has_table('public', 'court_discovery_cells', 'shared court discovery lease exists');
 SELECT extensions.has_table('public', 'media_cleanup_jobs', 'durable media cleanup queue exists');
 SELECT extensions.has_table('public', 'media_object_cleanup_jobs', 'durable object cleanup queue exists');
+SELECT extensions.has_table('public', 'push_receipts', 'durable push receipt queue exists');
 SELECT extensions.has_table('public', 'sweep_state', 'bounded sweep state exists');
 SELECT extensions.has_column('public', 'courts', 'client_key', 'court creation has an idempotency key');
 SELECT extensions.has_column('public', 'scheduled_matches', 'client_key', 'scheduled creation has an idempotency key');
@@ -232,6 +233,18 @@ SELECT extensions.is(
   (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.media_cleanup_jobs'::regclass),
   true,
   'cleanup queue has RLS enabled'
+);
+SELECT extensions.is(
+  (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.push_receipts'::regclass),
+  true,
+  'push receipt queue has RLS enabled'
+);
+SELECT extensions.is(
+  (SELECT count(*)::integer FROM information_schema.role_table_grants
+    WHERE table_schema = 'public' AND table_name = 'push_receipts'
+      AND grantee IN ('anon', 'authenticated')),
+  0,
+  'client roles have no direct push receipt grants'
 );
 SELECT extensions.is(
   (SELECT count(*)::integer FROM cron.job

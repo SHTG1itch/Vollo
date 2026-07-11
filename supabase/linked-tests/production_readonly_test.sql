@@ -8,9 +8,10 @@ BEGIN;
 CREATE SCHEMA IF NOT EXISTS extensions;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 
-SELECT extensions.plan(21);
+SELECT extensions.plan(22);
 
 SELECT extensions.has_table('public', 'media_object_cleanup_jobs', 'latest cleanup schema is deployed');
+SELECT extensions.has_table('public', 'push_receipts', 'push receipt tracking is deployed');
 SELECT extensions.has_index('public', 'matches', 'matches_user_created_idx', 'match abuse-cap index is deployed');
 SELECT extensions.has_index('public', 'scheduled_matches', 'scheduled_creator_created_idx', 'schedule abuse-cap index is deployed');
 SELECT extensions.has_index('public', 'comments', 'comments_user_created_idx', 'comment abuse-cap index is deployed');
@@ -49,7 +50,8 @@ WITH expected(name) AS (
     'notifications', 'push_tokens', 'app_secrets', 'scheduled_matches',
     'blocks', 'goals', 'clubs', 'club_members', 'follow_requests',
     'geocode_cache', 'outbound_service_limits', 'court_discovery_cells',
-    'sweep_state', 'media_cleanup_jobs', 'media_object_cleanup_jobs'
+    'sweep_state', 'media_cleanup_jobs', 'media_object_cleanup_jobs',
+    'push_receipts'
   ]::text[])
 ), state AS (
   SELECT e.name, c.relrowsecurity
@@ -63,7 +65,7 @@ WITH expected(name) AS (
 )
 SELECT extensions.is(
   (SELECT count(*)::integer FROM state WHERE relrowsecurity),
-  26,
+  27,
   'every application table has RLS enabled'
 );
 WITH expected(name) AS (
@@ -73,7 +75,8 @@ WITH expected(name) AS (
     'notifications', 'push_tokens', 'app_secrets', 'scheduled_matches',
     'blocks', 'goals', 'clubs', 'club_members', 'follow_requests',
     'geocode_cache', 'outbound_service_limits', 'court_discovery_cells',
-    'sweep_state', 'media_cleanup_jobs', 'media_object_cleanup_jobs'
+    'sweep_state', 'media_cleanup_jobs', 'media_object_cleanup_jobs',
+    'push_receipts'
   ]::text[])
 )
 SELECT extensions.is(
@@ -81,7 +84,7 @@ SELECT extensions.is(
      FROM expected e
      JOIN pg_class c ON c.relname = e.name
      JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = 'public'),
-  26,
+  27,
   'every expected application table exists'
 );
 

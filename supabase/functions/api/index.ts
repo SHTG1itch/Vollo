@@ -32,7 +32,7 @@ import { recomputeUserStreak, getStreakState } from './streak.ts';
 import { recomputeUserRatings, getRatings } from './rating.ts';
 import { evaluateAchievements, getAchievements } from './achievements.ts';
 import { getCourtController, recomputeAfterMatch, getUserTerritories, listTerritories } from './territory.ts';
-import { notify } from './notifications.ts';
+import { notify, processPushReceipts } from './notifications.ts';
 import {
   GeocoderBusyError,
   allowsAutomatedGeocoding,
@@ -2956,11 +2956,12 @@ app.post('/api/internal/sweep', async (c) => {
   // actual sweep out of the Edge wall-clock budget. Cron invokes this route
   // frequently and failed jobs remain durable with backoff.
   const media_cleanup = await processMediaCleanupJobs(2);
-  if (type === 'streak') return c.json({ ok: true, recomputed: await runStreakSweep(), media_cleanup });
-  if (type === 'territory') return c.json({ ok: true, recomputed: await runTerritorySweep(), media_cleanup });
-  if (type === 'ratings') return c.json({ ok: true, recomputed: await runRatingSweep(), media_cleanup });
-  if (type === 'court_names') return c.json({ ok: true, named: await runCourtNameSweep(), media_cleanup });
-  return c.json({ ok: true, media_cleanup });
+  const push_receipts = await processPushReceipts(100);
+  if (type === 'streak') return c.json({ ok: true, recomputed: await runStreakSweep(), media_cleanup, push_receipts });
+  if (type === 'territory') return c.json({ ok: true, recomputed: await runTerritorySweep(), media_cleanup, push_receipts });
+  if (type === 'ratings') return c.json({ ok: true, recomputed: await runRatingSweep(), media_cleanup, push_receipts });
+  if (type === 'court_names') return c.json({ ok: true, named: await runCourtNameSweep(), media_cleanup, push_receipts });
+  return c.json({ ok: true, media_cleanup, push_receipts });
 });
 
 // ─── Error handling ──────────────────────────────────────────────────────
