@@ -183,6 +183,7 @@ export function MapScreen() {
   const mapRef = useRef<OsmMapHandle>(null);
   const [territories, setTerritories] = useState<Territory[]>([]);
   const [courts, setCourts] = useState<Court[]>([]);
+  const [overlayLoadError, setOverlayLoadError] = useState(false);
   const [selected, setSelected] = useState<Territory | null>(null);
   const [locationOff, setLocationOff] = useState(false);
   // Last known position for the Android WebView map's "you are here" dot (iOS uses
@@ -254,19 +255,20 @@ export function MapScreen() {
       const bbox = regionToBbox(r);
       // 1) Instant paint: territories + courts straight from the DB (no Overpass),
       //    so overlays appear immediately and panning never waits on the network.
-      try {
-        const [{ territories: terr }, courtRes] = await Promise.all([
-          api.getTerritories(bbox),
-          api
-            .discoverCourts(bbox, { discover: false })
-            .catch(() => api.getCourts({ lat: r.latitude, lng: r.longitude, radius_km: 60, limit: MAX_MARKERS })),
-        ]);
-        if (seq !== loadSeq.current) return; // a newer load already won
-        commitTerritories(seq, terr);
-        commitCourts(seq, courtRes.courts);
-      } catch {
-        /* keep current overlays */
+      const [territoryResult, courtResult] = await Promise.allSettled([
+        api.getTerritories(bbox),
+        api
+          .discoverCourts(bbox, { discover: false })
+          .catch(() => api.getCourts({ lat: r.latitude, lng: r.longitude, radius_km: 60, limit: MAX_MARKERS })),
+      ]);
+      if (seq !== loadSeq.current) return; // a newer load already won
+      if (territoryResult.status === 'fulfilled') {
+        commitTerritories(seq, territoryResult.value.territories);
       }
+      if (courtResult.status === 'fulfilled') {
+        commitCourts(seq, courtResult.value.courts);
+      }
+      setOverlayLoadError(territoryResult.status === 'rejected' || courtResult.status === 'rejected');
 
       // 2) Background: pull any new real-world courts from OpenStreetMap. This is
       //    the slow call (Overpass), so it runs AFTER paint and only when zoomed in
@@ -612,6 +614,23 @@ export function MapScreen() {
         </View>
       ) : null}
 
+      {overlayLoadError ? (
+        <View
+          style={[styles.dataErrorBanner, { top: insets.top + (!zoomedIn || locationOff ? 100 : 52) }]}
+          accessibilityLiveRegion="assertive"
+        >
+          <Text style={styles.bannerText}>Some map data couldnâ€™t load.</Text>
+          <Pressable
+            onPress={() => void load(lastRegion.current, { force: true })}
+            style={styles.dataErrorRetry}
+            accessibilityRole="button"
+            accessibilityLabel="Retry loading map data"
+          >
+            <Text style={styles.dataErrorRetryText}>Try again</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
       {/* Add a court at the current map area */}
       <Pressable
         style={styles.addCourt}
@@ -808,6 +827,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     ...shadow.card,
   },
+  dataErrorBanner: {
+    position: 'absolute',
+    left: spacing.lg,
+    right: spacing.lg,
+    minHeight: 44,
+    paddingLeft: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.loss,
+    ...shadow.card,
+  },
+  dataErrorRetry: { minHeight: 44, justifyContent: 'center', paddingHorizontal: spacing.md },
+  dataErrorRetryText: { color: colors.primary, fontFamily: fonts.bold, fontSize: font.small },
   bannerText: { color: colors.textDim, fontSize: font.small, fontFamily: fonts.medium },
   recenter: {
     position: 'absolute',

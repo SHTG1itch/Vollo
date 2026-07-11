@@ -85,6 +85,16 @@ test('court placement uses Apple native tiles on iOS and visibly attributes OSM 
   assert.match(source, /accessibilityRole="link"/);
 });
 
+test('map preserves partial overlay results and makes primary load failures retryable', async () => {
+  const source = await read('mobile/src/screens/MapScreen.tsx');
+  assert.match(source, /Promise\.allSettled\(\[/);
+  assert.match(source, /territoryResult\.status === 'fulfilled'[\s\S]*commitTerritories/);
+  assert.match(source, /courtResult\.status === 'fulfilled'[\s\S]*commitCourts/);
+  assert.match(source, /setOverlayLoadError\(territoryResult\.status === 'rejected' \|\| courtResult\.status === 'rejected'\)/);
+  assert.match(source, /accessibilityLabel="Retry loading map data"/);
+  assert.match(source, /load\(lastRegion\.current, \{ force: true \}\)/);
+});
+
 test('profile photos remain local drafts until save and all clear actions are explicit', async () => {
   const [source, uploads] = await Promise.all([
     read('mobile/src/screens/EditProfileScreen.tsx'),
