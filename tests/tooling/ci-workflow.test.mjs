@@ -21,6 +21,7 @@ test('production workflow pins runtimes, actions, and frozen dependency checks',
   assert.equal((workflow.match(/runs-on: ubuntu-24\.04/g) ?? []).length, 3);
   assert.match(workflow, /deno check --frozen --config deno\.json --lock=deno\.lock index\.ts/);
   assert.match(workflow, /npm ci --prefix mobile/);
+  assert.match(workflow, /npx --yes npm@10\.8\.2 ci --dry-run --ignore-scripts/);
   assert.match(workflow, /npm --prefix mobile run typecheck/);
   assert.match(workflow, /npm --prefix mobile run lint/);
   assert.match(workflow, /npm --prefix mobile audit --omit=dev --audit-level=high/);

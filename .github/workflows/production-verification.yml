@@ -42,6 +42,10 @@ jobs:
       - name: Install mobile dependencies from lockfile
         run: npm ci --prefix mobile --no-audit --no-fund
 
+      - name: Validate lockfile with EAS npm
+        working-directory: mobile
+        run: npx --yes npm@10.8.2 ci --dry-run --ignore-scripts --no-audit --no-fund
+
       - name: Type-check mobile app
         run: npm --prefix mobile run typecheck
 

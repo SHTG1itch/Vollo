@@ -6,6 +6,7 @@ import test from 'node:test';
 const config = JSON.parse(await readFile(new URL('../../mobile/app.json', import.meta.url), 'utf8')).expo;
 const eas = JSON.parse(await readFile(new URL('../../mobile/eas.json', import.meta.url), 'utf8'));
 const mobilePackage = JSON.parse(await readFile(new URL('../../mobile/package.json', import.meta.url), 'utf8'));
+const mobileLock = JSON.parse(await readFile(new URL('../../mobile/package-lock.json', import.meta.url), 'utf8'));
 const require = createRequire(import.meta.url);
 const dynamicConfig = require('../../mobile/app.config.js');
 
@@ -44,6 +45,11 @@ test('mobile config blocks unused camera, microphone, and background-location ac
 test('the declared system appearance has its required native implementation', () => {
   assert.equal(config.userInterfaceStyle, 'light');
   assert.match(mobilePackage.dependencies['expo-system-ui'], /^~6\.0\./);
+});
+
+test('the lockfile contains optional peers required by the EAS npm version', () => {
+  assert.equal(mobileLock.packages['node_modules/@emnapi/core'].version, '1.11.2');
+  assert.equal(mobileLock.packages['node_modules/@emnapi/runtime'].version, '1.11.2');
 });
 
 test('Google iOS configuration never ships a placeholder URL scheme', () => {
