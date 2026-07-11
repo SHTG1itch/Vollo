@@ -166,7 +166,16 @@ export function NotificationsScreen() {
               onResolved={(requestId) => setRequests((list) => list.filter((r) => r.id !== requestId))}
             />
           }
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => fetch(true)} tintColor={colors.primary} />}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => {
+                void fetch(true);
+                void loadFollowRequests();
+              }}
+              tintColor={colors.primary}
+            />
+          }
           renderItem={({ item }) => {
             const data = item.data as Record<string, unknown> | null | undefined;
             const tappable =

@@ -200,6 +200,10 @@ test('privacy relationship queues distinguish load failures from an empty queue'
   assert.match(notifications, /error=\{requestsError\}/);
   assert.match(notifications, /onRetry=\{\(\) => void loadFollowRequests\(\)\}/);
   assert.doesNotMatch(notifications, /getFollowRequests\(\)[\s\S]{0,160}\.catch\(\(\) => \{\}\)/);
+  assert.match(
+    notifications,
+    /onRefresh=\{\(\) => \{\s*void fetch\(true\);\s*void loadFollowRequests\(\);/,
+  );
 });
 
 test('match opponent lookup distinguishes search failure from no registered player', async () => {
