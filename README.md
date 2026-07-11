@@ -345,6 +345,17 @@ raise Supavisor/compute capacity based on measured database headroom; do not
 raise PostgreSQL connection limits blindly. Re-baseline after plan, region,
 schema, query, or pooler changes.
 
+After each Edge deployment, rerun the credential-free security contract probes:
+
+```bash
+VOLLO_API_URL=https://<project-ref>.supabase.co/functions/v1/api npm run security:smoke
+```
+
+The command accepts only canonical Supabase Edge hosts and checks the public
+health response, private-route auth boundary, invalid-token caching, UUID
+validation, CORS preflight, security headers, request IDs, and the 64 KiB body
+ceiling. It carries no valid credentials and cannot perform an authorized write.
+
 ## Release checklist
 
 Code-level production checks are automated, but a store release still depends on
