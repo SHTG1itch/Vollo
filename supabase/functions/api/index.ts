@@ -2363,14 +2363,27 @@ app.patch('/api/users/me', requireAuth, async (c) => {
   const userId = uid(c);
   const b = updateProfileSchema.parse(await jsonBody(c));
   const mediaOwnerId = authUid(c);
-  const avatarMediaPath = b.avatar_url && !isGoogleAvatarUrl(b.avatar_url)
+  const googleAvatar = b.avatar_url ? isGoogleAvatarUrl(b.avatar_url) : false;
+  const avatarMediaPath = b.avatar_url && !googleAvatar
     ? ownedUserMediaPathFromUrl(b.avatar_url, mediaOwnerId, 'avatar')
     : null;
   const coverMediaPath = b.cover_url
     ? ownedUserMediaPathFromUrl(b.cover_url, mediaOwnerId, 'cover')
     : null;
-  if (b.avatar_url && !isGoogleAvatarUrl(b.avatar_url) && !avatarMediaPath) {
+  if (b.avatar_url && !googleAvatar && !avatarMediaPath) {
     throw ApiError.badRequest('Avatar must belong to your Vollo media folder');
+  }
+  if (b.avatar_url && googleAvatar) {
+    // Google-hosted images are accepted only as an exact no-op preservation of
+    // the avatar installed by trusted OAuth provisioning. Without this check a
+    // modified client could inject any googleusercontent.com tracking image.
+    const current = await queryOne<{ avatar_url: string | null }>(
+      'SELECT avatar_url FROM users WHERE id = $1',
+      [userId],
+    );
+    if (current?.avatar_url !== b.avatar_url) {
+      throw ApiError.badRequest('A Google avatar can only preserve your existing OAuth photo');
+    }
   }
   if (b.cover_url && !coverMediaPath) {
     throw ApiError.badRequest('Cover photo must belong to your Vollo media folder');

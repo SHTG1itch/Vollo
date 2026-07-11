@@ -42,6 +42,9 @@ test('only Google-hosted OAuth avatars bypass Vollo folder ownership', () => {
   assert.match(validation, /photo_url: volloMediaUrlSchema\.optional\(\)/);
   assert.match(validation, /cover_url: volloMediaUrlSchema\.nullable\(\)\.optional\(\)/);
   assert.match(validation, /avatar_url: profileAvatarUrlSchema\.nullable\(\)\.optional\(\)/);
+  assert.match(api, /SELECT avatar_url FROM users WHERE id = \$1/);
+  assert.match(api, /current\?\.avatar_url !== b\.avatar_url/);
+  assert.match(api, /Google avatar can only preserve your existing OAuth photo/);
 });
 
 test('match and profile routes enforce media ownership after schema validation', () => {
