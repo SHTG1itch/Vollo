@@ -159,8 +159,8 @@ export function AddCourtScreen({ route, navigation }: Props) {
       try {
         const { result } = await api.reverseGeocode(center.current.lat, center.current.lng);
         if (result) {
-          city = result.city ?? undefined;
-          address = result.label ?? undefined;
+          city = result.city?.slice(0, 120) || undefined;
+          address = result.label.slice(0, 240) || undefined;
         }
       } catch {
         /* no label — the court still saves with its coordinates */

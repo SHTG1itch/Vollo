@@ -198,7 +198,11 @@ export function EditProfileScreen({ navigation }: Props) {
       if (avatarPatch !== undefined) body.avatar_url = avatarPatch;
       if (coverPatch !== undefined) body.cover_url = coverPatch;
       if (resolvedHome) {
-        body.home = { lat: resolvedHome.lat, lng: resolvedHome.lng, label: resolvedHome.label };
+        body.home = {
+          lat: resolvedHome.lat,
+          lng: resolvedHome.lng,
+          label: resolvedHome.label.slice(0, 160),
+        };
       } else if (homeCleared && hasPersistedHome(user)) {
         body.home = null;
       }
