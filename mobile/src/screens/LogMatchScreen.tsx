@@ -29,6 +29,7 @@ import {
   canSubmitLogMatch,
   hasRecordedMatchStats,
   logMatchPrefillKey,
+  matchStatsValidationError,
   PhotoUploadGuard,
 } from '../utils/logMatchState';
 import { newClientKey } from '../utils/idempotency';
@@ -302,6 +303,7 @@ export function LogMatchScreen() {
 
   const setStat = (k: keyof MatchStats, v: number) => setStats((s) => ({ ...s, [k]: v }));
   const statsTouched = hasRecordedMatchStats(stats);
+  const statsError = statsTouched ? matchStatsValidationError(stats) : null;
 
   const onAddPhoto = async () => {
     const uploadToken = photoUploadGuard.current.begin();
@@ -346,6 +348,10 @@ export function LogMatchScreen() {
     }
     if (!scoreValid) {
       showToast(scoreError ?? 'Enter a valid completed tennis score.', 'error');
+      return;
+    }
+    if (statsError) {
+      showToast(statsError, 'error');
       return;
     }
     // One idempotency key per logical match: stable across retries of this
@@ -518,6 +524,9 @@ export function LogMatchScreen() {
           </View>
           <Text style={styles.tbToggleText}>Final set was a match tie-break (first to 10)</Text>
         </Pressable>
+        {scoreError ? (
+          <Text style={styles.validationError} accessibilityLiveRegion="polite">{scoreError}</Text>
+        ) : null}
       </Section>
 
       {/* Opponent */}
@@ -775,6 +784,9 @@ export function LogMatchScreen() {
           </StatGroup>
         </Card>
       ) : null}
+      {statsError ? (
+        <Text style={styles.validationError} accessibilityLiveRegion="polite">{statsError}</Text>
+      ) : null}
 
       <Button
         label={courtLookupLoading ? 'Loading court…' : uploadingPhoto ? 'Uploading photo…' : 'Log match'}
@@ -783,6 +795,7 @@ export function LogMatchScreen() {
         disabled={
           courtLookupLoading || !canSubmitLogMatch({
             scoreValid,
+            statsValid: statsError === null,
             submitting,
             photoUploadActive: uploadingPhoto,
           })
@@ -855,6 +868,7 @@ const styles = StyleSheet.create({
   rpeTextActive: { color: colors.onPrimary, fontFamily: fonts.bold },
   statsToggle: { paddingVertical: spacing.sm },
   statsToggleText: { color: colors.primary, fontFamily: fonts.bold, fontSize: font.body },
+  validationError: { color: colors.loss, fontFamily: fonts.medium, fontSize: font.small },
   addPhoto: {
     height: 96,
     borderRadius: radius.md,

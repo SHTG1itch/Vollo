@@ -6,6 +6,7 @@ import {
   canSubmitLogMatch,
   hasRecordedMatchStats,
   logMatchPrefillKey,
+  matchStatsValidationError,
   PhotoUploadGuard,
 } from '../../mobile/src/utils/logMatchState.ts';
 
@@ -49,19 +50,23 @@ test('a reset invalidates a late photo upload without affecting the next upload'
 
 test('submission stays disabled until validation passes and upload work is idle', () => {
   assert.equal(
-    canSubmitLogMatch({ scoreValid: true, submitting: false, photoUploadActive: false }),
+    canSubmitLogMatch({ scoreValid: true, statsValid: true, submitting: false, photoUploadActive: false }),
     true,
   );
   assert.equal(
-    canSubmitLogMatch({ scoreValid: true, submitting: false, photoUploadActive: true }),
+    canSubmitLogMatch({ scoreValid: true, statsValid: true, submitting: false, photoUploadActive: true }),
     false,
   );
   assert.equal(
-    canSubmitLogMatch({ scoreValid: true, submitting: true, photoUploadActive: false }),
+    canSubmitLogMatch({ scoreValid: true, statsValid: true, submitting: true, photoUploadActive: false }),
     false,
   );
   assert.equal(
-    canSubmitLogMatch({ scoreValid: false, submitting: false, photoUploadActive: false }),
+    canSubmitLogMatch({ scoreValid: false, statsValid: true, submitting: false, photoUploadActive: false }),
+    false,
+  );
+  assert.equal(
+    canSubmitLogMatch({ scoreValid: true, statsValid: false, submitting: false, photoUploadActive: false }),
     false,
   );
 });
@@ -89,4 +94,13 @@ test('recorded advanced stats survive collapsing their editor', () => {
 
   assert.equal(hasRecordedMatchStats(empty), false);
   assert.equal(hasRecordedMatchStats({ ...empty, aces: 3 }), true);
+  assert.equal(matchStatsValidationError(empty), null);
+  assert.equal(
+    matchStatsValidationError({ ...empty, first_serve_in: 6, first_serve_total: 5 }),
+    '1st serves in cannot exceed its total.',
+  );
+  assert.equal(
+    matchStatsValidationError({ ...empty, break_points_won: 3, break_points_total: 2 }),
+    'Break points won cannot exceed its total.',
+  );
 });

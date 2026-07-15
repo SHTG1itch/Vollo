@@ -83,14 +83,16 @@ export class PhotoUploadGuard {
 
 export function canSubmitLogMatch({
   scoreValid,
+  statsValid,
   submitting,
   photoUploadActive,
 }: {
   scoreValid: boolean;
+  statsValid: boolean;
   submitting: boolean;
   photoUploadActive: boolean;
 }): boolean {
-  return scoreValid && !submitting && !photoUploadActive;
+  return scoreValid && statsValid && !submitting && !photoUploadActive;
 }
 
 /**
@@ -101,4 +103,17 @@ export function canSubmitLogMatch({
  */
 export function hasRecordedMatchStats(stats: MatchStats): boolean {
   return Object.values(stats).some((value) => value > 0);
+}
+
+/** Mirror the backend's subset/total invariants with actionable form copy. */
+export function matchStatsValidationError(stats: MatchStats): string | null {
+  const pairs: [keyof MatchStats, keyof MatchStats, string][] = [
+    ['first_serve_in', 'first_serve_total', '1st serves in'],
+    ['second_serve_in', 'second_serve_total', '2nd serves in'],
+    ['break_points_won', 'break_points_total', 'Break points won'],
+  ];
+  for (const [part, total, label] of pairs) {
+    if (stats[part] > stats[total]) return `${label} cannot exceed its total.`;
+  }
+  return null;
 }
