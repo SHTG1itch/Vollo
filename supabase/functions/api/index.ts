@@ -44,7 +44,7 @@ import { getProfileAnalytics, getHeadToHead } from './analytics.ts';
 import { getPersonalRecords, getYearInReview } from './records.ts';
 import { runStreakSweep, runTerritorySweep, runCourtNameSweep, runRatingSweep } from './sweeps.ts';
 import { processMediaCleanupJobs } from './mediaCleanup.ts';
-import { isGoogleAvatarUrl, isOwnedUserMediaUrl, ownedUserMediaPathFromUrl } from './mediaOwnership.ts';
+import { isGoogleAvatarUrl, ownedUserMediaPathFromUrl } from './mediaOwnership.ts';
 import type { AuthClaims, LeaderboardEntry, MatchCard, MatchStats, Surface } from './types.ts';
 
 type Env = { Variables: { user?: AuthClaims; requestId: string } };
@@ -1999,7 +1999,7 @@ async function discoverCellHash(
 }
 
 /** Atomically claim one viewport and pace Overpass starts across the fleet. */
-async function claimDiscoveryCell(cellKey: string): Promise<boolean> {
+function claimDiscoveryCell(cellKey: string): Promise<boolean> {
   return withTransaction(async (client) => {
     await client.query(
       `INSERT INTO court_discovery_cells (cell_key)
@@ -2661,7 +2661,7 @@ app.get('/api/users/:username', optionalAuth, async (c) => {
 
   const isSelf = viewerId != null && viewerId === (row.id as string);
   const restricted =
-    !isSelf && Boolean(row.is_private) && !Boolean(row.viewer_is_following);
+    !isSelf && Boolean(row.is_private) && !row.viewer_is_following;
   return c.json({
     user: isSelf ? mapUser(row) : mapPublicUser(row),
     // The schema's private-account contract covers stats as well as activity.

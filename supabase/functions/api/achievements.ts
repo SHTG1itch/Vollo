@@ -114,7 +114,7 @@ export async function evaluateAchievements(userId: string): Promise<string[]> {
   return newlyAwarded;
 }
 
-export async function getAchievements(userId: string): Promise<Achievement[]> {
+export function getAchievements(userId: string): Promise<Achievement[]> {
   return query<Achievement>(
     `SELECT code, title, description, icon, created_at
        FROM achievements WHERE user_id = $1 ORDER BY created_at DESC`,

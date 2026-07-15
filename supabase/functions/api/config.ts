@@ -10,11 +10,6 @@ function num(value: string | undefined, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
-function bool(value: string | undefined, fallback: boolean): boolean {
-  if (value === undefined) return fallback;
-  return value === 'true' || value === '1' || value === 'yes';
-}
-
 const env = Deno.env.get('NODE_ENV') ?? 'production';
 
 export const config = {
