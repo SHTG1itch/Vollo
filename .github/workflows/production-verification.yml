@@ -99,6 +99,10 @@ jobs:
         working-directory: supabase/functions/api
         run: deno check --frozen --config deno.json --lock=deno.lock index.ts
 
+      - name: Lint Edge Function
+        working-directory: supabase/functions/api
+        run: deno lint
+
   database:
     name: Database migrations and pgTAP
     runs-on: ubuntu-24.04
