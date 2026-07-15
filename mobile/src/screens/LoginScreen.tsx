@@ -54,6 +54,7 @@ export function LoginScreen({ navigation }: Props) {
               autoComplete="username"
               textContentType="username"
               returnKeyType="next"
+              maxLength={255}
             />
             <Field
               label="Password"

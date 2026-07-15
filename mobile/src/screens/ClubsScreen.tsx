@@ -108,6 +108,7 @@ export function ClubsScreen() {
             onChangeText={setQ}
             autoCapitalize="none"
             returnKeyType="search"
+            maxLength={120}
           />
         ) : null}
       </View>

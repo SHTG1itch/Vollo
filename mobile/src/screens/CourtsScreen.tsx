@@ -125,7 +125,7 @@ export function CourtsScreen() {
       </View>
 
       <View style={styles.searchRow}>
-        <Field value={query} onChangeText={setQuery} placeholder="Search by name or city" onSubmitEditing={() => search(query)} style={{ flex: 1 }} />
+        <Field value={query} onChangeText={setQuery} placeholder="Search by name or city" onSubmitEditing={() => search(query)} maxLength={120} style={{ flex: 1 }} />
         {loading ? (
           <View style={styles.searchSpinner}>
             <ActivityIndicator color={colors.primary} />

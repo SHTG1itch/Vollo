@@ -281,6 +281,7 @@ export function AddCourtScreen({ route, navigation }: Props) {
               value={courtCount}
               onChangeText={(v) => setCourtCount(v.replace(/[^0-9]/g, ''))}
               keyboardType="number-pad"
+              maxLength={2}
               style={{ width: 96 }}
             />
             <Text style={styles.countHint}>All courts at one venue count as a single domination sector.</Text>
@@ -294,6 +295,7 @@ export function AddCourtScreen({ route, navigation }: Props) {
               style={{ flex: 1 }}
               onSubmitEditing={findAddress}
               autoCapitalize="none"
+              maxLength={200}
             />
             <Button label="Find" variant="secondary" onPress={findAddress} loading={searching} disabled={submitting} style={{ paddingHorizontal: spacing.lg }} />
           </View>

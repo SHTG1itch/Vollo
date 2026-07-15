@@ -560,6 +560,7 @@ export function LogMatchScreen() {
               placeholder="Search a Vollo player, or type any name"
               autoCapitalize="none"
               autoCorrect={false}
+              maxLength={60}
             />
             {oppResults.map((u) => (
               <Pressable

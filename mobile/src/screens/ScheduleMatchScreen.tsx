@@ -153,6 +153,7 @@ export function ScheduleMatchScreen({ navigation, route }: Props) {
             onChangeText={setOpponentName}
             placeholder="Who are you playing?"
             autoCapitalize="words"
+            maxLength={60}
           />
         )}
       </Card>

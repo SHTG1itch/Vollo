@@ -108,6 +108,7 @@ export function UserSearchScreen() {
           autoFocus
           autoCapitalize="none"
           autoCorrect={false}
+          maxLength={60}
           style={{ flex: 1 }}
         />
       </View>

@@ -387,6 +387,7 @@ export function EditProfileScreen({ navigation }: Props) {
             }}
             placeholder="Your city"
             onSubmitEditing={findHome}
+            maxLength={200}
           />
           <Button
             label="Find home base"
@@ -447,19 +448,19 @@ export function EditProfileScreen({ navigation }: Props) {
         </View>
 
         <View style={{ gap: spacing.xs }}>
-          <Field label="Racquet" value={racquet} onChangeText={setRacquet} placeholder="e.g. Babolat Pure Aero" />
+          <Field label="Racquet" value={racquet} onChangeText={setRacquet} placeholder="e.g. Babolat Pure Aero" maxLength={80} />
           <GearPicks options={RACQUET_OPTIONS} value={racquet} onPick={setRacquet} />
         </View>
 
         <View style={{ gap: spacing.xs }}>
-          <Field label="Strings" value={strings} onChangeText={setStrings} placeholder="e.g. Luxilon ALU Power" />
+          <Field label="Strings" value={strings} onChangeText={setStrings} placeholder="e.g. Luxilon ALU Power" maxLength={80} />
           <GearPicks options={STRING_OPTIONS} value={strings} onPick={setStrings} />
         </View>
 
-        <Field label="String tension" value={tension} onChangeText={setTension} placeholder="e.g. 52 lbs" />
+        <Field label="String tension" value={tension} onChangeText={setTension} placeholder="e.g. 52 lbs" maxLength={40} />
 
         <View style={{ gap: spacing.xs }}>
-          <Field label="Shoes" value={shoes} onChangeText={setShoes} placeholder="e.g. Nike Vapor Pro" />
+          <Field label="Shoes" value={shoes} onChangeText={setShoes} placeholder="e.g. Nike Vapor Pro" maxLength={80} />
           <GearPicks options={SHOE_OPTIONS} value={shoes} onPick={setShoes} />
         </View>
       </Card>
