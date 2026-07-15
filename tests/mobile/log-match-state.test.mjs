@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   applyOpponentPrefill,
   canSubmitLogMatch,
+  hasRecordedMatchStats,
   logMatchPrefillKey,
   PhotoUploadGuard,
 } from '../../mobile/src/utils/logMatchState.ts';
@@ -63,4 +64,29 @@ test('submission stays disabled until validation passes and upload work is idle'
     canSubmitLogMatch({ scoreValid: false, submitting: false, photoUploadActive: false }),
     false,
   );
+});
+
+test('recorded advanced stats survive collapsing their editor', () => {
+  const empty = {
+    first_serve_in: 0,
+    first_serve_total: 0,
+    second_serve_in: 0,
+    second_serve_total: 0,
+    aces: 0,
+    double_faults: 0,
+    forehand_winners: 0,
+    forehand_errors: 0,
+    backhand_winners: 0,
+    backhand_errors: 0,
+    volley_winners: 0,
+    volley_errors: 0,
+    rally_short: 0,
+    rally_medium: 0,
+    rally_long: 0,
+    break_points_won: 0,
+    break_points_total: 0,
+  };
+
+  assert.equal(hasRecordedMatchStats(empty), false);
+  assert.equal(hasRecordedMatchStats({ ...empty, aces: 3 }), true);
 });

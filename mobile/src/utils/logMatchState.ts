@@ -1,4 +1,4 @@
-import type { Surface } from '../types';
+import type { MatchStats, Surface } from '../types';
 
 export type LogMatchPrefill = {
   scheduledMatchId?: string;
@@ -91,4 +91,14 @@ export function canSubmitLogMatch({
   photoUploadActive: boolean;
 }): boolean {
   return scoreValid && !submitting && !photoUploadActive;
+}
+
+/**
+ * Whether the player recorded any optional point-level statistics. This must be
+ * derived from the values, not from whether the collapsible editor is visible:
+ * collapsing a completed editor is a presentation choice and must not discard
+ * its data from the create-match payload.
+ */
+export function hasRecordedMatchStats(stats: MatchStats): boolean {
+  return Object.values(stats).some((value) => value > 0);
 }

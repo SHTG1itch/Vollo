@@ -27,6 +27,7 @@ import { analyzeLocal, scoreValidationError } from '../utils/format';
 import {
   applyOpponentPrefill,
   canSubmitLogMatch,
+  hasRecordedMatchStats,
   logMatchPrefillKey,
   PhotoUploadGuard,
 } from '../utils/logMatchState';
@@ -300,7 +301,7 @@ export function LogMatchScreen() {
   }, [navigation]);
 
   const setStat = (k: keyof MatchStats, v: number) => setStats((s) => ({ ...s, [k]: v }));
-  const statsTouched = showStats && Object.values(stats).some((v) => v > 0);
+  const statsTouched = hasRecordedMatchStats(stats);
 
   const onAddPhoto = async () => {
     const uploadToken = photoUploadGuard.current.begin();
