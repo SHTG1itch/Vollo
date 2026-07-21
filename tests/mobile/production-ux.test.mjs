@@ -75,6 +75,21 @@ test('every interactive Pressable exposes an accessibility role', async () => {
   assert.deepEqual(missing, []);
 });
 
+test('user-visible mobile copy contains no mojibake', async () => {
+  const sourceRoot = fileURLToPath(new URL('../../mobile/src/', import.meta.url));
+  const files = await tsxFiles(sourceRoot);
+  const malformed = [];
+  for (const file of files) {
+    const source = await readFile(file, 'utf8');
+    source.split(/\r?\n/).forEach((line, index) => {
+      if (/[\u00c2\u00c3\u00e2]/u.test(line)) {
+        malformed.push(`${path.relative(sourceRoot, file)}:${index + 1}`);
+      }
+    });
+  }
+  assert.deepEqual(malformed, []);
+});
+
 test('court placement uses Apple native tiles on iOS and visibly attributes OSM data', async () => {
   const source = await read('mobile/src/screens/AddCourtScreen.tsx');
   assert.doesNotMatch(source, /\bUrlTile\b[^;]*from 'react-native-maps'/);
