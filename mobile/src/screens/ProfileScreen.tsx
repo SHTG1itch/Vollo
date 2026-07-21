@@ -452,7 +452,7 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
           {analytics.by_surface.map((s) => (
             <ProgressBar
               key={s.surface}
-              label={`${s.surface[0].toUpperCase()}${s.surface.slice(1)} (${s.wins}-${s.losses})`}
+              label={`${s.surface.charAt(0).toUpperCase()}${s.surface.slice(1)} (${s.wins}-${s.losses})`}
               pct={s.win_rate}
               color={surfaceColors[s.surface]}
             />

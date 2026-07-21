@@ -51,9 +51,10 @@ const linking: LinkingOptions<RootStackParamList> = {
 function replayDeepLink(url: string): void {
   let segments: string[];
   try {
-    segments = url
+    const path = url
       .replace(/^[a-z][a-z0-9+.-]*:\/\//i, '') // strip "vollo://"
-      .split(/[?#]/)[0]
+      .split(/[?#]/)[0] ?? '';
+    segments = path
       .split('/')
       .filter(Boolean)
       .map(decodeURIComponent);

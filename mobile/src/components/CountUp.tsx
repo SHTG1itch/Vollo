@@ -24,11 +24,12 @@ const AnimatedTextInput = Animated.createAnimatedComponent(TextInput);
 function format(n: number, decimals: number, prefix: string, suffix: string): string {
   'worklet';
   const fixed = Math.abs(n).toFixed(decimals);
-  const [intPart, frac] = fixed.split('.');
+  const [rawIntPart, frac] = fixed.split('.');
+  const intPart = rawIntPart ?? '0';
   let grouped = '';
   for (let i = 0; i < intPart.length; i++) {
     if (i > 0 && (intPart.length - i) % 3 === 0) grouped += ',';
-    grouped += intPart[i];
+    grouped += intPart.charAt(i);
   }
   const sign = n < 0 ? '-' : '';
   return prefix + sign + grouped + (frac ? '.' + frac : '') + suffix;

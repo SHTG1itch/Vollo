@@ -102,8 +102,8 @@ async function writeNativeValue(
   await clearSlot(SecureStore, key, target, 0, true);
   await SecureStore.setItemAsync(sessionSlotCountKey(key, target), String(chunks.length), options);
   try {
-    for (let index = 0; index < chunks.length; index += 1) {
-      await SecureStore.setItemAsync(sessionChunkKey(key, target, index), chunks[index], options);
+    for (const [index, chunk] of chunks.entries()) {
+      await SecureStore.setItemAsync(sessionChunkKey(key, target, index), chunk, options);
     }
     // The small manifest is the atomic commit point: readers see either the
     // complete previous value or the complete new value, never half a session.

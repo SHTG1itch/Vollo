@@ -12,8 +12,11 @@ import { formatScoreLine } from '../utils/format';
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 function monthLabel(ym: string): string {
-  const [y, m] = ym.split('-').map(Number);
-  const d = new Date(y, (m ?? 1) - 1, 1);
+  const match = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(ym);
+  const year = match?.[1];
+  const month = match?.[2];
+  if (!year || !month) return ym;
+  const d = new Date(Number(year), Number(month) - 1, 1);
   return d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
 }
 
