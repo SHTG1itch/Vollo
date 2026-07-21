@@ -3,6 +3,8 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const workflowUrl = new URL('../../.github/workflows/production-verification.yml', import.meta.url);
+const secretWorkflowUrl = new URL('../../.github/workflows/secret-scanning.yml', import.meta.url);
+const gitleaksIgnoreUrl = new URL('../../.gitleaksignore', import.meta.url);
 const databaseLintUrl = new URL('../../supabase/lint/public_app_functions.sql', import.meta.url);
 
 test('production workflow pins runtimes, actions, and frozen dependency checks', async () => {
@@ -41,4 +43,28 @@ test('production workflow pins runtimes, actions, and frozen dependency checks',
   assert.match(databaseLint, /lower\(issue\.level\) = 'error'/);
   assert.match(databaseLint, /RAISE EXCEPTION 'Vollo PL\/pgSQL lint failed/);
   assert.doesNotMatch(workflow, /contents: write|pull-requests: write|npm run load:test/);
+});
+
+test('secret scanning covers full history with exact reviewed exceptions', async () => {
+  const [workflow, ignoredFindings] = await Promise.all([
+    readFile(secretWorkflowUrl, 'utf8'),
+    readFile(gitleaksIgnoreUrl, 'utf8'),
+  ]);
+
+  assert.match(workflow, /permissions:\s*\n\s+contents: read/);
+  assert.match(workflow, /actions\/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6\.0\.2/);
+  assert.match(workflow, /gitleaks\/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3\.0\.0/);
+  assert.match(workflow, /fetch-depth: 0/);
+  assert.match(workflow, /persist-credentials: false/);
+  assert.match(workflow, /GITLEAKS_ENABLE_COMMENTS: "false"/);
+  assert.match(workflow, /GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"/);
+  assert.doesNotMatch(workflow, /contents: write|pull-requests: write/);
+
+  const fingerprints = ignoredFindings
+    .split(/\r?\n/)
+    .filter((line) => line && !line.startsWith('#'));
+  assert.deepEqual(fingerprints, [
+    '1c75e013db58d7fc6d36b1b120538199c8653b6f:mobile/app.json:jwt:51',
+    '8013c9d0f20ced3470ca1242c4a6c63cd30d747a:mobile/app.json:jwt:44',
+  ]);
 });

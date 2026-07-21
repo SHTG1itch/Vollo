@@ -1,0 +1,5 @@
+# Public Supabase anon JWT committed in mobile/app.json. Both findings point to
+# the same intentionally public client credential; exact fingerprints keep any
+# future JWT finding subject to review.
+1c75e013db58d7fc6d36b1b120538199c8653b6f:mobile/app.json:jwt:51
+8013c9d0f20ced3470ca1242c4a6c63cd30d747a:mobile/app.json:jwt:44
