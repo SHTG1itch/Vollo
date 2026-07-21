@@ -620,7 +620,7 @@ export function MapScreen() {
           style={[styles.dataErrorBanner, { top: insets.top + (!zoomedIn || locationOff ? 100 : 52) }]}
           accessibilityLiveRegion="assertive"
         >
-          <Text style={styles.bannerText}>Some map data couldnâ€™t load.</Text>
+          <Text style={styles.bannerText}>Some map data couldn’t load.</Text>
           <Pressable
             onPress={() => void load(lastRegion.current, { force: true })}
             style={styles.dataErrorRetry}

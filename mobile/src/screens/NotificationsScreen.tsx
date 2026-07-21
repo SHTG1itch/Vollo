@@ -55,7 +55,7 @@ function FollowRequestsCard({
   return (
     <View style={styles.requestsCard}>
       <Text style={styles.requestsTitle}>FOLLOW REQUESTS</Text>
-      {loading ? <Muted style={{ textAlign: 'left' }}>Loading follow requestsâ€¦</Muted> : null}
+      {loading ? <Muted style={{ textAlign: 'left' }}>Loading follow requests…</Muted> : null}
       {error ? (
         <View style={styles.requestLoadError} accessibilityLiveRegion="assertive">
           <Muted style={{ textAlign: 'left' }}>{error}</Muted>

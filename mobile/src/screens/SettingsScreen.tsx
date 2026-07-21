@@ -179,7 +179,7 @@ export function SettingsScreen() {
         </View>
 
         {blockedLoading ? (
-          <Muted style={{ textAlign: 'left' }}>Loading blocked playersâ€¦</Muted>
+          <Muted style={{ textAlign: 'left' }}>Loading blocked players…</Muted>
         ) : blockedError ? (
           <View style={styles.blockedLoadError} accessibilityLiveRegion="assertive">
             <Muted style={{ textAlign: 'left' }}>{blockedError}</Muted>
