@@ -51,7 +51,7 @@ test('secret scanning covers full history with exact reviewed exceptions', async
     readFile(gitleaksIgnoreUrl, 'utf8'),
   ]);
 
-  assert.match(workflow, /permissions:\s*\n\s+contents: read/);
+  assert.match(workflow, /permissions:\s*\n\s+contents: read\s*\n\s+pull-requests: read/);
   assert.match(workflow, /actions\/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6\.0\.2/);
   assert.match(workflow, /gitleaks\/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3\.0\.0/);
   assert.match(workflow, /fetch-depth: 0/);
