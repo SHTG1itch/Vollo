@@ -7,6 +7,7 @@ const config = JSON.parse(await readFile(new URL('../../mobile/app.json', import
 const eas = JSON.parse(await readFile(new URL('../../mobile/eas.json', import.meta.url), 'utf8'));
 const mobilePackage = JSON.parse(await readFile(new URL('../../mobile/package.json', import.meta.url), 'utf8'));
 const mobileLock = JSON.parse(await readFile(new URL('../../mobile/package-lock.json', import.meta.url), 'utf8'));
+const mobileTsconfig = JSON.parse(await readFile(new URL('../../mobile/tsconfig.json', import.meta.url), 'utf8'));
 const require = createRequire(import.meta.url);
 const dynamicConfig = require('../../mobile/app.config.js');
 
@@ -45,6 +46,11 @@ test('mobile config blocks unused camera, microphone, and background-location ac
 test('the declared system appearance has its required native implementation', () => {
   assert.equal(config.userInterfaceStyle, 'light');
   assert.match(mobilePackage.dependencies['expo-system-ui'], /^~6\.0\./);
+});
+
+test('mobile type-checking rejects unchecked array access', () => {
+  assert.equal(mobileTsconfig.compilerOptions.strict, true);
+  assert.equal(mobileTsconfig.compilerOptions.noUncheckedIndexedAccess, true);
 });
 
 test('the lockfile contains optional peers required by the EAS npm version', () => {

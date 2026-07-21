@@ -76,7 +76,11 @@ function zoneColors(t: Territory, self: boolean): { fill: string; stroke: string
 
 function polygonCoords(t: Territory): { latitude: number; longitude: number }[] {
   const ring = t.geometry.coordinates[0] ?? [];
-  const points = ring.map(([lng, lat]) => ({ latitude: lat, longitude: lng }));
+  const points = ring.flatMap(([lng, lat]) => (
+    Number.isFinite(lat) && Number.isFinite(lng)
+      ? [{ latitude: lat!, longitude: lng! }]
+      : []
+  ));
   if (points.length <= MAX_POLY_VERTICES) return points;
   // Evenly downsample an over-detailed ring, always keeping the closing vertex so
   // the polygon stays closed.
