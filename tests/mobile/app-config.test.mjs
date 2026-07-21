@@ -8,6 +8,7 @@ const eas = JSON.parse(await readFile(new URL('../../mobile/eas.json', import.me
 const mobilePackage = JSON.parse(await readFile(new URL('../../mobile/package.json', import.meta.url), 'utf8'));
 const mobileLock = JSON.parse(await readFile(new URL('../../mobile/package-lock.json', import.meta.url), 'utf8'));
 const mobileTsconfig = JSON.parse(await readFile(new URL('../../mobile/tsconfig.json', import.meta.url), 'utf8'));
+const fontLicense = await readFile(new URL('../../mobile/assets/fonts/OFL.txt', import.meta.url), 'utf8');
 const require = createRequire(import.meta.url);
 const dynamicConfig = require('../../mobile/app.config.js');
 
@@ -51,6 +52,12 @@ test('the declared system appearance has its required native implementation', ()
 test('mobile type-checking rejects unchecked array access', () => {
   assert.equal(mobileTsconfig.compilerOptions.strict, true);
   assert.equal(mobileTsconfig.compilerOptions.noUncheckedIndexedAccess, true);
+});
+
+test('bundled Barlow fonts retain their required open-font license', () => {
+  assert.match(fontLicense, /Copyright 2017 The Barlow Project Authors/);
+  assert.match(fontLicense, /SIL OPEN FONT LICENSE Version 1\.1/);
+  assert.match(fontLicense, /provided that each copy\s+contains the above copyright notice and this license/);
 });
 
 test('the lockfile contains optional peers required by the EAS npm version', () => {
