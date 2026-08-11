@@ -13,6 +13,10 @@ const productionCapabilities = await readFile(
   new URL('../../mobile/plugins/with-production-capabilities.js', import.meta.url),
   'utf8',
 );
+const clipboardPatch = await readFile(
+  new URL('../../scripts/patch-expo-clipboard.mjs', import.meta.url),
+  'utf8',
+);
 const require = createRequire(import.meta.url);
 const dynamicConfig = require('../../mobile/app.config.js');
 
@@ -57,6 +61,16 @@ test('Android image cropping is pinned to the security-fixed native release', ()
   assert.match(productionCapabilities, /CROPPER_ACTIVITY = 'com\.canhub\.cropper\.CropImageActivity'/);
   assert.match(productionCapabilities, /cropper\.\$\['android:exported'\] = 'false'/);
   assert.match(productionCapabilities, /resolutionStrategy\.force '\$\{marker\}'/);
+});
+
+test('Android clipboard images use delegated URI access', () => {
+  assert.equal(mobilePackage.scripts.postinstall, 'node ../scripts/patch-expo-clipboard.mjs');
+  assert.deepEqual(mobilePackage.expo.autolinking.android.buildFromSource, ['expo-clipboard']);
+  assert.match(clipboardPatch, /assert\.equal\(packageJson\.version, '8\.0\.8'/);
+  assert.match(clipboardPatch, /android:exported=\"false\"/);
+  assert.match(clipboardPatch, /android:grantUriPermissions=\"true\"/);
+  assert.match(clipboardPatch, /ClipboardFileProvider must be exported/);
+  assert.match(productionCapabilities, /CLIPBOARD_PROVIDER = 'expo\.modules\.clipboard\.ClipboardFileProvider'/);
 });
 
 test('the declared system appearance has its required native implementation', () => {

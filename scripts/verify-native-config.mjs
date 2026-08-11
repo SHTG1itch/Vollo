@@ -67,4 +67,15 @@ const cropperActivity = activities.find(
 assert.equal(cropperActivity?.$?.['android:exported'], 'false');
 assert.equal(cropperActivity?.$?.['tools:replace'], 'android:exported');
 
+const providers = android.manifest.manifest.application?.[0]?.provider ?? [];
+const clipboardProvider = providers.find(
+  (provider) => provider?.$?.['android:name'] === 'expo.modules.clipboard.ClipboardFileProvider',
+);
+assert.equal(clipboardProvider?.$?.['android:exported'], 'false');
+assert.equal(clipboardProvider?.$?.['android:grantUriPermissions'], 'true');
+assert.equal(
+  clipboardProvider?.$?.['tools:replace'],
+  'android:exported,android:grantUriPermissions',
+);
+
 console.log('Native capability introspection: PASS');

@@ -8,6 +8,7 @@ const {
 
 const SECURE_CROPPER_VERSION = '4.7.0';
 const CROPPER_ACTIVITY = 'com.canhub.cropper.CropImageActivity';
+const CLIPBOARD_PROVIDER = 'expo.modules.clipboard.ClipboardFileProvider';
 
 /** Keep optional native packages from declaring capabilities that Vollo does
  * not use in the current release. Config-plugin introspection verifies these
@@ -23,6 +24,16 @@ module.exports = function withProductionCapabilities(config, options = {}) {
     }
     cropper.$['android:exported'] = 'false';
     cropper.$['tools:replace'] = 'android:exported';
+
+    const providers = application.provider ??= [];
+    let clipboard = providers.find((provider) => provider.$?.['android:name'] === CLIPBOARD_PROVIDER);
+    if (!clipboard) {
+      clipboard = { $: { 'android:name': CLIPBOARD_PROVIDER } };
+      providers.push(clipboard);
+    }
+    clipboard.$['android:exported'] = 'false';
+    clipboard.$['android:grantUriPermissions'] = 'true';
+    clipboard.$['tools:replace'] = 'android:exported,android:grantUriPermissions';
     return result;
   });
 
