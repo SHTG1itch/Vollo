@@ -9,6 +9,10 @@ const mobilePackage = JSON.parse(await readFile(new URL('../../mobile/package.js
 const mobileLock = JSON.parse(await readFile(new URL('../../mobile/package-lock.json', import.meta.url), 'utf8'));
 const mobileTsconfig = JSON.parse(await readFile(new URL('../../mobile/tsconfig.json', import.meta.url), 'utf8'));
 const fontLicense = await readFile(new URL('../../mobile/assets/fonts/OFL.txt', import.meta.url), 'utf8');
+const productionCapabilities = await readFile(
+  new URL('../../mobile/plugins/with-production-capabilities.js', import.meta.url),
+  'utf8',
+);
 const require = createRequire(import.meta.url);
 const dynamicConfig = require('../../mobile/app.config.js');
 
@@ -46,6 +50,13 @@ test('mobile config blocks unused camera, microphone, and background-location ac
 
   const secureStore = config.plugins.find((plugin) => Array.isArray(plugin) && plugin[0] === 'expo-secure-store');
   assert.deepEqual(secureStore, ['expo-secure-store', { configureAndroidBackup: true }]);
+});
+
+test('Android image cropping is pinned to the security-fixed native release', () => {
+  assert.match(productionCapabilities, /SECURE_CROPPER_VERSION = '4\.7\.0'/);
+  assert.match(productionCapabilities, /CROPPER_ACTIVITY = 'com\.canhub\.cropper\.CropImageActivity'/);
+  assert.match(productionCapabilities, /cropper\.\$\['android:exported'\] = 'false'/);
+  assert.match(productionCapabilities, /resolutionStrategy\.force '\$\{marker\}'/);
 });
 
 test('the declared system appearance has its required native implementation', () => {

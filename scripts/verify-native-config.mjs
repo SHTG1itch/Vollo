@@ -60,4 +60,11 @@ const application = android.manifest.manifest.application?.[0]?.$;
 assert.equal(application?.['android:allowBackup'], 'false');
 assert.notEqual(application?.['android:usesCleartextTraffic'], 'true');
 
+const activities = android.manifest.manifest.application?.[0]?.activity ?? [];
+const cropperActivity = activities.find(
+  (activity) => activity?.$?.['android:name'] === 'com.canhub.cropper.CropImageActivity',
+);
+assert.equal(cropperActivity?.$?.['android:exported'], 'false');
+assert.equal(cropperActivity?.$?.['tools:replace'], 'android:exported');
+
 console.log('Native capability introspection: PASS');
