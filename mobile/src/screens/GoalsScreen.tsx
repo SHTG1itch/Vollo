@@ -31,20 +31,34 @@ export function GoalsScreen() {
   const [target, setTarget] = useState(3);
   const [saving, setSaving] = useState(false);
   const saveActive = useRef(false);
+  const loadSequence = useRef(0);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(() => {
+    const sequence = ++loadSequence.current;
     void api
       .getGoals()
       .then((r) => {
+        if (sequence !== loadSequence.current) return;
         setGoals(r.goals);
         setError(null);
       })
-      .catch((e) => setError(e instanceof ApiError ? e.message : 'Failed to load your goals'))
-      .finally(() => setRefreshing(false));
+      .catch((e) => {
+        if (sequence === loadSequence.current) {
+          setError(e instanceof ApiError ? e.message : 'Failed to load your goals');
+        }
+      })
+      .finally(() => {
+        if (sequence === loadSequence.current) setRefreshing(false);
+      });
   }, []);
-  useEffect(load, [load]);
+  useEffect(() => {
+    load();
+    return () => {
+      loadSequence.current += 1;
+    };
+  }, [load]);
 
   const onRefresh = () => {
     setRefreshing(true);

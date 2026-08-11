@@ -345,16 +345,20 @@ test('creation screens synchronously reject rapid duplicate taps', async () => {
   assert.match(goals, /saveActive\.current \|\| saving/);
 });
 
-test('paired responses and club searches are race-safe', async () => {
-  const [clubs, notifications, scheduled] = await Promise.all([
+test('paired responses and refreshable lists are race-safe', async () => {
+  const [clubs, goals, notifications, scheduled] = await Promise.all([
     read('mobile/src/screens/ClubsScreen.tsx'),
+    read('mobile/src/screens/GoalsScreen.tsx'),
     read('mobile/src/screens/NotificationsScreen.tsx'),
     read('mobile/src/screens/ScheduledMatchesScreen.tsx'),
   ]);
   assert.match(clubs, /const sequence = \+\+searchSequence\.current/);
   assert.match(clubs, /if \(sequence !== searchSequence\.current\) return/);
   assert.match(clubs, /searchSequence\.current \+= 1/);
+  assert.match(goals, /const sequence = \+\+loadSequence\.current/);
+  assert.match(goals, /if \(sequence !== loadSequence\.current\) return/);
   assert.match(notifications, /if \(responseActive\.current \|\| busy\) return/);
+  assert.match(scheduled, /const sequence = \+\+loadSequence\.current/);
   assert.match(scheduled, /if \(responseActive\.current \|\| busyId\) return/);
 });
 

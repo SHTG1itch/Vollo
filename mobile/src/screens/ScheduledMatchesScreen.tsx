@@ -41,24 +41,32 @@ export function ScheduledMatchesScreen() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState(false);
   const responseActive = useRef(false);
+  const loadSequence = useRef(0);
 
   const load = useCallback(async () => {
+    const sequence = ++loadSequence.current;
     try {
       const { scheduled_matches } = await api.getScheduledMatches();
+      if (sequence !== loadSequence.current) return;
       setItems(scheduled_matches);
       setLoadError(false);
     } catch {
       // Keep whatever we have, but surface the failure when there's nothing to show.
-      setLoadError(true);
+      if (sequence === loadSequence.current) setLoadError(true);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (sequence === loadSequence.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, []);
 
   useFocusEffect(
     useCallback(() => {
       void load();
+      return () => {
+        loadSequence.current += 1;
+      };
     }, [load]),
   );
 
