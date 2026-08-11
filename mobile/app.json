@@ -4,6 +4,10 @@
     "slug": "vollo",
     "scheme": "vollo",
     "version": "0.1.0",
+    "platforms": [
+      "ios",
+      "android"
+    ],
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
@@ -32,10 +36,6 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0F7A3D"
       },
-      "permissions": [
-        "ACCESS_FINE_LOCATION",
-        "ACCESS_COARSE_LOCATION"
-      ],
       "blockedPermissions": [
         "android.permission.CAMERA",
         "android.permission.READ_EXTERNAL_STORAGE",
@@ -43,10 +43,6 @@
         "android.permission.SYSTEM_ALERT_WINDOW",
         "android.permission.WRITE_EXTERNAL_STORAGE"
       ]
-    },
-    "web": {
-      "bundler": "metro",
-      "favicon": "./assets/favicon.png"
     },
     "plugins": [
       [

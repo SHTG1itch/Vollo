@@ -17,6 +17,7 @@ export interface ReverseGeocodeResult {
 
 /** Abort a geocoding request that hangs so it cannot tie up the function. */
 const GEOCODE_TIMEOUT_MS = 8_000;
+const MAX_GEOCODER_RESPONSE_BYTES = 256 * 1024;
 const FORWARD_CACHE_TTL_DAYS = 30;
 const REVERSE_CACHE_TTL_DAYS = 180;
 
@@ -51,6 +52,34 @@ function boundedText(value: unknown, max = 500): string | null {
 function validCoordinate(value: unknown, min: number, max: number): number | null {
   const number = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(number) && number >= min && number <= max ? number : null;
+}
+
+async function readGeocoderJson<T>(response: Response): Promise<T> {
+  const declared = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > MAX_GEOCODER_RESPONSE_BYTES) {
+    throw new Error('Geocoder response exceeded size limit');
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error('Geocoder returned an empty response');
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  let text = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > MAX_GEOCODER_RESPONSE_BYTES) {
+        await reader.cancel();
+        throw new Error('Geocoder response exceeded size limit');
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    return JSON.parse(text + decoder.decode()) as T;
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 async function cacheFingerprint(value: string): Promise<string> {
@@ -152,12 +181,12 @@ async function geocodeNominatim(q: string, limit: number): Promise<GeocodeResult
     signal: AbortSignal.timeout(GEOCODE_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`nominatim responded ${res.status}`);
-  const rows = (await res.json()) as Array<{
+  const rows = await readGeocoderJson<Array<{
     display_name?: unknown;
     lat?: unknown;
     lon?: unknown;
     address?: { city?: unknown; town?: unknown; village?: unknown; municipality?: unknown };
-  }>;
+  }>>(res);
 
   return rows.flatMap((row) => {
     const label = boundedText(row.display_name);
@@ -200,10 +229,10 @@ async function reverseGeocodeNominatim(lat: number, lng: number): Promise<Revers
     signal: AbortSignal.timeout(GEOCODE_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`nominatim reverse responded ${res.status}`);
-  const row = (await res.json()) as {
+  const row = await readGeocoderJson<{
     display_name?: unknown;
     address?: Record<string, unknown>;
-  };
+  }>(res);
   return mapReverseResult(row.display_name, row.address ?? {});
 }
 
@@ -219,9 +248,9 @@ async function geocodeGeoapify(q: string, limit: number): Promise<GeocodeResult[
     signal: AbortSignal.timeout(GEOCODE_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`geoapify responded ${res.status}`);
-  const json = (await res.json()) as {
+  const json = await readGeocoderJson<{
     features?: Array<{ properties?: Record<string, unknown> }>;
-  };
+  }>(res);
   return (json.features ?? []).flatMap((feature) => {
     const properties = feature.properties ?? {};
     const label = boundedText(properties.formatted);
@@ -245,9 +274,9 @@ async function reverseGeocodeGeoapify(lat: number, lng: number): Promise<Reverse
     signal: AbortSignal.timeout(GEOCODE_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`geoapify reverse responded ${res.status}`);
-  const json = (await res.json()) as {
+  const json = await readGeocoderJson<{
     features?: Array<{ properties?: Record<string, unknown> }>;
-  };
+  }>(res);
   const properties = json.features?.[0]?.properties;
   return properties ? mapReverseResult(properties.formatted, properties) : null;
 }

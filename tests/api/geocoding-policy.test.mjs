@@ -95,3 +95,11 @@ test('Overpass responses are bounded before JSON parsing', () => {
   );
   assert.match(overpass, /elements\.length > MAX_ELEMENTS/);
 });
+
+test('geocoder responses are stream-bounded before JSON parsing', () => {
+  assert.match(geocoding, /MAX_GEOCODER_RESPONSE_BYTES = 256 \* 1024/);
+  assert.match(geocoding, /response\.body\?\.getReader\(\)/);
+  assert.match(geocoding, /bytes > MAX_GEOCODER_RESPONSE_BYTES/);
+  assert.equal((geocoding.match(/readGeocoderJson</g) ?? []).length, 5);
+  assert.doesNotMatch(geocoding, /res\.json\(\)/);
+});

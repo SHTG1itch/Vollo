@@ -19,10 +19,14 @@ test('production builds use an exact validated EAS CLI contract', () => {
   assert.equal(eas.build.production.autoIncrement, true);
 });
 
+test('production config advertises only supported native platforms', () => {
+  assert.deepEqual(config.platforms, ['ios', 'android']);
+  assert.equal(mobilePackage.scripts.web, undefined);
+});
+
 test('mobile config blocks unused camera, microphone, and background-location access', () => {
   assert.equal(config.android.allowBackup, false);
   assert.equal(config.ios.config.usesNonExemptEncryption, false);
-  assert.deepEqual(config.android.permissions.sort(), ['ACCESS_COARSE_LOCATION', 'ACCESS_FINE_LOCATION']);
   assert.deepEqual(config.android.blockedPermissions.sort(), [
     'android.permission.CAMERA',
     'android.permission.READ_EXTERNAL_STORAGE',

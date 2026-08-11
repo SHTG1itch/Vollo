@@ -54,6 +54,8 @@ for (const permission of [
 }
 assert.equal(permissionByName.has('android.permission.ACCESS_BACKGROUND_LOCATION'), false);
 assert.equal(permissionByName.has('android.permission.FOREGROUND_SERVICE_LOCATION'), false);
+assert.equal(permissionByName.has('android.permission.ACCESS_COARSE_LOCATION'), true);
+assert.equal(permissionByName.has('android.permission.ACCESS_FINE_LOCATION'), true);
 const application = android.manifest.manifest.application?.[0]?.$;
 assert.equal(application?.['android:allowBackup'], 'false');
 assert.notEqual(application?.['android:usesCleartextTraffic'], 'true');
