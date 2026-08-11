@@ -195,6 +195,20 @@ test('optional native cold-start lookups cannot reject unhandled', async () => {
   assert.match(app, /Linking\.getInitialURL\(\)\.then\([\s\S]*?\)\.catch\(\(\) => \{/);
 });
 
+test('external attribution links report native launch failures', async () => {
+  const sources = await Promise.all([
+    read('mobile/src/screens/AddCourtScreen.tsx'),
+    read('mobile/src/screens/EditProfileScreen.tsx'),
+    read('mobile/src/screens/MapScreen.tsx'),
+  ]);
+  for (const source of sources) {
+    assert.match(
+      source,
+      /Linking\.openURL\('https:\/\/www\.openstreetmap\.org\/copyright'\)\s*\.catch\(\(\) => showToast\('Could not open the OpenStreetMap attribution\.', 'error'\)\)/,
+    );
+  }
+});
+
 test('settings saves stay scoped to the account that initiated them', async () => {
   const source = await read('mobile/src/screens/SettingsScreen.tsx');
   assert.match(source, /const accountId = user\.id/g);

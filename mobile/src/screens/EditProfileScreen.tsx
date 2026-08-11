@@ -434,7 +434,8 @@ export function EditProfileScreen({ navigation }: Props) {
             />
           ) : null}
           <Pressable
-            onPress={() => void Linking.openURL('https://www.openstreetmap.org/copyright')}
+            onPress={() => void Linking.openURL('https://www.openstreetmap.org/copyright')
+              .catch(() => showToast('Could not open the OpenStreetMap attribution.', 'error'))}
             accessibilityRole="link"
             accessibilityLabel="Search data © OpenStreetMap contributors"
             hitSlop={8}

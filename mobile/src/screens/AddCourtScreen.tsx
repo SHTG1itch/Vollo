@@ -244,7 +244,8 @@ export function AddCourtScreen({ route, navigation }: Props) {
 
         <Pressable
           style={styles.attribution}
-          onPress={() => void Linking.openURL('https://www.openstreetmap.org/copyright')}
+          onPress={() => void Linking.openURL('https://www.openstreetmap.org/copyright')
+            .catch(() => showToast('Could not open the OpenStreetMap attribution.', 'error'))}
           accessibilityRole="link"
           accessibilityLabel={OSM_ATTRIBUTION}
           hitSlop={6}

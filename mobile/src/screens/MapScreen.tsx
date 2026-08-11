@@ -581,7 +581,8 @@ export function MapScreen() {
 
       <Pressable
         style={styles.attribution}
-        onPress={() => void Linking.openURL('https://www.openstreetmap.org/copyright')}
+        onPress={() => void Linking.openURL('https://www.openstreetmap.org/copyright')
+          .catch(() => showToast('Could not open the OpenStreetMap attribution.', 'error'))}
         accessibilityRole="link"
         accessibilityLabel="OpenStreetMap copyright and contributors"
       >
