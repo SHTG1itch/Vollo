@@ -26,7 +26,7 @@ test('production workflow pins runtimes, actions, and frozen dependency checks',
   assert.match(workflow, /npx --yes npm@10\.8\.2 ci --dry-run --ignore-scripts/);
   assert.match(workflow, /npm --prefix mobile run typecheck/);
   assert.match(workflow, /npm --prefix mobile run lint/);
-  assert.match(workflow, /npm --prefix mobile audit --omit=dev --audit-level=high/);
+  assert.match(workflow, /npm run audit:mobile/);
   assert.match(workflow, /npx --no-install expo install --check/);
   assert.match(workflow, /npx --yes expo-doctor@1\.20\.0/);
   assert.match(workflow, /npx --no-install expo config --type public/);

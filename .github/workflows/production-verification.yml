@@ -53,7 +53,7 @@ jobs:
         run: npm --prefix mobile run lint
 
       - name: Reject high-severity runtime dependency advisories
-        run: npm --prefix mobile audit --omit=dev --audit-level=high
+        run: npm run audit:mobile
 
       - name: Validate Expo SDK dependency alignment
         working-directory: mobile
