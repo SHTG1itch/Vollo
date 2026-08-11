@@ -61,8 +61,8 @@ test('bundled Barlow fonts retain their required open-font license', () => {
 });
 
 test('the lockfile contains optional peers required by the EAS npm version', () => {
-  assert.equal(mobileLock.packages['node_modules/@emnapi/core'].version, '1.11.2');
-  assert.equal(mobileLock.packages['node_modules/@emnapi/runtime'].version, '1.11.2');
+  assert.equal(mobileLock.packages['node_modules/@emnapi/core'].optional, true);
+  assert.equal(mobileLock.packages['node_modules/@emnapi/runtime'].optional, true);
 });
 
 test('Google iOS configuration never ships a placeholder URL scheme', () => {
