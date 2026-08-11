@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -40,6 +40,7 @@ export function ScheduledMatchesScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState(false);
+  const responseActive = useRef(false);
 
   const load = useCallback(async () => {
     try {
@@ -62,6 +63,8 @@ export function ScheduledMatchesScreen() {
   );
 
   const respond = async (s: ScheduledMatchCard, action: 'accept' | 'decline' | 'cancel') => {
+    if (responseActive.current || busyId) return;
+    responseActive.current = true;
     setBusyId(s.id);
     try {
       const { scheduled_match } = await api.respondToScheduledMatch(s.id, action);
@@ -69,6 +72,7 @@ export function ScheduledMatchesScreen() {
     } catch (e) {
       showToast(e instanceof ApiError ? e.message : 'Could not update — try again', 'error');
     } finally {
+      responseActive.current = false;
       setBusyId(null);
     }
   };

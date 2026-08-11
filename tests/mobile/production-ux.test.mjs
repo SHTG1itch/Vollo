@@ -345,6 +345,19 @@ test('creation screens synchronously reject rapid duplicate taps', async () => {
   assert.match(goals, /saveActive\.current \|\| saving/);
 });
 
+test('paired responses and club searches are race-safe', async () => {
+  const [clubs, notifications, scheduled] = await Promise.all([
+    read('mobile/src/screens/ClubsScreen.tsx'),
+    read('mobile/src/screens/NotificationsScreen.tsx'),
+    read('mobile/src/screens/ScheduledMatchesScreen.tsx'),
+  ]);
+  assert.match(clubs, /const sequence = \+\+searchSequence\.current/);
+  assert.match(clubs, /if \(sequence !== searchSequence\.current\) return/);
+  assert.match(clubs, /searchSequence\.current \+= 1/);
+  assert.match(notifications, /if \(responseActive\.current \|\| busy\) return/);
+  assert.match(scheduled, /if \(responseActive\.current \|\| busyId\) return/);
+});
+
 test('comments reject rapid duplicates and activity links use validated navigation', async () => {
   const [match, notifications, nav] = await Promise.all([
     read('mobile/src/screens/MatchDetailScreen.tsx'),

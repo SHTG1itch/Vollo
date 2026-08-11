@@ -35,10 +35,13 @@ function FollowRequestsCard({
   // Track which request AND which button is in flight, so Accept and Decline
   // each get their own loading spinner.
   const [busy, setBusy] = useState<{ id: string; action: 'accept' | 'decline' } | null>(null);
+  const responseActive = React.useRef(false);
 
   if (requests.length === 0 && !loading && !error) return null;
 
   const respond = async (r: FollowRequest, action: 'accept' | 'decline') => {
+    if (responseActive.current || busy) return;
+    responseActive.current = true;
     tapMedium();
     setBusy({ id: r.id, action });
     try {
@@ -48,6 +51,7 @@ function FollowRequestsCard({
     } catch {
       showToast('Could not update the request — please try again.', 'error');
     } finally {
+      responseActive.current = false;
       setBusy(null);
     }
   };

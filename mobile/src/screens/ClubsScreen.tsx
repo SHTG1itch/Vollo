@@ -43,6 +43,8 @@ export function ClubsScreen() {
   const [found, setFound] = useState<Club[] | null>(null);
   const [q, setQ] = useState('');
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mineSequence = useRef(0);
+  const searchSequence = useRef(0);
 
   // A failed fetch with nothing loaded shows an error state, not a false
   // "no clubs" empty state; with data already on screen it keeps the stale list.
@@ -50,23 +52,31 @@ export function ClubsScreen() {
   const [foundError, setFoundError] = useState(false);
 
   const loadMine = useCallback(() => {
+    const sequence = ++mineSequence.current;
     void api
       .getMyClubs()
       .then((r) => {
+        if (sequence !== mineSequence.current) return;
         setMine(r.clubs);
         setMineError(false);
       })
-      .catch(() => setMineError(true));
+      .catch(() => {
+        if (sequence === mineSequence.current) setMineError(true);
+      });
   }, []);
 
   const search = useCallback((term: string) => {
+    const sequence = ++searchSequence.current;
     void api
       .getClubs(term || undefined)
       .then((r) => {
+        if (sequence !== searchSequence.current) return;
         setFound(r.clubs);
         setFoundError(false);
       })
-      .catch(() => setFoundError(true));
+      .catch(() => {
+        if (sequence === searchSequence.current) setFoundError(true);
+      });
   }, []);
 
   // Refresh on focus so joins/leaves/creations made deeper in the stack show up.
@@ -74,6 +84,10 @@ export function ClubsScreen() {
     useCallback(() => {
       loadMine();
       if (scope === 'discover') search(q.trim());
+      return () => {
+        mineSequence.current += 1;
+        searchSequence.current += 1;
+      };
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [loadMine, scope]),
   );
