@@ -25,6 +25,9 @@ test('production builds use an exact validated EAS CLI contract', () => {
   assert.equal(eas.cli.version, '20.5.1');
   assert.equal(eas.cli.appVersionSource, 'remote');
   assert.equal(eas.build.production.autoIncrement, true);
+  assert.equal(eas.build.github.extends, 'production');
+  assert.equal(eas.build.github.distribution, 'internal');
+  assert.equal(eas.build.github.android.buildType, 'apk');
 });
 
 test('production config advertises only supported native platforms', () => {
