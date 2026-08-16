@@ -36,6 +36,8 @@ export function mapUser(r: Record<string, unknown>): User {
     // Default true: the column ships with DEFAULT true and older SELECTs that
     // omit it must not read as "hidden".
     show_competitive: r.show_competitive == null ? true : Boolean(r.show_competitive),
+    terms_version: (r.terms_version as string | null) ?? null,
+    terms_accepted_at: r.terms_accepted_at != null ? toIso(r.terms_accepted_at) : null,
     created_at: toIso(r.created_at),
   };
 }
@@ -53,7 +55,7 @@ function normalizeEquipment(v: unknown): Equipment {
 }
 
 /**
- * Public view of a user. Email and the saved home location are account settings,
+ * Public view of a user. Email, saved home location, and consent records are account settings,
  * not profile data: a geocoder result can be a street address, and exact
  * coordinates must never leave the owner-only /auth/me response.
  *
@@ -66,13 +68,24 @@ export function mapPublicUser(r: Record<string, unknown>): Omit<User, 'email'> {
     home_lat: _homeLat,
     home_lng: _homeLng,
     home_label: _homeLabel,
+    terms_version: _termsVersion,
+    terms_accepted_at: _termsAcceptedAt,
     ...rest
   } = mapUser(r);
   void _email;
   void _homeLat;
   void _homeLng;
   void _homeLabel;
-  return { ...rest, home_lat: null, home_lng: null, home_label: null };
+  void _termsVersion;
+  void _termsAcceptedAt;
+  return {
+    ...rest,
+    home_lat: null,
+    home_lng: null,
+    home_label: null,
+    terms_version: null,
+    terms_accepted_at: null,
+  };
 }
 
 export function mapCourt(r: Record<string, unknown>): Court {

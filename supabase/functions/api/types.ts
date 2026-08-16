@@ -71,6 +71,9 @@ export interface User {
   /** Competitive visibility: territories + court/club leaderboards are public
    *  when true, hidden from everyone (never follower-gated) when false. */
   show_competitive: boolean;
+  /** Version of the in-app Terms of Use this account accepted. */
+  terms_version: string | null;
+  terms_accepted_at: string | null;
   created_at: string;
 }
 

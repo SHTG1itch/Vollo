@@ -332,6 +332,17 @@ export const commentSchema = z.object({
   body: z.string().trim().min(1).max(500),
 });
 
+export const acceptTermsSchema = z.object({
+  version: z.string().trim().min(1).max(32),
+});
+
+export const reportContentSchema = z.object({
+  subject_type: z.enum(['user', 'match', 'comment', 'club', 'court']),
+  subject_id: z.string().uuid(),
+  reason: z.enum(['spam', 'harassment', 'hate', 'sexual', 'violence', 'impersonation', 'privacy', 'other']),
+  details: z.string().trim().max(1000).optional(),
+});
+
 export const pushTokenSchema = z.object({
   token: z.string().trim().min(1).max(300),
   platform: z.string().trim().max(20).optional(),

@@ -19,11 +19,11 @@ import { adminClient, authClient } from './supabaseAdmin.ts';
 import { ApiError } from './errors.ts';
 import { mapCourt, mapMatchCard, mapPublicUser, mapScheduledMatch, mapUser, toIso } from './mappers.ts';
 import {
-  bboxQuerySchema, calendarQuerySchema, clubsQuerySchema, commentSchema, commentsQuerySchema,
+  acceptTermsSchema, bboxQuerySchema, calendarQuerySchema, clubsQuerySchema, commentSchema, commentsQuerySchema,
   courtsQuerySchema, createClubSchema, createCourtSchema, createMatchSchema, createScheduledMatchSchema,
   discoverQuerySchema, feedQuerySchema, followRequestActionSchema,
   geocodeQuerySchema, loginSchema, matchMediaDraftSchema, notificationIdsSchema, profileMediaDraftSchema, pushTokenSchema,
-  reverseGeocodeQuerySchema, setGoalSchema, updateProfileSchema, updateScheduledMatchSchema,
+  reportContentSchema, reverseGeocodeQuerySchema, setGoalSchema, updateProfileSchema, updateScheduledMatchSchema,
   userSearchQuerySchema, verifyMatchSchema, yearQuerySchema,
 } from './validation.ts';
 import type { CreateMatchInput } from './validation.ts';
@@ -52,7 +52,7 @@ type Env = { Variables: { user?: AuthClaims; requestId: string } };
 const USER_SELECT = `
   id, username, email, display_name, avatar_url, cover_url, bio, dominant_hand, color,
   ST_Y(home_geom) AS home_lat, ST_X(home_geom) AS home_lng, home_label, equipment, is_private,
-  show_competitive, created_at
+  show_competitive, terms_version, terms_accepted_at, created_at
 `;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -70,7 +70,9 @@ const UUID_RE = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 const DAILY_MATCH_CAP = 100;
 const DAILY_SCHEDULE_CAP = 100;
 const DAILY_COMMENT_CAP = 500;
+const DAILY_REPORT_CAP = 100;
 const PUSH_TOKEN_CAP = 20;
+const CURRENT_TERMS_VERSION = '2026-08-16';
 
 /** Reject malformed UUID path values at the HTTP boundary. Letting PostgreSQL
  * cast attacker-controlled text would turn a client 400 into a noisy 500. */
@@ -160,6 +162,20 @@ const optionalAuth: MiddlewareHandler<Env> = async (c, next) => {
   // auth-provider/DB blip is retryable and must not accidentally broaden access.
   if (!claims && (hadToken || transient)) throwAuthFailure(hadToken, transient);
   if (claims) c.set('user', claims);
+  await next();
+};
+
+/** Content creation is unavailable until the account accepts the exact Terms
+ * version bundled with this API. This is server-side so an old or modified
+ * client cannot bypass the UGC consent gate. */
+const requireCurrentTerms: MiddlewareHandler<Env> = async (c, next) => {
+  const row = await queryOne<{ terms_version: string | null }>(
+    'SELECT terms_version FROM users WHERE id = $1',
+    [uid(c)],
+  );
+  if (row?.terms_version !== CURRENT_TERMS_VERSION) {
+    throw new ApiError(403, 'terms_required', 'Accept the current Terms of Use before posting content');
+  }
   await next();
 };
 
@@ -661,6 +677,64 @@ app.get('/api/auth/me', requireAuth, async (c) => {
   return c.json({ user: mapUser(row) });
 });
 
+app.post('/api/users/me/terms', requireAuth, async (c) => {
+  const { version } = acceptTermsSchema.parse(await jsonBody(c));
+  if (version !== CURRENT_TERMS_VERSION) {
+    throw ApiError.badRequest('This Terms of Use version is no longer current');
+  }
+  const row = await queryOne<Record<string, unknown>>(
+    `UPDATE users
+        SET terms_version = $2, terms_accepted_at = now()
+      WHERE id = $1
+      RETURNING ${USER_SELECT}`,
+    [uid(c), CURRENT_TERMS_VERSION],
+  );
+  if (!row) throw ApiError.notFound('User not found');
+  return c.json({ user: mapUser(row) });
+});
+
+app.post('/api/reports', requireAuth, requireCurrentTerms, async (c) => {
+  const userId = uid(c);
+  const body = reportContentSchema.parse(await jsonBody(c));
+  const subjectQueries = {
+    user: 'SELECT id AS owner_id FROM users WHERE id = $1',
+    match: 'SELECT user_id AS owner_id FROM matches WHERE id = $1',
+    comment: 'SELECT user_id AS owner_id FROM comments WHERE id = $1',
+    club: 'SELECT creator_id AS owner_id FROM clubs WHERE id = $1',
+    court: "SELECT created_by AS owner_id FROM courts WHERE id = $1 AND source = 'user'",
+  } as const;
+  const subject = await queryOne<{ owner_id: string | null }>(subjectQueries[body.subject_type], [body.subject_id]);
+  if (!subject) throw ApiError.notFound('Reportable content not found');
+  if (subject.owner_id === userId) throw ApiError.badRequest('You cannot report your own content');
+
+  await withTransaction(async (client) => {
+    // Serialize per reporter so simultaneous requests across Edge isolates
+    // cannot all observe the same below-cap count and overrun the durable limit.
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended('report-create:' || $1, 0))", [userId]);
+    const recentResult = await client.query<{ c: string }>(
+      `SELECT COUNT(*) AS c FROM content_reports
+        WHERE reporter_id = $1 AND created_at > now() - interval '24 hours'`,
+      [userId],
+    );
+    if (Number(recentResult.rows[0]?.c ?? 0) >= DAILY_REPORT_CAP) {
+      throw ApiError.tooManyRequests('You have submitted too many reports today; try again tomorrow');
+    }
+
+    await client.query(
+      `INSERT INTO content_reports (reporter_id, subject_type, subject_id, reason, details)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (reporter_id, subject_type, subject_id) DO UPDATE
+         SET reason = EXCLUDED.reason,
+             details = EXCLUDED.details,
+             status = 'open',
+             created_at = now(),
+             reviewed_at = NULL`,
+      [userId, body.subject_type, body.subject_id, body.reason, body.details || null],
+    );
+  });
+  return c.json({ ok: true }, 201);
+});
+
 // ─── Feed ──────────────────────────────────────────────────────────────────
 app.get('/api/feed', optionalAuth, async (c) => {
   const { scope, limit, before } = feedQuerySchema.parse(c.req.query());
@@ -872,7 +946,7 @@ async function discardMediaDraft(ownerAuthId: string, objectPath: string): Promi
   );
 }
 
-app.post('/api/media/match-drafts', requireAuth, async (c) => {
+app.post('/api/media/match-drafts', requireAuth, requireCurrentTerms, async (c) => {
   const ownerAuthId = authUid(c);
   const { object_path: objectPath } = matchMediaDraftSchema.parse(await jsonBody(c));
   if (!objectPath.startsWith(`${ownerAuthId}/match/`)) {
@@ -892,7 +966,7 @@ app.delete('/api/media/match-drafts', requireAuth, async (c) => {
   return c.body(null, 204);
 });
 
-app.post('/api/media/profile-drafts', requireAuth, async (c) => {
+app.post('/api/media/profile-drafts', requireAuth, requireCurrentTerms, async (c) => {
   const ownerAuthId = authUid(c);
   const { object_path: objectPath } = profileMediaDraftSchema.parse(await jsonBody(c));
   if (!objectPath.startsWith(`${ownerAuthId}/profile/`)) {
@@ -912,7 +986,7 @@ app.delete('/api/media/profile-drafts', requireAuth, async (c) => {
   return c.body(null, 204);
 });
 
-app.post('/api/matches', requireAuth, async (c) => {
+app.post('/api/matches', requireAuth, requireCurrentTerms, async (c) => {
   const userId = uid(c);
   const body = createMatchSchema.parse(await jsonBody(c)) as CreateMatchInput;
   const matchPhotoPath = body.photo_url
@@ -1451,7 +1525,7 @@ app.get('/api/matches/:id/comments', optionalAuth, async (c) => {
   });
 });
 
-app.post('/api/matches/:id/comments', requireAuth, async (c) => {
+app.post('/api/matches/:id/comments', requireAuth, requireCurrentTerms, async (c) => {
   const userId = uid(c);
   const id = uuidParam(c);
   const match = await queryOne<ViewableMatch>(
@@ -1528,7 +1602,7 @@ app.get('/api/scheduled-matches', requireAuth, async (c) => {
   return c.json({ scheduled_matches: rows.map((r) => mapScheduledMatch(r, userId)) });
 });
 
-app.post('/api/scheduled-matches', requireAuth, async (c) => {
+app.post('/api/scheduled-matches', requireAuth, requireCurrentTerms, async (c) => {
   const userId = uid(c);
   const b = createScheduledMatchSchema.parse(await jsonBody(c));
   if (b.opponent_id === userId) throw ApiError.badRequest('You cannot schedule a match against yourself');
@@ -1758,7 +1832,7 @@ async function assertUnderDailyCreationCap(
   if (Number(recent?.c ?? 0) >= cap) throw ApiError.tooManyRequests(message);
 }
 
-app.post('/api/clubs', requireAuth, async (c) => {
+app.post('/api/clubs', requireAuth, requireCurrentTerms, async (c) => {
   const userId = uid(c);
   const b = createClubSchema.parse(await jsonBody(c));
   const existing = b.client_key
@@ -2234,7 +2308,7 @@ app.get('/api/courts', async (c) => {
   return c.json({ courts: rows.map(mapCourt) });
 });
 
-app.post('/api/courts', requireAuth, async (c) => {
+app.post('/api/courts', requireAuth, requireCurrentTerms, async (c) => {
   const b = createCourtSchema.parse(await jsonBody(c));
   const userId = uid(c);
   if (b.client_key) {
@@ -2285,6 +2359,7 @@ app.get('/api/courts/:id', optionalAuth, async (c) => {
 
   return c.json({
     court: mapCourt(row),
+    reportable: row.source === 'user' && row.created_by !== c.get('user')?.sub,
     controller: controller
       ? {
           user_id: controller.user_id,
@@ -2361,7 +2436,7 @@ app.get('/api/territories/user/:userId', optionalAuth, async (c) => {
 });
 
 // ─── Users / profiles ────────────────────────────────────────────────────
-app.patch('/api/users/me', requireAuth, async (c) => {
+app.patch('/api/users/me', requireAuth, requireCurrentTerms, async (c) => {
   const userId = uid(c);
   const b = updateProfileSchema.parse(await jsonBody(c));
   const mediaOwnerId = authUid(c);

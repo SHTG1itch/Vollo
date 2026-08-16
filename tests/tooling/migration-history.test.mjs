@@ -50,6 +50,7 @@ const productionVersions = [
   '20260710232519',
   '20260711052500',
   '20260711061500',
+  '20260816190000',
 ];
 
 test('migration files preserve the production ledger and timestamp ordering', async () => {
