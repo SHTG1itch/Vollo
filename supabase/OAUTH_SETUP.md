@@ -28,10 +28,10 @@ enable the providers in Supabase, and paste the client ids back into the app.
 
 | Done | Detail |
 | --- | --- |
-| Google Cloud project | **Vollo** (`stable-course-500806-f0`), owner `you@example.com` |
+| Google Cloud project | **Vollo** (`stable-course-500806-f0`) |
 | OAuth consent screen | App "Vollo", External, **published to Production** (basic scopes → no verification needed) |
 | Web OAuth client | **Vollo Web** — `958415288431-fol1pk22asmc748feuvbo1gkntcegis2.apps.googleusercontent.com`; redirect URI = the Supabase callback |
-| Android OAuth client | **Vollo Android** — `958415288431-ui589sqprbac8v4e87h1f143m5qq5gtu.apps.googleusercontent.com`; package `app.vollo.mobile`, SHA-1 `9B:1A:88:97:8F:1B:29:D4:0E:CA:8A:75:EC:F8:65:27:8C:2D:CF:D9` (EAS `development` keystore) |
+| Android OAuth client | **Vollo Android** — `958415288431-ui589sqprbac8v4e87h1f143m5qq5gtu.apps.googleusercontent.com`; package `app.vollo.mobile`, SHA-1 `9B:1A:88:97:8F:1B:29:D4:0E:CA:8A:75:EC:F8:65:27:8C:2D:CF:D9` (current Android release certificate) |
 | Supabase Google provider | **Enabled** with the Web client id + secret (verified live: `GET /auth/v1/settings` → `external.google: true`) |
 | App config | `expo.extra.googleWebClientId` set in `mobile/app.json`; **`googleAuthEnabled: true`**; EAS project linked (`eas.json` + `extra.eas.projectId`). The button still requires a native build, and iOS additionally requires a valid iOS client id. |
 | DB provisioning | Migration `015`'s `handle_new_auth_user()` confirmed live and proven end-to-end against the project (simulated Google identity → `public.users` row with derived handle/display/avatar + `user_streaks`, collisions suffixed; email sign-up's explicit username/display\_name still win) |
