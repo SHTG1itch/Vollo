@@ -29,6 +29,7 @@ export type RootStackParamList = {
   ForgotPassword: undefined;
   ResetPassword: undefined;
   Terms: { viewOnly?: boolean } | undefined;
+  Privacy: undefined;
   Report: { subjectType: ReportSubjectType; subjectId: string; subjectLabel: string };
   Tabs: NavigatorScreenParams<TabParamList> | undefined;
   MatchDetail: { matchId: string };

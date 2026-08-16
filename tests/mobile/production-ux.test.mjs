@@ -195,6 +195,24 @@ test('optional native cold-start lookups cannot reject unhandled', async () => {
   assert.match(app, /Linking\.getInitialURL\(\)\.then\([\s\S]*?\)\.catch\(\(\) => \{/);
 });
 
+test('privacy stays available offline throughout account setup and settings', async () => {
+  const [navigator, login, register, settings, terms, privacy] = await Promise.all([
+    read('mobile/src/navigation/RootNavigator.tsx'),
+    read('mobile/src/screens/LoginScreen.tsx'),
+    read('mobile/src/screens/RegisterScreen.tsx'),
+    read('mobile/src/screens/SettingsScreen.tsx'),
+    read('mobile/src/screens/TermsScreen.tsx'),
+    read('mobile/src/screens/PrivacyScreen.tsx'),
+  ]);
+  assert.match(navigator, /name="Privacy" component=\{PrivacyScreen\}/);
+  for (const source of [login, register, settings, terms]) {
+    assert.match(source, /label="Privacy Policy"/);
+    assert.match(source, /navigation\.navigate\('Privacy'\)/);
+  }
+  assert.match(privacy, /PRIVACY_SECTIONS\.map/);
+  assert.match(privacy, /Effective \{PRIVACY_EFFECTIVE_DATE\}/);
+});
+
 test('external attribution links report native launch failures', async () => {
   const sources = await Promise.all([
     read('mobile/src/screens/AddCourtScreen.tsx'),

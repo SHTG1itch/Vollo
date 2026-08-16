@@ -213,6 +213,7 @@ export function SettingsScreen() {
         <Muted style={{ textAlign: 'left' }}>New to Vollo? Replay the quickstart tour of every feature.</Muted>
         <Button label="How Vollo works" variant="secondary" onPress={() => navigation.navigate('Quickstart')} />
         <Button label="Terms of Use" variant="secondary" onPress={() => navigation.navigate('Terms', { viewOnly: true })} />
+        <Button label="Privacy Policy" variant="secondary" onPress={() => navigation.navigate('Privacy')} />
       </Card>
 
       <Card style={{ gap: spacing.sm }}>

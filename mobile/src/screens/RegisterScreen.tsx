@@ -144,6 +144,7 @@ export function RegisterScreen({ navigation }: Props) {
             <Button label="Create account" onPress={submit} loading={loading} disabled={!valid} />
             <SocialAuth onError={setError} />
             <Button label="I already have an account" variant="ghost" onPress={() => navigation.goBack()} />
+            <Button label="Privacy Policy" variant="ghost" onPress={() => navigation.navigate('Privacy')} />
           </View>
         </ScrollView>
       </KeyboardAvoidingView>

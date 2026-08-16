@@ -27,6 +27,7 @@ import { ScheduledMatchesScreen } from '../screens/ScheduledMatchesScreen';
 import { ScheduleMatchScreen } from '../screens/ScheduleMatchScreen';
 import { QuickstartScreen } from '../screens/QuickstartScreen';
 import { TermsScreen } from '../screens/TermsScreen';
+import { PrivacyScreen } from '../screens/PrivacyScreen';
 import { ReportScreen } from '../screens/ReportScreen';
 import { CURRENT_TERMS_VERSION } from '../policy/terms';
 import { colors, fonts } from '../theme';
@@ -94,6 +95,7 @@ export function RootNavigator() {
           <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
         </Stack.Group>
       )}
+      <Stack.Screen name="Privacy" component={PrivacyScreen} options={{ title: 'Privacy Policy' }} />
     </Stack.Navigator>
   );
 }

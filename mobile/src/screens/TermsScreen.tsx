@@ -10,7 +10,7 @@ import { CURRENT_TERMS_VERSION, TERMS_SECTIONS } from '../policy/terms';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Terms'>;
 
-export function TermsScreen({ route }: Props) {
+export function TermsScreen({ route, navigation }: Props) {
   const user = useAuth((s) => s.user);
   const meError = useAuth((s) => s.meError);
   const refreshMe = useAuth((s) => s.refreshMe);
@@ -60,6 +60,8 @@ export function TermsScreen({ route }: Props) {
             <Text style={styles.body}>{section.body}</Text>
           </Card>
         ))}
+
+        <Button label="Privacy Policy" variant="secondary" onPress={() => navigation.navigate('Privacy')} />
 
         {!viewOnly ? (
           <Card style={styles.acceptCard}>

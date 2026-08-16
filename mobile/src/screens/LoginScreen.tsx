@@ -83,6 +83,7 @@ export function LoginScreen({ navigation }: Props) {
             />
             <SocialAuth onError={setError} />
             <Button label="Create an account" variant="ghost" onPress={() => navigation.navigate('Register')} />
+            <Button label="Privacy Policy" variant="ghost" onPress={() => navigation.navigate('Privacy')} />
           </View>
 
           {__DEV__ ? <Muted style={styles.hint}>New here? Create an account to get started.</Muted> : null}
