@@ -300,6 +300,14 @@ export function MatchDetailScreen({ route, navigation }: Props) {
                 style={{ height: 38, paddingHorizontal: spacing.md }}
               />
               {isOwner ? <Button label="Delete" variant="danger" onPress={remove} style={{ height: 38, paddingHorizontal: spacing.md }} /> : null}
+              {!isOwner ? (
+                <Button
+                  label="Report"
+                  variant="ghost"
+                  onPress={() => navigation.navigate('Report', { subjectType: 'match', subjectId: match.id, subjectLabel: 'match' })}
+                  style={{ height: 38, paddingHorizontal: spacing.sm }}
+                />
+              ) : null}
             </View>
           </View>
         </Card>
@@ -356,6 +364,16 @@ export function MatchDetailScreen({ route, navigation }: Props) {
                 <Text style={styles.commentAuthor}>{c.display_name} <Text style={styles.sub}>· {timeAgo(c.created_at)}</Text></Text>
               </Pressable>
               <Text style={styles.commentBody}>{c.body}</Text>
+              {c.user_id !== user?.id ? (
+                <Pressable
+                  onPress={() => navigation.navigate('Report', { subjectType: 'comment', subjectId: c.id, subjectLabel: 'comment' })}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Report ${c.display_name}'s comment`}
+                  hitSlop={8}
+                >
+                  <Text style={styles.reportLink}>Report</Text>
+                </Pressable>
+              ) : null}
             </View>
           </View>
         ))}
@@ -433,5 +451,6 @@ const styles = StyleSheet.create({
   comment: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start' },
   commentAuthor: { color: colors.text, fontFamily: fonts.bold, fontSize: font.small },
   commentBody: { color: colors.textDim, fontSize: font.body, marginTop: 2 },
+  reportLink: { color: colors.textFaint, fontFamily: fonts.bold, fontSize: font.tiny, marginTop: spacing.xs },
   commentInput: { flexDirection: 'row', gap: spacing.sm, alignItems: 'center', marginTop: spacing.sm },
 });

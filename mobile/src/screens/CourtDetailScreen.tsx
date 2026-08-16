@@ -15,6 +15,7 @@ export function CourtDetailScreen({ route, navigation }: Props) {
   const { courtId } = route.params;
   const user = useAuth((s) => s.user);
   const [court, setCourt] = useState<Court | null>(null);
+  const [reportable, setReportable] = useState(false);
   const [controller, setController] = useState<{ display_name: string; username: string; score: number } | null>(null);
   const [board, setBoard] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -35,6 +36,7 @@ export function CourtDetailScreen({ route, navigation }: Props) {
       // A route-param update may reuse this instance. Clear every court-keyed
       // section before rendering so no old venue/controller data can flash.
       setCourt(null);
+      setReportable(false);
       setController(null);
       setBoard([]);
       setRefreshing(false);
@@ -54,10 +56,11 @@ export function CourtDetailScreen({ route, navigation }: Props) {
         () => ({ ok: false as const }),
       );
       try {
-        const { court: c, controller: ctrl } = await api.getCourt(courtId);
+        const { court: c, controller: ctrl, reportable: canReport } = await api.getCourt(courtId);
         if (!active) return;
         setCourt(c);
         setController(ctrl);
+        setReportable(canReport);
       } catch (e) {
         if (active) setError(e instanceof Error ? e.message : 'Failed to load court');
       } finally {
@@ -127,6 +130,14 @@ export function CourtDetailScreen({ route, navigation }: Props) {
             )}
           </View>
         </View>
+        {reportable ? (
+          <Button
+            label="Report court"
+            variant="ghost"
+            onPress={() => navigation.navigate('Report', { subjectType: 'court', subjectId: court.id, subjectLabel: court.name })}
+            style={{ height: 38 }}
+          />
+        ) : null}
       </Card>
 
       <View style={styles.boardHeader}>

@@ -316,6 +316,15 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
           <View style={{ gap: spacing.sm }}>
             <Muted>You&apos;ve blocked this player. They can&apos;t see your matches or profile.</Muted>
             <Button label="Unblock" variant="secondary" onPress={unblock} loading={blockLoading} style={{ height: 42 }} />
+            <Pressable
+              onPress={() => navigation.navigate('Report', {
+                subjectType: 'user', subjectId: profile.user.id, subjectLabel: `@${profile.user.username}`,
+              })}
+              accessibilityRole="button"
+              hitSlop={8}
+            >
+              <Text style={styles.blockLink}>Report @{profile.user.username}</Text>
+            </Pressable>
           </View>
         ) : (
           <View style={{ gap: spacing.sm }}>
@@ -348,9 +357,20 @@ export function ProfileView({ username, isSelf }: { username: string; isSelf: bo
                 style={{ flex: 1, height: 42 }}
               />
             </View>
-            <Pressable onPress={confirmBlock} accessibilityRole="button" hitSlop={8}>
-              <Text style={styles.blockLink}>Block @{profile.user.username}</Text>
-            </Pressable>
+            <View style={styles.safetyLinks}>
+              <Pressable onPress={confirmBlock} accessibilityRole="button" hitSlop={8}>
+                <Text style={styles.blockLink}>Block @{profile.user.username}</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => navigation.navigate('Report', {
+                  subjectType: 'user', subjectId: profile.user.id, subjectLabel: `@${profile.user.username}`,
+                })}
+                accessibilityRole="button"
+                hitSlop={8}
+              >
+                <Text style={styles.blockLink}>Report player</Text>
+              </Pressable>
+            </View>
           </View>
         )}
       </Card>
@@ -684,5 +704,6 @@ const styles = StyleSheet.create({
   matchScore: { color: colors.text, fontFamily: fonts.bold, width: 110 },
   matchMeta: { color: colors.textFaint, fontSize: font.tiny, flex: 1 },
   blockLink: { color: colors.textFaint, fontSize: font.tiny, fontFamily: fonts.bold, textAlign: 'center', paddingVertical: 2 },
+  safetyLinks: { flexDirection: 'row', justifyContent: 'center', gap: spacing.xl },
   lockTitle: { color: colors.text, fontSize: font.h3, fontFamily: fonts.heading },
 });

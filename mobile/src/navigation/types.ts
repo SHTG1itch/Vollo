@@ -1,5 +1,6 @@
 import type { NavigatorScreenParams } from '@react-navigation/native';
 import type { Surface } from '../types';
+import type { ReportSubjectType } from '../api/client';
 
 export type TabParamList = {
   Feed: undefined;
@@ -27,6 +28,8 @@ export type RootStackParamList = {
   Register: undefined;
   ForgotPassword: undefined;
   ResetPassword: undefined;
+  Terms: { viewOnly?: boolean } | undefined;
+  Report: { subjectType: ReportSubjectType; subjectId: string; subjectLabel: string };
   Tabs: NavigatorScreenParams<TabParamList> | undefined;
   MatchDetail: { matchId: string };
   Court: { courtId: string };

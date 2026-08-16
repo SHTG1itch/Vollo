@@ -202,6 +202,14 @@ export function ClubDetailScreen({ route }: NativeStackScreenProps<RootStackPara
         ) : (
           <Button label="Join club" onPress={join} loading={busy} style={{ height: 42 }} />
         )}
+        {club.creator_id !== user?.id ? (
+          <Button
+            label="Report club"
+            variant="ghost"
+            onPress={() => navigation.navigate('Report', { subjectType: 'club', subjectId: club.id, subjectLabel: club.name })}
+            style={{ height: 38 }}
+          />
+        ) : null}
       </Card>
 
       {leaderboardError ? <Muted>Couldn&apos;t refresh the club leaderboard. Pull down to try again.</Muted> : null}
