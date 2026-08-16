@@ -36,8 +36,8 @@ test('production builds use an exact validated EAS CLI contract', () => {
 });
 
 test('the public Android release is documented with integrity and privacy guidance', () => {
-  assert.match(rootReadme, /releases\/download\/v0\.1\.0-android\.9\/Vollo-0\.1\.0-android-v9\.apk/);
-  assert.match(rootReadme, /4BEF3C61DEF33F6B559621A838812335BA6F74110210525E5E354358BE353730/);
+  assert.match(rootReadme, /releases\/download\/v0\.1\.0-android\.10\/Vollo-0\.1\.0-android-v10\.apk/);
+  assert.match(rootReadme, /57815EA9336601B794C61EE44D0844735E686DC367A6010EE238D3C8F506FEE4/);
   assert.match(rootReadme, /\[Privacy Policy\]\(PRIVACY\.md\)/);
   assert.match(rootReadme, /\[Security Policy\]\(SECURITY\.md\)/);
   assert.match(privacyPolicy, /Settings → Delete account/);
