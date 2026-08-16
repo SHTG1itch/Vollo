@@ -6,7 +6,7 @@ BEGIN;
 CREATE SCHEMA IF NOT EXISTS extensions;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 
-SELECT extensions.plan(39);
+SELECT extensions.plan(47);
 
 SELECT extensions.has_table('public', 'geocode_cache', 'geocoder cache exists');
 SELECT extensions.has_table('public', 'outbound_service_limits', 'shared provider limiter exists');
@@ -262,6 +262,48 @@ SELECT extensions.is(
   (SELECT count(*)::integer FROM vault.decrypted_secrets WHERE name = 'project_url'),
   0,
   'a clean local database cannot call a deployed project'
+);
+
+SELECT extensions.has_table('public', 'content_reports', 'durable UGC report queue exists');
+SELECT extensions.has_column('public', 'users', 'terms_version', 'users record accepted Terms version');
+SELECT extensions.has_column('public', 'users', 'terms_accepted_at', 'users record Terms acceptance time');
+SELECT extensions.is(
+  (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.content_reports'::regclass),
+  true,
+  'UGC report queue has RLS enabled'
+);
+SELECT extensions.is(
+  (SELECT count(*)::integer FROM information_schema.role_table_grants
+    WHERE table_schema = 'public' AND table_name = 'content_reports'
+      AND grantee IN ('anon', 'authenticated')),
+  0,
+  'client roles have no direct UGC report grants'
+);
+SELECT extensions.lives_ok(
+  $$UPDATE public.users
+       SET terms_version = '2026-08-16', terms_accepted_at = now()
+     WHERE id = '03100000-0000-4000-8000-000000000001'$$,
+  'a complete Terms acceptance pair is valid'
+);
+INSERT INTO public.content_reports (reporter_id, subject_type, subject_id, reason)
+VALUES (
+  '03100000-0000-4000-8000-000000000001',
+  'user',
+  '03100000-0000-4000-8000-000000000002',
+  'harassment'
+);
+SELECT extensions.is(
+  (SELECT count(*)::integer FROM public.content_reports
+    WHERE reporter_id = '03100000-0000-4000-8000-000000000001'),
+  1,
+  'a UGC report is stored durably'
+);
+DELETE FROM public.users WHERE id = '03100000-0000-4000-8000-000000000001';
+SELECT extensions.is(
+  (SELECT count(*)::integer FROM public.content_reports
+    WHERE reporter_id = '03100000-0000-4000-8000-000000000001'),
+  0,
+  'deleting an account removes its submitted reports'
 );
 
 SELECT * FROM extensions.finish();
