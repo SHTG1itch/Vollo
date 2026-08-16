@@ -16,8 +16,10 @@ import { useFeed } from './feed';
 import { useNotifications } from './notifications';
 import type { User } from '../types';
 import { parsePasswordRecoveryLink } from '../utils/authRecovery';
+import { CURRENT_TERMS_VERSION } from '../policy/terms';
 
 const PASSWORD_RECOVERY_ACCOUNT_KEY = 'vollo:password-recovery-account';
+const PENDING_APPLE_NAME_KEY = 'vollo:pending-apple-name';
 const startupRecoveryAccount = AsyncStorage.getItem(PASSWORD_RECOVERY_ACCOUNT_KEY).catch(() => null);
 
 interface AuthState {
@@ -55,6 +57,7 @@ interface AuthState {
   logout: () => Promise<void>;
   setUser: (user: User) => void;
   refreshMe: () => Promise<void>;
+  acceptTerms: (version: string) => Promise<void>;
 }
 
 export const useAuth = create<AuthState>()((set, get) => ({
@@ -102,28 +105,21 @@ export const useAuth = create<AuthState>()((set, get) => ({
       if (e instanceof OAuthCancelled) return; // user backed out — no-op
       throw e;
     }
-    const { error } = await supabase.auth.signInWithIdToken({
+    const { data, error } = await supabase.auth.signInWithIdToken({
       provider: 'apple',
       token: credential.identityToken,
       nonce: credential.nonce,
     });
     if (error) throw new Error(error.message);
 
-    // Apple discloses the user's real name only on the very first authorization,
-    // and never inside the identity token — so if we got one, set it as the
-    // display name, but only while the freshly-provisioned profile still carries
-    // the auto-derived fallback (so we never clobber a name the user has edited).
-    if (credential.fullName) {
-      try {
-        await get().refreshMe();
-        const me = get().user;
-        if (me && (me.display_name === me.username || !me.display_name.trim())) {
-          const { user } = await api.updateProfile({ display_name: credential.fullName });
-          set({ user });
-        }
-      } catch {
-        /* best-effort — the user can always edit their name in-app */
-      }
+    // Apple discloses a name only on the first authorization. Preserve it until
+    // this new account accepts the Terms gate; profile mutations are correctly
+    // blocked before then. The auth id prevents a later account from receiving it.
+    if (credential.fullName && data.user) {
+      await AsyncStorage.setItem(
+        PENDING_APPLE_NAME_KEY,
+        JSON.stringify({ authId: data.user.id, name: credential.fullName }),
+      ).catch(() => {});
     }
   },
 
@@ -243,11 +239,18 @@ export const useAuth = create<AuthState>()((set, get) => ({
 
   setUser: (user) => set({ user }),
 
+  acceptTerms: async (version) => {
+    const { user } = await api.acceptTerms(version);
+    set({ user, meError: false });
+    await applyPendingAppleName();
+  },
+
   refreshMe: async () => {
     if (!get().token) return;
     try {
       const { user } = await api.me();
       set({ user, meError: false });
+      await applyPendingAppleName();
     } catch {
       // Swallow the failure for session lifetime: a network blip on cold start
       // must NOT nuke a valid session, and a real 401 has already been handled
@@ -259,6 +262,25 @@ export const useAuth = create<AuthState>()((set, get) => ({
     }
   },
 }));
+
+async function applyPendingAppleName(): Promise<void> {
+  const state = useAuth.getState();
+  const me = state.user;
+  if (!me || me.terms_version !== CURRENT_TERMS_VERSION || !state.accountId) return;
+  try {
+    const raw = await AsyncStorage.getItem(PENDING_APPLE_NAME_KEY);
+    if (!raw) return;
+    const pending = JSON.parse(raw) as { authId?: unknown; name?: unknown };
+    if (pending.authId !== state.accountId) return;
+    if (typeof pending.name === 'string' && pending.name.trim() && (me.display_name === me.username || !me.display_name.trim())) {
+      const { user } = await api.updateProfile({ display_name: pending.name.trim() });
+      if (useAuth.getState().accountId === pending.authId) useAuth.setState({ user });
+    }
+    await AsyncStorage.removeItem(PENDING_APPLE_NAME_KEY);
+  } catch {
+    // Keep the one-time value for a later refresh; users can always edit it too.
+  }
+}
 
 // ── Supabase session → app auth state bridge ───────────────────────────────
 let initialized = false;

@@ -293,6 +293,9 @@ export interface CommentItem {
   avatar_url: string | null;
 }
 
+export type ReportSubjectType = 'user' | 'match' | 'comment' | 'club' | 'court';
+export type ReportReason = 'spam' | 'harassment' | 'hate' | 'sexual' | 'violence' | 'impersonation' | 'privacy' | 'other';
+
 export interface UserSearchResult {
   id: string;
   username: string;
@@ -359,6 +362,13 @@ export const api = {
   checkUsername: (username: string) =>
     request<{ available: boolean }>(`/auth/username-available${qs({ username })}`),
   me: () => request<{ user: AuthResponse['user'] }>('/auth/me'),
+  acceptTerms: (version: string) =>
+    request<{ user: AuthResponse['user'] }>('/users/me/terms', {
+      method: 'POST',
+      body: JSON.stringify({ version }),
+    }),
+  reportContent: (body: { subject_type: ReportSubjectType; subject_id: string; reason: ReportReason; details?: string }) =>
+    request<{ ok: boolean }>('/reports', { method: 'POST', body: JSON.stringify(body) }),
 
   // ── Feed ──
   getFeed: (params: { scope?: 'global' | 'following'; before?: string; limit?: number }) =>
@@ -423,7 +433,7 @@ export const api = {
   reverseGeocode: (lat: number, lng: number) =>
     request<{ result: ReverseGeocodeResult | null }>(`/courts/reverse-geocode${qs({ lat, lng })}`),
   getCourt: (id: string) =>
-    request<{ court: Court; controller: { user_id: string; username: string; display_name: string; score: number } | null }>(
+    request<{ court: Court; reportable: boolean; controller: { user_id: string; username: string; display_name: string; score: number } | null }>(
       `/courts/${seg(id)}`,
     ),
   getCourtLeaderboard: (id: string) =>

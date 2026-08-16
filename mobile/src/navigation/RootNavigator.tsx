@@ -26,6 +26,9 @@ import { CreateClubScreen } from '../screens/CreateClubScreen';
 import { ScheduledMatchesScreen } from '../screens/ScheduledMatchesScreen';
 import { ScheduleMatchScreen } from '../screens/ScheduleMatchScreen';
 import { QuickstartScreen } from '../screens/QuickstartScreen';
+import { TermsScreen } from '../screens/TermsScreen';
+import { ReportScreen } from '../screens/ReportScreen';
+import { CURRENT_TERMS_VERSION } from '../policy/terms';
 import { colors, fonts } from '../theme';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -34,6 +37,8 @@ export function RootNavigator() {
   const token = useAuth((s) => s.token);
   const accountId = useAuth((s) => s.accountId);
   const passwordRecovery = useAuth((s) => s.passwordRecovery);
+  const user = useAuth((s) => s.user);
+  const needsTerms = Boolean(token && (!user || user.terms_version !== CURRENT_TERMS_VERSION));
 
   return (
     <Stack.Navigator
@@ -49,6 +54,10 @@ export function RootNavigator() {
         <Stack.Group screenOptions={{ headerShown: false }}>
           <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} />
         </Stack.Group>
+      ) : needsTerms ? (
+        <Stack.Group navigationKey={accountId ?? 'terms'} screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="Terms" component={TermsScreen} />
+        </Stack.Group>
       ) : token ? (
         <Stack.Group navigationKey={accountId ?? 'authenticated'}>
           <Stack.Screen name="Tabs" component={Tabs} options={{ headerShown: false }} />
@@ -61,6 +70,8 @@ export function RootNavigator() {
           <Stack.Screen name="EditProfile" component={EditProfileScreen} options={{ title: 'Edit profile' }} />
           <Stack.Screen name="UserSearch" component={UserSearchScreen} options={{ headerShown: false }} />
           <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings' }} />
+          <Stack.Screen name="Terms" component={TermsScreen} options={{ title: 'Terms of Use' }} />
+          <Stack.Screen name="Report" component={ReportScreen} options={{ title: 'Report' }} />
           <Stack.Screen name="Goals" component={GoalsScreen} options={{ title: 'Goals' }} />
           <Stack.Screen name="Records" component={RecordsScreen} options={{ title: 'Trophy case' }} />
           <Stack.Screen name="TrainingLog" component={TrainingLogScreen} options={{ title: 'Training log' }} />
