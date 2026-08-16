@@ -9,6 +9,10 @@ const mobilePackage = JSON.parse(await readFile(new URL('../../mobile/package.js
 const mobileLock = JSON.parse(await readFile(new URL('../../mobile/package-lock.json', import.meta.url), 'utf8'));
 const mobileTsconfig = JSON.parse(await readFile(new URL('../../mobile/tsconfig.json', import.meta.url), 'utf8'));
 const fontLicense = await readFile(new URL('../../mobile/assets/fonts/OFL.txt', import.meta.url), 'utf8');
+const rootReadme = await readFile(new URL('../../README.md', import.meta.url), 'utf8');
+const privacyPolicy = await readFile(new URL('../../PRIVACY.md', import.meta.url), 'utf8');
+const securityPolicy = await readFile(new URL('../../SECURITY.md', import.meta.url), 'utf8');
+const oauthSetup = await readFile(new URL('../../supabase/OAUTH_SETUP.md', import.meta.url), 'utf8');
 const productionCapabilities = await readFile(
   new URL('../../mobile/plugins/with-production-capabilities.js', import.meta.url),
   'utf8',
@@ -28,6 +32,16 @@ test('production builds use an exact validated EAS CLI contract', () => {
   assert.equal(eas.build.github.extends, 'production');
   assert.equal(eas.build.github.distribution, 'internal');
   assert.equal(eas.build.github.android.buildType, 'apk');
+});
+
+test('the public Android release is documented with integrity and privacy guidance', () => {
+  assert.match(rootReadme, /releases\/download\/v0\.1\.0-android\.9\/Vollo-0\.1\.0-android-v9\.apk/);
+  assert.match(rootReadme, /4BEF3C61DEF33F6B559621A838812335BA6F74110210525E5E354358BE353730/);
+  assert.match(rootReadme, /\[Privacy Policy\]\(PRIVACY\.md\)/);
+  assert.match(rootReadme, /\[Security Policy\]\(SECURITY\.md\)/);
+  assert.match(privacyPolicy, /Settings → Delete account/);
+  assert.match(securityPolicy, /private vulnerability report/);
+  assert.doesNotMatch(oauthSetup, /@gmail\.com/i);
 });
 
 test('production config advertises only supported native platforms', () => {

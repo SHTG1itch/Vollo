@@ -12,6 +12,28 @@ free / open-source tooling for a **$0.00 infrastructure runway.**
 
 ---
 
+## Download for Android
+
+[**Download Vollo 0.1.0 for Android (versionCode 9)**](https://github.com/SHTG1itch/Vollo/releases/download/v0.1.0-android.9/Vollo-0.1.0-android-v9.apk)
+
+- Requires Android 7.0 (API 24) or newer.
+- Package: `app.vollo.mobile`
+- SHA-256: `4BEF3C61DEF33F6B559621A838812335BA6F74110210525E5E354358BE353730`
+- The APK is signed and hosted as a GitHub Release asset. Android may ask you
+  to allow installs from your browser or file manager because this release is
+  distributed directly rather than through Google Play.
+
+Verify the file before installing:
+
+```text
+4BEF3C61DEF33F6B559621A838812335BA6F74110210525E5E354358BE353730  Vollo-0.1.0-android-v9.apk
+```
+
+See the [Privacy Policy](PRIVACY.md), [Terms of Use](TERMS.md), and
+[Security Policy](SECURITY.md) before using or reporting an issue.
+
+---
+
 ## What is Vollo?
 
 Vollo treats every match as a discrete, richly-structured event (not a background GPS
@@ -358,9 +380,8 @@ ceiling. It carries no valid credentials and cannot perform an authorized write.
 
 ## Release checklist
 
-Code-level production checks are automated, but a store release still depends on
-environment-owned credentials and policies that do not belong in this private
-repository:
+Code-level production checks are automated, but a release still depends on
+environment-owned credentials that never belong in source control:
 
 - Require a green `Production verification` workflow, then apply every migration
   and deploy the matching Edge function from the same commit. Provision the
@@ -372,10 +393,12 @@ repository:
   a production SMTP provider, abuse limits, and provider credentials in Supabase
   Auth. Apple remains hidden until its App ID/capability/provider are provisioned;
   iOS Google remains hidden until its iOS client ID is supplied.
-- Configure APNs/FCM credentials for the EAS project and exercise registration,
-  foreground/background delivery, dead-token pruning, and logout on real devices.
-- Complete App Store/Play signing, privacy/support/terms URLs, data-safety labels,
-  account-deletion disclosures, screenshots, and store metadata.
+- The GitHub APK currently uses in-app alerts. Configure Android FCM credentials,
+  add the matching Firebase client configuration at build time, rebuild, and
+  exercise foreground/background delivery before claiming remote push support.
+- Keep the GitHub release notes, APK checksum, [Privacy Policy](PRIVACY.md),
+  [Terms of Use](TERMS.md), and [Security Policy](SECURITY.md) current. Complete
+  store-specific data-safety labels and metadata only when a store release begins.
 - On at least one current iPhone and Android device, smoke-test sign-up/sign-in,
   recovery, logging/verifying/deleting a match, photo/profile uploads, privacy and
   blocks, courts/territories, notifications, and all Photo/Court/Sticker share modes.
