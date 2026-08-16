@@ -13,6 +13,7 @@ const rootReadme = await readFile(new URL('../../README.md', import.meta.url), '
 const privacyPolicy = await readFile(new URL('../../PRIVACY.md', import.meta.url), 'utf8');
 const securityPolicy = await readFile(new URL('../../SECURITY.md', import.meta.url), 'utf8');
 const oauthSetup = await readFile(new URL('../../supabase/OAUTH_SETUP.md', import.meta.url), 'utf8');
+const pushService = await readFile(new URL('../../mobile/src/services/push.ts', import.meta.url), 'utf8');
 const productionCapabilities = await readFile(
   new URL('../../mobile/plugins/with-production-capabilities.js', import.meta.url),
   'utf8',
@@ -71,6 +72,9 @@ test('mobile config blocks unused camera, microphone, and background-location ac
 
   const secureStore = config.plugins.find((plugin) => Array.isArray(plugin) && plugin[0] === 'expo-secure-store');
   assert.deepEqual(secureStore, ['expo-secure-store', { configureAndroidBackup: true }]);
+  assert.equal(config.extra.androidRemotePushEnabled, false);
+  assert.ok(pushService.indexOf('if (!remotePushEnabled()) return') < pushService.indexOf('requestPermissionsAsync()'));
+  assert.match(pushService, /Platform\.OS !== 'android'[\s\S]*androidRemotePushEnabled === true/);
 });
 
 test('Android image cropping is pinned to the security-fixed native release', () => {

@@ -19,6 +19,11 @@ function projectId(): string | undefined {
   return Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId ?? undefined;
 }
 
+function remotePushEnabled(): boolean {
+  return Platform.OS !== 'android'
+    || Constants.expoConfig?.extra?.androidRemotePushEnabled === true;
+}
+
 // The Expo push token most recently registered with the server, so logout can
 // best-effort unregister it (the server stops pushing to a signed-out device).
 let lastRegisteredToken: string | null = null;
@@ -37,6 +42,9 @@ export function takeRegisteredPushToken(): string | null {
  * simulator) is swallowed — push is a bonus, never a blocker.
  */
 export async function registerForPush(): Promise<void> {
+  // Do not request a permission that this binary cannot use. Android remote
+  // delivery needs Firebase client credentials; in-app alerts remain available.
+  if (!remotePushEnabled()) return;
   try {
     // Android requires an explicit channel or notifications are silently dropped.
     if (Platform.OS === 'android') {

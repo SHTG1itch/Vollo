@@ -80,6 +80,7 @@
       "googleIosClientId": "",
       "googleAuthEnabled": true,
       "appleAuthEnabled": false,
+      "androidRemotePushEnabled": false,
       "eas": {
         "projectId": "0be07316-2872-4688-afad-404a26ef890d"
       }
