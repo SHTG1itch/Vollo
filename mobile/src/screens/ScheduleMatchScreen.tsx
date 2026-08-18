@@ -84,6 +84,9 @@ export function ScheduleMatchScreen({ navigation, route }: Props) {
 
   const inPast = scheduledAt.getTime() < now;
   const hasOpponent = !!presetOpponentId || opponentName.trim().length > 0;
+  const actionLabel = availableHours.length === 0
+    ? 'Choose another day'
+    : `${isChallenge ? '⚔️ Send challenge' : 'Propose'} · ${dayLabel(dayOffset, base)} ${hourLabel(hour)}`;
 
   const submit = async () => {
     if (saveActive.current || saving) return;
@@ -228,7 +231,7 @@ export function ScheduleMatchScreen({ navigation, route }: Props) {
         <Field value={note} onChangeText={setNote} placeholder="e.g. Best of 3, bring new balls" multiline maxLength={280} style={{ height: 70, paddingTop: spacing.sm }} />
       </Card>
 
-      <Button label={`${isChallenge ? '⚔️ Send challenge' : 'Propose'} · ${dayLabel(dayOffset, base)} ${hourLabel(hour)}`} onPress={submit} loading={saving} disabled={!hasOpponent || inPast} />
+      <Button label={actionLabel} onPress={submit} loading={saving} disabled={!hasOpponent || availableHours.length === 0 || inPast} />
       <View style={{ height: spacing.xxl }} />
     </ScrollView>
     </KeyboardAvoidingView>

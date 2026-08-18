@@ -114,6 +114,13 @@ test('player search flexes the field container without collapsing its input', as
   assert.doesNotMatch(field, /style=\{\{ flex: 1 \}\}/);
 });
 
+test('challenge actions do not advertise an unavailable past slot', async () => {
+  const source = await read('mobile/src/screens/ScheduleMatchScreen.tsx');
+  assert.match(source, /availableHours\.length === 0\s*\? 'Choose another day'/);
+  assert.match(source, /disabled=\{!hasOpponent \|\| availableHours\.length === 0 \|\| inPast\}/);
+  assert.match(source, /<Button label=\{actionLabel\}/);
+});
+
 test('court placement uses Apple native tiles on iOS and visibly attributes OSM data', async () => {
   const source = await read('mobile/src/screens/AddCourtScreen.tsx');
   assert.doesNotMatch(source, /\bUrlTile\b[^;]*from 'react-native-maps'/);
