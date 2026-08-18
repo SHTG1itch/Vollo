@@ -1,12 +1,9 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
-  FlatList,
   Pressable,
   StyleSheet,
   Text,
   View,
-  useWindowDimensions,
-  type ViewToken,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation } from '@react-navigation/native';
@@ -122,20 +119,13 @@ const PAGES: Page[] = [
 
 export function QuickstartScreen() {
   const navigation = useNavigation();
-  const { width } = useWindowDimensions();
   const [page, setPage] = useState(0);
-  const listRef = useRef<FlatList<Page>>(null);
   const lastPage = page === PAGES.length - 1;
+  const item = PAGES[page]!;
 
   // Mark seen the moment the guide opens: even if the user force-quits halfway,
   // it must not ambush them on every launch (it stays reopenable from Settings).
   React.useEffect(markQuickstartSeen, []);
-
-  // FlatList requires a referentially-stable callback — useCallback([]) keeps it.
-  const onViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: ViewToken[] }) => {
-    const idx = viewableItems[0]?.index;
-    if (idx != null) setPage(idx);
-  }, []);
 
   const close = useCallback(() => {
     if (navigation.canGoBack()) navigation.goBack();
@@ -147,8 +137,8 @@ export function QuickstartScreen() {
       close();
       return;
     }
-    listRef.current?.scrollToIndex({ index: page + 1, animated: true });
-  }, [lastPage, page, close]);
+    setPage((current) => current + 1);
+  }, [lastPage, close]);
 
   return (
     <Screen edges={['top', 'bottom']}>
@@ -161,40 +151,27 @@ export function QuickstartScreen() {
         ) : null}
       </View>
 
-      <FlatList
-        ref={listRef}
-        data={PAGES}
-        keyExtractor={(p) => p.key}
-        horizontal
-        pagingEnabled
-        showsHorizontalScrollIndicator={false}
-        onViewableItemsChanged={onViewableItemsChanged}
-        viewabilityConfig={{ itemVisiblePercentThreshold: 60 }}
-        getItemLayout={(_, index) => ({ length: width, offset: width * index, index })}
-        renderItem={({ item }) => (
-          <View style={[styles.page, { width }]}>
-            <View style={styles.hero}>
-              {item.icon === 'logo' ? (
-                <TennisBall size={72} />
-              ) : (
-                <Icon name={item.icon} size={64} color={colors.primary} strokeWidth={1.6} />
-              )}
+      <View style={styles.page}>
+        <View style={styles.hero}>
+          {item.icon === 'logo' ? (
+            <TennisBall size={72} />
+          ) : (
+            <Icon name={item.icon} size={64} color={colors.primary} strokeWidth={1.6} />
+          )}
+        </View>
+        <Text style={styles.title}>{item.title}</Text>
+        <Text style={styles.body}>{item.body}</Text>
+        <View style={styles.bullets}>
+          {item.bullets.map((b) => (
+            <View key={b.text} style={styles.bullet}>
+              <View style={styles.bulletIcon}>
+                <Icon name={b.icon} size={18} color={colors.primary} />
+              </View>
+              <Text style={styles.bulletText}>{b.text}</Text>
             </View>
-            <Text style={styles.title}>{item.title}</Text>
-            <Text style={styles.body}>{item.body}</Text>
-            <View style={styles.bullets}>
-              {item.bullets.map((b) => (
-                <View key={b.text} style={styles.bullet}>
-                  <View style={styles.bulletIcon}>
-                    <Icon name={b.icon} size={18} color={colors.primary} />
-                  </View>
-                  <Text style={styles.bulletText}>{b.text}</Text>
-                </View>
-              ))}
-            </View>
-          </View>
-        )}
-      />
+          ))}
+        </View>
+      </View>
 
       <View style={styles.footer}>
         <View style={styles.dots} accessibilityLabel={`Page ${page + 1} of ${PAGES.length}`}>
@@ -217,7 +194,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
   },
   skip: { color: colors.textDim, fontFamily: fonts.bold, fontSize: font.small },
-  page: { paddingHorizontal: spacing.xl, paddingTop: spacing.lg, gap: spacing.md },
+  page: { flex: 1, paddingHorizontal: spacing.xl, paddingTop: spacing.lg, gap: spacing.md },
   hero: {
     width: 116,
     height: 116,

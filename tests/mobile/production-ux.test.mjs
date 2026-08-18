@@ -90,6 +90,14 @@ test('user-visible mobile copy contains no mojibake', async () => {
   assert.deepEqual(malformed, []);
 });
 
+test('quickstart pages avoid Android carousel recycling artifacts', async () => {
+  const source = await read('mobile/src/screens/QuickstartScreen.tsx');
+  assert.doesNotMatch(source, /\bFlatList\b|removeClippedSubviews|pagingEnabled/);
+  assert.match(source, /const item = PAGES\[page\]!/);
+  assert.match(source, /setPage\(\(current\) => current \+ 1\)/);
+  assert.match(source, /page: \{ flex: 1,/);
+});
+
 test('court placement uses Apple native tiles on iOS and visibly attributes OSM data', async () => {
   const source = await read('mobile/src/screens/AddCourtScreen.tsx');
   assert.doesNotMatch(source, /\bUrlTile\b[^;]*from 'react-native-maps'/);
