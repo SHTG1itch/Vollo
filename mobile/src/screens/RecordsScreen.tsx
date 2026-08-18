@@ -24,6 +24,10 @@ function dateLabel(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+function matchCountLabel(count: number): string {
+  return `${count} ${count === 1 ? 'match' : 'matches'}`;
+}
+
 export function RecordsScreen({ route }: NativeStackScreenProps<RootStackParamList, 'Records'>) {
   const navigation = useNavigation<Nav>();
   const { username } = route.params;
@@ -132,7 +136,7 @@ export function RecordsScreen({ route }: NativeStackScreenProps<RootStackParamLi
     rows.push({
       icon: '📅',
       title: 'Busiest month',
-      value: `${records.busiest_month.matches} matches`,
+      value: matchCountLabel(records.busiest_month.matches),
       sub: monthLabel(records.busiest_month.month),
     });
   }
@@ -149,7 +153,7 @@ export function RecordsScreen({ route }: NativeStackScreenProps<RootStackParamLi
       icon: '🎾',
       title: 'On Vollo since',
       value: dateLabel(records.first_match_at),
-      sub: `${records.total_matches} matches logged`,
+      sub: `${matchCountLabel(records.total_matches)} logged`,
     });
   }
 

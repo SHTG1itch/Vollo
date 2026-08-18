@@ -121,6 +121,13 @@ test('challenge actions do not advertise an unavailable past slot', async () => 
   assert.match(source, /<Button label=\{actionLabel\}/);
 });
 
+test('trophy-case match counts use singular copy for one match', async () => {
+  const source = await read('mobile/src/screens/RecordsScreen.tsx');
+  assert.match(source, /count === 1 \? 'match' : 'matches'/);
+  assert.match(source, /value: matchCountLabel\(records\.busiest_month\.matches\)/);
+  assert.match(source, /`\$\{matchCountLabel\(records\.total_matches\)\} logged`/);
+});
+
 test('court placement uses Apple native tiles on iOS and visibly attributes OSM data', async () => {
   const source = await read('mobile/src/screens/AddCourtScreen.tsx');
   assert.doesNotMatch(source, /\bUrlTile\b[^;]*from 'react-native-maps'/);
