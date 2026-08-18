@@ -73,12 +73,6 @@ export function VolloWordmark({
 }) {
   const ballSize = Math.round(size * 0.8);
   const kern = size * 0.02; // snug the ball between V and llo
-  // Center the ball on the cap band so it reads as the hero "o" and sits in line
-  // with the letters. Barlow Semi Condensed cap height ≈ 0.665·size, so the band
-  // centre is ≈0.333·size above the baseline; with the ball half-height at 0.40·size
-  // the symmetric drop is 0.40 − 0.333 ≈ 0.067·size (overshoots cap & baseline
-  // equally). The old 0.085 sat the ball low, dangling it below the baseline.
-  const drop = size * 0.065;
   const letter = {
     fontFamily: fonts.display,
     fontSize: size,
@@ -95,7 +89,7 @@ export function VolloWordmark({
       <Text allowFontScaling={false} style={letter}>
         V
       </Text>
-      <View style={{ marginHorizontal: -kern, transform: [{ translateY: drop }] }}>
+      <View style={{ marginHorizontal: -kern }}>
         <TennisBall size={ballSize} tilt={tilt} />
       </View>
       <Text allowFontScaling={false} style={letter}>
@@ -106,5 +100,5 @@ export function VolloWordmark({
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'baseline' },
+  row: { flexDirection: 'row', alignItems: 'center' },
 });
