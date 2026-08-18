@@ -106,6 +106,14 @@ test('empty winners-versus-errors charts keep a neutral track', async () => {
   assert.doesNotMatch(source, /positive \+ negative \|\| 1/);
 });
 
+test('player search flexes the field container without collapsing its input', async () => {
+  const source = await read('mobile/src/screens/UserSearchScreen.tsx');
+  assert.match(source, /<View style=\{\{ flex: 1 \}\}>\s*<Field/);
+  const field = source.match(/<Field[\s\S]*?maxLength=\{60\}[\s\S]*?\/>/)?.[0];
+  assert.ok(field);
+  assert.doesNotMatch(field, /style=\{\{ flex: 1 \}\}/);
+});
+
 test('court placement uses Apple native tiles on iOS and visibly attributes OSM data', async () => {
   const source = await read('mobile/src/screens/AddCourtScreen.tsx');
   assert.doesNotMatch(source, /\bUrlTile\b[^;]*from 'react-native-maps'/);

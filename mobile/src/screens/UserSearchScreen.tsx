@@ -101,16 +101,17 @@ export function UserSearchScreen() {
         <Pressable onPress={() => navigation.goBack()} hitSlop={10} accessibilityRole="button" accessibilityLabel="Go back">
           <Icon name="chevron-left" size={26} color={colors.primary} strokeWidth={2.4} />
         </Pressable>
-        <Field
-          value={q}
-          onChangeText={setQ}
-          placeholder="Search players by name or @username"
-          autoFocus
-          autoCapitalize="none"
-          autoCorrect={false}
-          maxLength={60}
-          style={{ flex: 1 }}
-        />
+        <View style={{ flex: 1 }}>
+          <Field
+            value={q}
+            onChangeText={setQ}
+            placeholder="Search players by name or @username"
+            autoFocus
+            autoCapitalize="none"
+            autoCorrect={false}
+            maxLength={60}
+          />
+        </View>
       </View>
 
       <FlatList
