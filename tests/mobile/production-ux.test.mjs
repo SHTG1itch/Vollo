@@ -128,6 +128,14 @@ test('trophy-case match counts use singular copy for one match', async () => {
   assert.match(source, /`\$\{matchCountLabel\(records\.total_matches\)\} logged`/);
 });
 
+test('season-recap highlights pluralize match counts', async () => {
+  const source = await read('mobile/src/screens/YearInReviewScreen.tsx');
+  assert.match(source, /count === 1 \? 'match' : 'matches'/);
+  assert.match(source, /matchCountLabel\(review\.top_opponent\.matches\)/);
+  assert.match(source, /matchCountLabel\(review\.favorite_court\.matches\)/);
+  assert.match(source, /matchCountLabel\(review\.favorite_surface\.matches\)/);
+});
+
 test('court placement uses Apple native tiles on iOS and visibly attributes OSM data', async () => {
   const source = await read('mobile/src/screens/AddCourtScreen.tsx');
   assert.doesNotMatch(source, /\bUrlTile\b[^;]*from 'react-native-maps'/);

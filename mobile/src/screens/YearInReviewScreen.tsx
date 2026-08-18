@@ -14,6 +14,10 @@ const MONTHS = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'];
 // Vollo launched in 2024 — no recap exists for earlier years.
 const MIN_YEAR = 2024;
 
+function matchCountLabel(count: number): string {
+  return `${count} ${count === 1 ? 'match' : 'matches'}`;
+}
+
 export function YearInReviewScreen({
   route,
 }: NativeStackScreenProps<RootStackParamList, 'YearInReview'>) {
@@ -187,7 +191,7 @@ export function YearInReviewScreen({
             icon="⚔️"
             title="Top rival"
             value={review.top_opponent.name}
-            sub={`${review.top_opponent.matches} matches · you lead ${review.top_opponent.wins}-${review.top_opponent.losses}`}
+            sub={`${matchCountLabel(review.top_opponent.matches)} · you lead ${review.top_opponent.wins}-${review.top_opponent.losses}`}
           />
         ) : null}
         {review.favorite_court ? (
@@ -195,7 +199,7 @@ export function YearInReviewScreen({
             icon="📍"
             title="Home turf"
             value={review.favorite_court.name}
-            sub={`${review.favorite_court.matches} matches there`}
+            sub={`${matchCountLabel(review.favorite_court.matches)} there`}
           />
         ) : null}
         {review.favorite_surface ? (
@@ -206,7 +210,7 @@ export function YearInReviewScreen({
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: 2 }}>
                 <SurfaceBadge surface={review.favorite_surface.surface} small />
                 <Text style={styles.hlSub}>
-                  {review.favorite_surface.matches} matches · {review.favorite_surface.win_rate}% wins
+                  {matchCountLabel(review.favorite_surface.matches)} · {review.favorite_surface.win_rate}% wins
                 </Text>
               </View>
             </View>
