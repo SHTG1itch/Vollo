@@ -38,8 +38,8 @@ export function SplitBar({
   positive: number;
   negative: number;
 }) {
-  const total = positive + negative || 1;
-  const posPct = (positive / total) * 100;
+  const total = positive + negative;
+  const posPct = total > 0 ? (positive / total) * 100 : 0;
   return (
     <View style={{ gap: 4 }}>
       <View style={styles.row}>
@@ -51,8 +51,12 @@ export function SplitBar({
         </Text>
       </View>
       <View style={[styles.track, { flexDirection: 'row' }]}>
-        <View style={{ width: `${posPct}%`, backgroundColor: colors.win }} />
-        <View style={{ width: `${100 - posPct}%`, backgroundColor: colors.loss }} />
+        {total > 0 ? (
+          <>
+            <View style={{ width: `${posPct}%`, backgroundColor: colors.win }} />
+            <View style={{ width: `${100 - posPct}%`, backgroundColor: colors.loss }} />
+          </>
+        ) : null}
       </View>
     </View>
   );

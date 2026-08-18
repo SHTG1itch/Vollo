@@ -98,6 +98,14 @@ test('quickstart pages avoid Android carousel recycling artifacts', async () => 
   assert.match(source, /page: \{ flex: 1,/);
 });
 
+test('empty winners-versus-errors charts keep a neutral track', async () => {
+  const source = await read('mobile/src/components/charts.tsx');
+  assert.match(source, /const total = positive \+ negative;/);
+  assert.match(source, /const posPct = total > 0 \?/);
+  assert.match(source, /\{total > 0 \? \(/);
+  assert.doesNotMatch(source, /positive \+ negative \|\| 1/);
+});
+
 test('court placement uses Apple native tiles on iOS and visibly attributes OSM data', async () => {
   const source = await read('mobile/src/screens/AddCourtScreen.tsx');
   assert.doesNotMatch(source, /\bUrlTile\b[^;]*from 'react-native-maps'/);
