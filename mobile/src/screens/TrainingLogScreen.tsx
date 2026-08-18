@@ -148,51 +148,58 @@ export function TrainingLogScreen({ route }: NativeStackScreenProps<RootStackPar
               ))}
             </View>
             <View style={styles.grid}>
-              {cells.map((day, i) => {
-                if (day === null) return <View key={i} style={styles.cell} />;
-                const date = `${year}-${pad2(month)}-${pad2(day)}`;
-                const info = byDate.get(date);
-                const isSelected = selected === date;
-                const played = !!info;
-                // Colour tells the day's story at a glance: green = all wins,
-                // red = all losses, primary = mixed.
-                const fill = !info
-                  ? 'transparent'
-                  : info.wins === info.matches
-                    ? colors.win
-                    : info.wins === 0
-                      ? colors.loss
-                      : colors.primary;
-                return (
-                  <Pressable
-                    key={i}
-                    style={styles.cell}
-                    onPress={() => {
-                      if (played) {
-                        tapLight();
-                        setSelected(isSelected ? null : date);
-                      }
-                    }}
-                    accessibilityRole="button"
-                    accessibilityLabel={
-                      info ? `${date}: ${info.matches} matches, ${info.wins} wins` : date
-                    }
-                  >
-                    <View
-                      style={[
-                        styles.dayDot,
-                        played && { backgroundColor: fill },
-                        isSelected && styles.daySelected,
-                      ]}
-                    >
-                      <Text style={[styles.dayText, played && { color: colors.white, fontFamily: fonts.bold }]}>
-                        {day}
-                      </Text>
-                    </View>
-                    {info && info.matches > 1 ? <Text style={styles.multi}>×{info.matches}</Text> : null}
-                  </Pressable>
-                );
-              })}
+              {Array.from({ length: cells.length / 7 }, (_, row) => (
+                <View key={row} style={styles.gridRow}>
+                  {cells.slice(row * 7, row * 7 + 7).map((day, column) => {
+                    const key = row * 7 + column;
+                    if (day === null) return <View key={key} style={styles.cell} />;
+                    const date = `${year}-${pad2(month)}-${pad2(day)}`;
+                    const info = byDate.get(date);
+                    const isSelected = selected === date;
+                    const played = !!info;
+                    // Colour tells the day's story at a glance: green = all wins,
+                    // red = all losses, primary = mixed.
+                    const fill = !info
+                      ? 'transparent'
+                      : info.wins === info.matches
+                        ? colors.win
+                        : info.wins === 0
+                          ? colors.loss
+                          : colors.primary;
+                    return (
+                      <Pressable
+                        key={key}
+                        style={styles.cell}
+                        onPress={() => {
+                          if (played) {
+                            tapLight();
+                            setSelected(isSelected ? null : date);
+                          }
+                        }}
+                        accessibilityRole="button"
+                        accessibilityLabel={
+                          info ? `${date}: ${info.matches} matches, ${info.wins} wins` : date
+                        }
+                      >
+                        <View
+                          style={[
+                            styles.dayDot,
+                            played && { backgroundColor: fill },
+                            isSelected && styles.daySelected,
+                          ]}
+                        >
+                          <Text
+                            style={[styles.dayText, played && { color: colors.white, fontFamily: fonts.bold }]}
+                          >
+                            {day}
+                          </Text>
+                        </View>
+                        {info && info.matches > 1 ? <Text style={styles.multi}>×{info.matches}</Text> : null}
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              ))}
             </View>
 
             <View style={styles.statsRow}>
@@ -253,8 +260,9 @@ const styles = StyleSheet.create({
     fontSize: font.tiny,
     fontFamily: fonts.bold,
   },
-  grid: { flexDirection: 'row', flexWrap: 'wrap' },
-  cell: { width: `${100 / 7}%`, alignItems: 'center', paddingVertical: 5 },
+  grid: { gap: 0 },
+  gridRow: { flexDirection: 'row' },
+  cell: { flex: 1, alignItems: 'center', paddingVertical: 5 },
   dayDot: {
     width: 34,
     height: 34,

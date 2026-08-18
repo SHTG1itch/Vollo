@@ -453,3 +453,13 @@ test('comments reject rapid duplicates and activity links use validated navigati
   assert.match(notifications, /typeof data\?\.username === 'string'/);
   assert.match(nav, /USERNAME_RE\.test\(username\)/);
 });
+
+test('training log renders deterministic seven-column calendar rows', async () => {
+  const trainingLog = await read('mobile/src/screens/TrainingLogScreen.tsx');
+  assert.match(trainingLog, /Array\.from\(\{ length: cells\.length \/ 7 \}/);
+  assert.match(trainingLog, /cells\.slice\(row \* 7, row \* 7 \+ 7\)/);
+  assert.match(trainingLog, /gridRow: \{ flexDirection: 'row' \}/);
+  assert.match(trainingLog, /cell: \{ flex: 1,/);
+  assert.doesNotMatch(trainingLog, /flexWrap: 'wrap'/);
+  assert.doesNotMatch(trainingLog, /width: `\$\{100 \/ 7\}%`/);
+});
