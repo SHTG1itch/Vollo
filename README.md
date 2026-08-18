@@ -14,11 +14,11 @@ free / open-source tooling for a **$0.00 infrastructure runway.**
 
 ## Download for Android
 
-[**Download Vollo 0.1.0 for Android (versionCode 10)**](https://github.com/SHTG1itch/Vollo/releases/download/v0.1.0-android.10/Vollo-0.1.0-android-v10.apk)
+[**Download Vollo 0.1.0 for Android (versionCode 11)**](https://github.com/SHTG1itch/Vollo/releases/download/v0.1.0-android.11/Vollo-0.1.0-android-v11.apk)
 
 - Requires Android 7.0 (API 24) or newer.
 - Package: `app.vollo.mobile`
-- SHA-256: `57815EA9336601B794C61EE44D0844735E686DC367A6010EE238D3C8F506FEE4`
+- SHA-256: `9BE52E886335B76B5F131D6046FE1A44CCD75A2678D245A7F0E9977794ACA40F`
 - The APK is signed and hosted as a GitHub Release asset. Android may ask you
   to allow installs from your browser or file manager because this release is
   distributed directly rather than through Google Play.
@@ -26,7 +26,7 @@ free / open-source tooling for a **$0.00 infrastructure runway.**
 Verify the file before installing:
 
 ```text
-57815EA9336601B794C61EE44D0844735E686DC367A6010EE238D3C8F506FEE4  Vollo-0.1.0-android-v10.apk
+9BE52E886335B76B5F131D6046FE1A44CCD75A2678D245A7F0E9977794ACA40F  Vollo-0.1.0-android-v11.apk
 ```
 
 See the [Privacy Policy](PRIVACY.md), [Terms of Use](TERMS.md), and
