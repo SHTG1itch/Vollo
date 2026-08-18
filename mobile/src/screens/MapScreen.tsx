@@ -298,7 +298,7 @@ export function MapScreen() {
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status === 'granted') {
-          const pos = await Location.getCurrentPositionAsync({});
+          const pos = await Location.getCurrentPositionAsync({ mayShowUserSettingsDialog: false });
           start = { ...DEFAULT_REGION, latitude: pos.coords.latitude, longitude: pos.coords.longitude };
           setUserLoc({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
           // Programmatic move via the ref — don't drive the map from state.
@@ -359,7 +359,7 @@ export function MapScreen() {
         return;
       }
       setLocationOff(false);
-      const pos = await Location.getCurrentPositionAsync({});
+      const pos = await Location.getCurrentPositionAsync({ mayShowUserSettingsDialog: false });
       const region = { ...DEFAULT_REGION, latitude: pos.coords.latitude, longitude: pos.coords.longitude };
       setUserLoc({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
       mapRef.current?.animateToRegion(region, 600);

@@ -86,7 +86,7 @@ export function AddCourtScreen({ route, navigation }: Props) {
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== 'granted') return;
-        const pos = await Location.getCurrentPositionAsync({});
+        const pos = await Location.getCurrentPositionAsync({ mayShowUserSettingsDialog: false });
         const r = { ...DEFAULT_REGION, latitude: pos.coords.latitude, longitude: pos.coords.longitude };
         center.current = { lat: r.latitude, lng: r.longitude };
         setUserLoc({ latitude: r.latitude, longitude: r.longitude });
@@ -106,7 +106,7 @@ export function AddCourtScreen({ route, navigation }: Props) {
         showToast('Enable location to centre on where you are.', 'error');
         return;
       }
-      const pos = await Location.getCurrentPositionAsync({});
+      const pos = await Location.getCurrentPositionAsync({ mayShowUserSettingsDialog: false });
       const r = { ...DEFAULT_REGION, latitude: pos.coords.latitude, longitude: pos.coords.longitude };
       center.current = { lat: r.latitude, lng: r.longitude };
       setUserLoc({ latitude: r.latitude, longitude: r.longitude });

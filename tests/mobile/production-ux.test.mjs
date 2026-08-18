@@ -138,6 +138,21 @@ test('user-triggered location failures are visible instead of silent', async () 
   assert.doesNotMatch(map, /const recenter = useCallback\(async \(\) => \{[\s\S]*?catch \{\s*\/\* keep current view \*\//);
 });
 
+test('location lookups do not repeatedly reopen the Android settings sheet', async () => {
+  const sources = await Promise.all([
+    read('mobile/src/screens/AddCourtScreen.tsx'),
+    read('mobile/src/screens/CourtsScreen.tsx'),
+    read('mobile/src/screens/MapScreen.tsx'),
+    read('mobile/src/screens/LogMatchScreen.tsx'),
+  ]);
+  for (const source of sources) {
+    assert.doesNotMatch(source, /getCurrentPositionAsync\(\{\}\)/);
+    for (const call of source.matchAll(/getCurrentPositionAsync\(([^)]*)\)/g)) {
+      assert.match(call[1], /mayShowUserSettingsDialog: false/);
+    }
+  }
+});
+
 test('profile photos remain local drafts until save and all clear actions are explicit', async () => {
   const [source, uploads] = await Promise.all([
     read('mobile/src/screens/EditProfileScreen.tsx'),

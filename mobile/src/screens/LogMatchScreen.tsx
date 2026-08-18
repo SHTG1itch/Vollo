@@ -188,7 +188,7 @@ export function LogMatchScreen() {
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status === 'granted') {
-          const pos = await Location.getCurrentPositionAsync({});
+          const pos = await Location.getCurrentPositionAsync({ mayShowUserSettingsDialog: false });
           coords.current = { lat: pos.coords.latitude, lng: pos.coords.longitude };
         }
       } catch {
