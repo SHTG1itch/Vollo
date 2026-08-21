@@ -450,6 +450,12 @@ async function socialPairIsBlocked(
   return Boolean(rows[0]?.blocked);
 }
 
+const MATCH_PARTICIPANT_COLS = ['user_id', 'partner_id', 'opponent_id', 'opponent2_id'] as const;
+
+function matchParticipantCondition(viewerParam: string, alias = 'mf'): string {
+  return `(${MATCH_PARTICIPANT_COLS.map((col) => `${alias}.${col} = ${viewerParam}`).join(' OR ')})`;
+}
+
 /**
  * SQL fragments that hide matches the viewer may not see, matching
  * assertCanViewContent: no block in either direction, and private authors only
@@ -458,19 +464,16 @@ async function socialPairIsBlocked(
  * viewer the block EXISTS never matches and only public authors pass.
  */
 function matchVisibilityConditions(viewerParam: string, authorCol: string): string[] {
+  const participant = matchParticipantCondition(viewerParam);
   return [
     mutuallyVisibleCondition(viewerParam, authorCol),
-    // A registered opponent's identity appears on the card too. Participants
-    // retain their own record, while third parties must pass both block graphs.
-    `(mf.opponent_id IS NULL OR mf.user_id = ${viewerParam} OR mf.opponent_id = ${viewerParam}
-       OR ${mutuallyVisibleCondition(viewerParam, 'mf.opponent_id')})`,
-    // A verified registered opponent is part of the activity, not merely free
-    // text. Their private-account boundary must therefore protect the shared
-    // match from third parties just as the author's boundary does.
-    `(mf.opponent_id IS NULL OR mf.user_id = ${viewerParam} OR mf.opponent_id = ${viewerParam}
-       OR NOT (SELECT ou.is_private FROM users ou WHERE ou.id = mf.opponent_id)
-       OR EXISTS(SELECT 1 FROM follows ofl
-                  WHERE ofl.follower_id = ${viewerParam} AND ofl.following_id = mf.opponent_id))`,
+    ...MATCH_PARTICIPANT_COLS.slice(1).flatMap((col) => [
+      `(mf.${col} IS NULL OR ${participant} OR ${mutuallyVisibleCondition(viewerParam, `mf.${col}`)})`,
+      `(mf.${col} IS NULL OR ${participant}
+         OR NOT (SELECT pu.is_private FROM users pu WHERE pu.id = mf.${col})
+         OR EXISTS(SELECT 1 FROM follows pf
+                    WHERE pf.follower_id = ${viewerParam} AND pf.following_id = mf.${col}))`,
+    ]),
     `(${authorCol} = ${viewerParam}
        OR NOT (SELECT u.is_private FROM users u WHERE u.id = ${authorCol})
        OR EXISTS(SELECT 1 FROM follows f WHERE f.follower_id = ${viewerParam} AND f.following_id = ${authorCol}))`,
@@ -484,7 +487,7 @@ function matchVisibilityConditions(viewerParam: string, authorCol: string): stri
  */
 function matchStatusCondition(viewerParam: string): string {
   return `(mf.verification_status IN ('auto','verified')
-            OR mf.user_id = ${viewerParam} OR mf.opponent_id = ${viewerParam})`;
+            OR ${matchParticipantCondition(viewerParam)})`;
 }
 
 /**
@@ -815,8 +818,13 @@ app.get('/api/feed/user/:userId', optionalAuth, async (c) => {
 interface ScheduledMatchBinding {
   id: string;
   creator_id: string;
+  match_format: 'singles' | 'doubles';
+  partner_id: string | null;
+  partner_name: string | null;
   opponent_id: string | null;
   opponent_name: string | null;
+  opponent2_id: string | null;
+  opponent2_name: string | null;
   court_id: string | null;
   surface: Surface | null;
   status: string;
@@ -843,6 +851,13 @@ function scheduledCounterpartyId(
   return null;
 }
 
+type ScheduledPerson = { id: string | null; name: string | null };
+
+function scheduledPersonMatches(id: string | undefined, name: string | undefined, person: ScheduledPerson): boolean {
+  if (person.id) return id === person.id && !name;
+  return !id && Boolean(name && person.name && normalizeOpponentName(name) === normalizeOpponentName(person.name));
+}
+
 async function lockScheduledMatchForCreate(
   client: Queryable,
   scheduledMatchId: string,
@@ -850,7 +865,8 @@ async function lockScheduledMatchForCreate(
   body: CreateMatchInput,
 ): Promise<ScheduledMatchBinding> {
   const { rows } = await client.query<ScheduledMatchBinding>(
-    `SELECT id, creator_id, opponent_id, opponent_name, court_id, surface, status, match_id
+    `SELECT id, creator_id, match_format, partner_id, partner_name, opponent_id, opponent_name,
+            opponent2_id, opponent2_name, court_id, surface, status, match_id
        FROM scheduled_matches
       WHERE id = $1
       FOR UPDATE`,
@@ -859,7 +875,39 @@ async function lockScheduledMatchForCreate(
   const scheduled = rows[0];
   if (!scheduled) throw ApiError.notFound('Scheduled match not found');
 
-  if (scheduled.opponent_id) {
+  if (body.match_format !== scheduled.match_format) {
+    throw ApiError.badRequest('The match format does not match the scheduled match');
+  }
+
+  if (scheduled.match_format === 'doubles') {
+    const creator = { id: scheduled.creator_id, name: null };
+    const partner = { id: scheduled.partner_id, name: scheduled.partner_name };
+    const opponent = { id: scheduled.opponent_id, name: scheduled.opponent_name };
+    const opponent2 = { id: scheduled.opponent2_id, name: scheduled.opponent2_name };
+    let expected: { partner: ScheduledPerson; opponent: ScheduledPerson; opponent2: ScheduledPerson };
+    if (callerId === scheduled.creator_id) {
+      expected = { partner, opponent, opponent2 };
+    } else if (callerId === scheduled.partner_id) {
+      expected = { partner: creator, opponent, opponent2 };
+    } else if (callerId === scheduled.opponent_id) {
+      expected = { partner: opponent2, opponent: creator, opponent2: partner };
+    } else if (callerId === scheduled.opponent2_id) {
+      expected = { partner: opponent, opponent: creator, opponent2: partner };
+    } else {
+      throw ApiError.forbidden('You are not a participant in this scheduled match');
+    }
+
+    if (scheduled.status !== 'accepted') {
+      throw ApiError.badRequest('An invited player must accept this scheduled match before a result can be logged');
+    }
+    if (
+      !scheduledPersonMatches(body.partner_id, body.partner_name, expected.partner) ||
+      !scheduledPersonMatches(body.opponent_id, body.opponent_name, expected.opponent) ||
+      !scheduledPersonMatches(body.opponent2_id, body.opponent2_name, expected.opponent2)
+    ) {
+      throw ApiError.badRequest('The doubles teams do not match the scheduled teams');
+    }
+  } else if (scheduled.opponent_id) {
     const expectedOpponentId = scheduledCounterpartyId(
       scheduled.creator_id,
       scheduled.opponent_id,
@@ -1003,8 +1051,9 @@ app.post('/api/matches', requireAuth, requireCurrentTerms, async (c) => {
     throw ApiError.badRequest(err instanceof Error ? err.message : 'Invalid score');
   }
 
-  if (body.opponent_id && body.opponent_id === userId) {
-    throw ApiError.badRequest('You cannot log a match against yourself');
+  const taggedIds = [body.partner_id, body.opponent_id, body.opponent2_id].filter((id): id is string => Boolean(id));
+  if (new Set([userId, ...taggedIds]).size !== taggedIds.length + 1) {
+    throw ApiError.badRequest('Each registered player can appear only once in a match');
   }
 
   // Client-supplied idempotency key: a timed-out request the app retries must
@@ -1036,7 +1085,8 @@ app.post('/api/matches', requireAuth, requireCurrentTerms, async (c) => {
   // A match against a registered Vollo player must be confirmed by that opponent
   // before it counts (ELO/streak/domination). Until then it's 'pending' and
   // contributes nothing. Matches with no registered opponent count immediately.
-  const needsVerification = !!body.opponent_id;
+  const verifierIds = [body.opponent_id, body.opponent2_id].filter((id): id is string => Boolean(id));
+  const needsVerification = verifierIds.length > 0;
   const verificationStatus = needsVerification ? 'pending' : 'auto';
   // Only meaningful when the match counts now — a pending match doesn't change
   // any court's controller, so there's no pre-state to capture.
@@ -1067,19 +1117,22 @@ app.post('/api/matches', requireAuth, requireCurrentTerms, async (c) => {
     if (Number(recentMatches.rows[0]?.c ?? 0) >= DAILY_MATCH_CAP) {
       throw ApiError.tooManyRequests('Daily match logging limit reached; try again later');
     }
-    if (body.opponent_id) {
+    for (const participantId of taggedIds) {
       // Serialize the block check and pending-cap check with block/unblock and
       // every other tag for this pair. Concurrent requests cannot all observe
       // "two pending" and flood the opponent, and a block can never slip
       // between the check and INSERT.
-      await lockSocialPair(client, userId, body.opponent_id);
-      if (await socialPairIsBlocked(client, userId, body.opponent_id)) {
+      await lockSocialPair(client, userId, participantId);
+      if (await socialPairIsBlocked(client, userId, participantId)) {
         throw ApiError.notFound('User not found');
       }
+    }
+    for (const verifierId of verifierIds) {
       const pending = await client.query<{ c: string }>(
         `SELECT COUNT(*) AS c FROM matches
-          WHERE user_id = $1 AND opponent_id = $2 AND verification_status = 'pending'`,
-        [userId, body.opponent_id],
+          WHERE user_id = $1 AND $2 IN (opponent_id, opponent2_id)
+            AND verification_status = 'pending'`,
+        [userId, verifierId],
       );
       if (Number(pending.rows[0]?.c ?? 0) >= 3) {
         throw ApiError.tooManyRequests('You already have matches awaiting this player’s confirmation');
@@ -1095,16 +1148,23 @@ app.post('/api/matches', requireAuth, requireCurrentTerms, async (c) => {
 
     const inserted = await client.query<{ id: string }>(
       `INSERT INTO matches
-         (user_id, opponent_id, opponent_name, court_id, surface, score_array, result,
+         (user_id, match_format, partner_id, partner_name, opponent_id, opponent_name,
+          opponent2_id, opponent2_name, court_id, surface, score_array, result,
           sets_won, sets_lost, games_won, games_lost, match_score, streak_modifier,
           rpe_index, duration_minutes, notes, is_tiebreak, played_at, verification_status,
           title, photo_url, client_key)
-       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,0,1,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14,$15,$16,0,1,
+               $17,$18,$19,$20,$21,$22,$23,$24,$25)
        RETURNING id`,
       [
         userId,
+        body.match_format,
+        body.partner_id ?? null,
+        body.partner_id ? null : body.partner_name ?? null,
         body.opponent_id ?? null,
         body.opponent_id ? null : body.opponent_name ?? null,
+        body.opponent2_id ?? null,
+        body.opponent2_id ? null : body.opponent2_name ?? null,
         body.court_id ?? null,
         body.surface,
         // Pass the raw array: postgres.js detects the jsonb param and serializes
@@ -1151,7 +1211,7 @@ app.post('/api/matches', requireAuth, requireCurrentTerms, async (c) => {
     // invited player verifies it. An off-app result counts automatically, so
     // its schedule can be completed in this same transaction.
     if (scheduled) {
-      const linked = scheduled.opponent_id
+      const linked = scheduled.opponent_id || scheduled.opponent2_id
         ? await client.query<{ id: string }>(
             `UPDATE scheduled_matches SET match_id = $1
               WHERE id = $2 AND status = 'accepted' AND match_id IS NULL
@@ -1210,15 +1270,25 @@ app.post('/api/matches', requireAuth, requireCurrentTerms, async (c) => {
     }
   }
 
-  if (needsVerification && body.opponent_id !== userId) {
+  for (const verifierId of verifierIds) {
     // Ask the tagged opponent to confirm the result before it counts — push on,
     // because the logger's ELO/territory hinges on this response.
     await notify({
-      userId: body.opponent_id!,
+      userId: verifierId,
       type: 'match_verify_request',
       title: '🎾 Verify this match',
-      body: `@${c.get('user')!.username} logged a match against you. Confirm it to make it count.`,
+      body: `@${c.get('user')!.username} logged a ${body.match_format} match against you. Confirm it to make it count.`,
       data: { matchId },
+    }).catch(() => {});
+  }
+  if (body.partner_id) {
+    await notify({
+      userId: body.partner_id,
+      type: 'match_tagged',
+      title: '🎾 Doubles match logged',
+      body: `@${c.get('user')!.username} added you as their doubles partner.`,
+      data: { matchId },
+      push: false,
     }).catch(() => {});
   }
 
@@ -1232,7 +1302,7 @@ app.get('/api/matches/pending', requireAuth, async (c) => {
   const userId = uid(c);
   const rows = await query<Record<string, unknown>>(
     `SELECT mf.*, ${visibleMatchSocialColumns('$1')} FROM match_feed mf
-      WHERE mf.opponent_id = $1 AND mf.verification_status = 'pending'
+      WHERE $1 IN (mf.opponent_id, mf.opponent2_id) AND mf.verification_status = 'pending'
       ORDER BY mf.created_at DESC LIMIT 50`,
     [userId],
   );
@@ -1253,13 +1323,16 @@ app.post('/api/matches/:id/verify', requireAuth, async (c) => {
   const { match, previousControllerId } = await withTransaction(async (client) => {
     const { rows } = await client.query<{
       user_id: string;
+      partner_id: string | null;
       opponent_id: string | null;
+      opponent2_id: string | null;
       court_id: string | null;
       games_won: number;
       games_lost: number;
       verification_status: string;
     }>(
-      `SELECT user_id, opponent_id, court_id, games_won, games_lost, verification_status
+      `SELECT user_id, partner_id, opponent_id, opponent2_id, court_id,
+              games_won, games_lost, verification_status
          FROM matches
         WHERE id = $1
         FOR UPDATE`,
@@ -1267,7 +1340,9 @@ app.post('/api/matches/:id/verify', requireAuth, async (c) => {
     );
     const locked = rows[0];
     if (!locked) throw ApiError.notFound('Match not found');
-    if (locked.opponent_id !== userId) throw ApiError.forbidden('Only the tagged opponent can verify this match');
+    if (locked.opponent_id !== userId && locked.opponent2_id !== userId) {
+      throw ApiError.forbidden('Only a tagged opponent can verify this match');
+    }
     if (locked.verification_status !== 'pending') throw ApiError.badRequest('This match has already been resolved');
 
     if (action === 'reject') {
@@ -1340,7 +1415,11 @@ app.post('/api/matches/:id/verify', requireAuth, async (c) => {
   return c.json({ match: await fetchMatchCard(id, userId) });
 });
 
-type ViewableMatch = Pick<MatchCard, 'user_id' | 'opponent_id' | 'verification_status'>;
+type ViewableMatch = Pick<MatchCard, 'user_id' | 'partner_id' | 'opponent_id' | 'opponent2_id' | 'verification_status'>;
+
+function isMatchParticipant(match: ViewableMatch, userId: string | null): boolean {
+  return Boolean(userId && [match.user_id, match.partner_id, match.opponent_id, match.opponent2_id].includes(userId));
+}
 
 /** The match's participants always see it. Everyone else may see only a
  *  counted match and remains subject to the author's privacy + blocks. Keep
@@ -1349,18 +1428,17 @@ async function assertCanViewMatch(
   match: ViewableMatch,
   viewerId: string | null,
 ): Promise<void> {
-  if (viewerId && (viewerId === match.user_id || viewerId === match.opponent_id)) return;
+  if (isMatchParticipant(match, viewerId)) return;
   // Pending/rejected matches exist only for their participants. Return 404
   // before profile checks so neither direct links nor interactions disclose one.
   if (match.verification_status !== 'auto' && match.verification_status !== 'verified') {
     throw ApiError.notFound('Match not found');
   }
   await assertCanViewContent(match.user_id, viewerId);
-  if (match.opponent_id) {
-    const opponentAccess = await profileAccess(match.opponent_id, viewerId);
-    if (opponentAccess.blocked || opponentAccess.restricted) {
-      throw ApiError.notFound('Match not found');
-    }
+  for (const participantId of [match.partner_id, match.opponent_id, match.opponent2_id]) {
+    if (!participantId) continue;
+    const access = await profileAccess(participantId, viewerId);
+    if (access.blocked || access.restricted) throw ApiError.notFound('Match not found');
   }
 }
 
@@ -1369,7 +1447,7 @@ async function assertCanViewMatch(
  * blocks the other. The owner can still manage their own activity. */
 async function assertCanInteractWithMatch(match: ViewableMatch, viewerId: string): Promise<void> {
   await assertCanViewMatch(match, viewerId);
-  if (viewerId === match.opponent_id) {
+  if (viewerId !== match.user_id && isMatchParticipant(match, viewerId)) {
     const access = await profileAccess(match.user_id, viewerId);
     if (access.blocked) throw ApiError.notFound('Match not found');
   }
@@ -1442,7 +1520,7 @@ app.post('/api/matches/:id/kudos', requireAuth, async (c) => {
   const userId = uid(c);
   const id = uuidParam(c);
   const match = await queryOne<ViewableMatch>(
-    'SELECT user_id, opponent_id, verification_status FROM matches WHERE id = $1', [id]);
+    'SELECT user_id, partner_id, opponent_id, opponent2_id, verification_status FROM matches WHERE id = $1', [id]);
   if (!match) throw ApiError.notFound('Match not found');
   await assertCanInteractWithMatch(match, userId);
 
@@ -1473,7 +1551,7 @@ app.delete('/api/matches/:id/kudos', requireAuth, async (c) => {
   const userId = uid(c);
   const id = uuidParam(c);
   const match = await queryOne<ViewableMatch>(
-    'SELECT user_id, opponent_id, verification_status FROM matches WHERE id = $1', [id]);
+    'SELECT user_id, partner_id, opponent_id, opponent2_id, verification_status FROM matches WHERE id = $1', [id]);
   if (!match) throw ApiError.notFound('Match not found');
   await assertCanViewMatch(match, userId);
   await query('DELETE FROM kudos WHERE match_id = $1 AND user_id = $2', [id, userId]);
@@ -1488,7 +1566,7 @@ app.delete('/api/matches/:id/kudos', requireAuth, async (c) => {
 app.get('/api/matches/:id/comments', optionalAuth, async (c) => {
   const id = uuidParam(c);
   const parent = await queryOne<ViewableMatch>(
-    'SELECT user_id, opponent_id, verification_status FROM matches WHERE id = $1', [id]);
+    'SELECT user_id, partner_id, opponent_id, opponent2_id, verification_status FROM matches WHERE id = $1', [id]);
   if (!parent) throw ApiError.notFound('Match not found');
   await assertCanViewMatch(parent, c.get('user')?.sub ?? null);
   const { limit, before } = commentsQuerySchema.parse(c.req.query());
@@ -1529,7 +1607,7 @@ app.post('/api/matches/:id/comments', requireAuth, requireCurrentTerms, async (c
   const userId = uid(c);
   const id = uuidParam(c);
   const match = await queryOne<ViewableMatch>(
-    'SELECT user_id, opponent_id, verification_status FROM matches WHERE id = $1', [id]);
+    'SELECT user_id, partner_id, opponent_id, opponent2_id, verification_status FROM matches WHERE id = $1', [id]);
   if (!match) throw ApiError.notFound('Match not found');
   await assertCanInteractWithMatch(match, userId);
   const { body } = commentSchema.parse(await jsonBody(c));
@@ -1570,15 +1648,20 @@ app.post('/api/matches/:id/comments', requireAuth, requireCurrentTerms, async (c
 
 // ─── Scheduled matches ───────────────────────────────────────────────────
 const SCHEDULED_SELECT = `
-  SELECT s.id, s.creator_id, s.opponent_id, s.opponent_name, s.court_id, s.surface,
+  SELECT s.id, s.creator_id, s.match_format, s.partner_id, s.partner_name,
+         s.opponent_id, s.opponent_name, s.opponent2_id, s.opponent2_name, s.court_id, s.surface,
          s.scheduled_at, s.note, s.status, s.is_challenge, s.match_id, s.created_at,
          cu.username AS creator_username, cu.display_name AS creator_display_name, cu.avatar_url AS creator_avatar_url,
+         pu.username AS partner_username, pu.display_name AS partner_display_name, pu.avatar_url AS partner_avatar_url,
          ou.username AS opponent_username, ou.display_name AS opponent_display_name, ou.avatar_url AS opponent_avatar_url,
+         o2u.username AS opponent2_username, o2u.display_name AS opponent2_display_name, o2u.avatar_url AS opponent2_avatar_url,
          c.name AS court_name,
          m.score_array AS result_score, m.user_id AS result_logged_by
     FROM scheduled_matches s
     JOIN users cu ON cu.id = s.creator_id
+    LEFT JOIN users pu ON pu.id = s.partner_id
     LEFT JOIN users ou ON ou.id = s.opponent_id
+    LEFT JOIN users o2u ON o2u.id = s.opponent2_id
     LEFT JOIN courts c ON c.id = s.court_id
     LEFT JOIN matches m ON m.id = s.match_id`;
 
@@ -1591,11 +1674,12 @@ app.get('/api/scheduled-matches', requireAuth, async (c) => {
   const userId = uid(c);
   const rows = await query<Record<string, unknown>>(
     `${SCHEDULED_SELECT}
-      WHERE (s.creator_id = $1 OR s.opponent_id = $1)
-        AND ${mutuallyVisibleCondition(
-          '$1',
-          'CASE WHEN s.creator_id = $1 THEN s.opponent_id ELSE s.creator_id END',
-        )}
+      WHERE $1 IN (s.creator_id, s.partner_id, s.opponent_id, s.opponent2_id)
+        AND NOT EXISTS (
+          SELECT 1 FROM blocks b
+           WHERE (b.blocker_id = $1 AND b.blocked_id = ANY (ARRAY[s.creator_id, s.partner_id, s.opponent_id, s.opponent2_id]))
+              OR (b.blocked_id = $1 AND b.blocker_id = ANY (ARRAY[s.creator_id, s.partner_id, s.opponent_id, s.opponent2_id]))
+        )
       ORDER BY s.scheduled_at DESC LIMIT 100`,
     [userId],
   );
@@ -1605,7 +1689,11 @@ app.get('/api/scheduled-matches', requireAuth, async (c) => {
 app.post('/api/scheduled-matches', requireAuth, requireCurrentTerms, async (c) => {
   const userId = uid(c);
   const b = createScheduledMatchSchema.parse(await jsonBody(c));
-  if (b.opponent_id === userId) throw ApiError.badRequest('You cannot schedule a match against yourself');
+  const taggedIds = [b.partner_id, b.opponent_id, b.opponent2_id].filter((id): id is string => Boolean(id));
+  if (new Set([userId, ...taggedIds]).size !== taggedIds.length + 1) {
+    throw ApiError.badRequest('Each registered player can appear only once in a match');
+  }
+  const inviteeIds = [b.opponent_id, b.opponent2_id].filter((id): id is string => Boolean(id));
 
   if (b.client_key) {
     const existing = await queryOne<{ id: string }>(
@@ -1620,8 +1708,8 @@ app.post('/api/scheduled-matches', requireAuth, requireCurrentTerms, async (c) =
   // A proposal to a Vollo player needs their acceptance; an off-app opponent is
   // just a personal plan, so it starts accepted. A challenge only makes sense
   // against a registered player.
-  const status = b.opponent_id ? 'proposed' : 'accepted';
-  const isChallenge = !!b.is_challenge && !!b.opponent_id;
+  const status = inviteeIds.length ? 'proposed' : 'accepted';
+  const isChallenge = !!b.is_challenge && inviteeIds.length > 0;
   let scheduledId: string;
   try {
     scheduledId = await withTransaction(async (client) => {
@@ -1641,15 +1729,17 @@ app.post('/api/scheduled-matches', requireAuth, requireCurrentTerms, async (c) =
     if (Number(recentSchedules.rows[0]?.c ?? 0) >= DAILY_SCHEDULE_CAP) {
       throw ApiError.tooManyRequests('Daily scheduling limit reached; try again later');
     }
-    if (b.opponent_id) {
-      await lockSocialPair(client, userId, b.opponent_id);
-      if (await socialPairIsBlocked(client, userId, b.opponent_id)) {
+    for (const participantId of taggedIds) {
+      await lockSocialPair(client, userId, participantId);
+      if (await socialPairIsBlocked(client, userId, participantId)) {
         throw ApiError.notFound('User not found');
       }
+    }
+    for (const inviteeId of inviteeIds) {
       const open = await client.query<{ c: string }>(
         `SELECT COUNT(*) AS c FROM scheduled_matches
-          WHERE creator_id = $1 AND opponent_id = $2 AND status = 'proposed'`,
-        [userId, b.opponent_id],
+          WHERE creator_id = $1 AND $2 IN (opponent_id, opponent2_id) AND status = 'proposed'`,
+        [userId, inviteeId],
       );
       if (Number(open.rows[0]?.c ?? 0) >= 3) {
         throw ApiError.tooManyRequests('You already have open proposals with this player — wait for a response');
@@ -1657,9 +1747,26 @@ app.post('/api/scheduled-matches', requireAuth, requireCurrentTerms, async (c) =
     }
     const inserted = await client.query<{ id: string }>(
       `INSERT INTO scheduled_matches
-         (creator_id, opponent_id, opponent_name, court_id, surface, scheduled_at, note, status, is_challenge, client_key)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
-      [userId, b.opponent_id ?? null, b.opponent_id ? null : b.opponent_name ?? null, b.court_id ?? null, b.surface ?? null, b.scheduled_at, b.note ?? null, status, isChallenge, b.client_key ?? null],
+         (creator_id, match_format, partner_id, partner_name, opponent_id, opponent_name,
+          opponent2_id, opponent2_name, court_id, surface, scheduled_at, note, status, is_challenge, client_key)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id`,
+      [
+        userId,
+        b.match_format,
+        b.partner_id ?? null,
+        b.partner_id ? null : b.partner_name ?? null,
+        b.opponent_id ?? null,
+        b.opponent_id ? null : b.opponent_name ?? null,
+        b.opponent2_id ?? null,
+        b.opponent2_id ? null : b.opponent2_name ?? null,
+        b.court_id ?? null,
+        b.surface ?? null,
+        b.scheduled_at,
+        b.note ?? null,
+        status,
+        isChallenge,
+        b.client_key ?? null,
+      ],
     );
     return inserted.rows[0]!.id;
     });
@@ -1679,9 +1786,9 @@ app.post('/api/scheduled-matches', requireAuth, requireCurrentTerms, async (c) =
   }
   const card = await fetchScheduledMatch(scheduledId, userId);
 
-  if (b.opponent_id) {
+  for (const inviteeId of inviteeIds) {
     await notify({
-      userId: b.opponent_id,
+      userId: inviteeId,
       type: isChallenge ? 'challenge' : 'match_scheduled',
       title: isChallenge ? '⚔️ You’ve been challenged' : '📅 Match proposed',
       body: isChallenge
@@ -1689,6 +1796,16 @@ app.post('/api/scheduled-matches', requireAuth, requireCurrentTerms, async (c) =
         : `${c.get('user')!.username} wants to play you. Tap to respond.`,
       data: { scheduledMatchId: scheduledId },
       push: isChallenge,
+    }).catch(() => {});
+  }
+  if (b.partner_id) {
+    await notify({
+      userId: b.partner_id,
+      type: 'match_scheduled',
+      title: '📅 Doubles match scheduled',
+      body: `@${c.get('user')!.username} added you as their partner.`,
+      data: { scheduledMatchId: scheduledId },
+      push: false,
     }).catch(() => {});
   }
   return c.json({ scheduled_match: card }, 201);
@@ -1699,32 +1816,43 @@ app.patch('/api/scheduled-matches/:id', requireAuth, async (c) => {
   const id = uuidParam(c);
   const { action } = updateScheduledMatchSchema.parse(await jsonBody(c));
 
-  const row = await queryOne<{ creator_id: string; opponent_id: string | null; status: string; match_id: string | null }>(
-    'SELECT creator_id, opponent_id, status, match_id FROM scheduled_matches WHERE id = $1',
+  const row = await queryOne<{
+    creator_id: string;
+    partner_id: string | null;
+    opponent_id: string | null;
+    opponent2_id: string | null;
+    status: string;
+    match_id: string | null;
+  }>(
+    'SELECT creator_id, partner_id, opponent_id, opponent2_id, status, match_id FROM scheduled_matches WHERE id = $1',
     [id],
   );
   if (!row) throw ApiError.notFound('Scheduled match not found');
 
   let newStatus: string;
-  let notifyUserId: string | null;
+  let notifyUserIds: string[];
   let notifyType: 'schedule_accepted' | 'schedule_declined' | 'schedule_cancelled';
   let notifyBody: string;
   const actor = c.get('user')!.username;
+  const participants = [row.creator_id, row.partner_id, row.opponent_id, row.opponent2_id]
+    .filter((participantId): participantId is string => Boolean(participantId));
 
   if (action === 'cancel') {
-    if (row.creator_id !== userId && row.opponent_id !== userId) throw ApiError.forbidden('Not your match to cancel');
+    if (!participants.includes(userId)) throw ApiError.forbidden('Not your match to cancel');
     if (row.status !== 'proposed' && row.status !== 'accepted') throw ApiError.badRequest('This match can no longer be cancelled');
     if (row.match_id) throw ApiError.badRequest('A result has already been logged for this scheduled match');
     newStatus = 'cancelled';
-    notifyUserId = userId === row.creator_id ? row.opponent_id : row.creator_id;
+    notifyUserIds = participants.filter((participantId) => participantId !== userId);
     notifyType = 'schedule_cancelled';
     notifyBody = `${actor} cancelled your scheduled match.`;
   } else {
     // Only the invited player can accept or decline a proposal.
-    if (row.opponent_id !== userId) throw ApiError.forbidden('Only the invited player can respond');
+    if (row.opponent_id !== userId && row.opponent2_id !== userId) {
+      throw ApiError.forbidden('Only an invited opponent can respond');
+    }
     if (row.status !== 'proposed') throw ApiError.badRequest('This proposal has already been answered');
     newStatus = action === 'accept' ? 'accepted' : 'declined';
-    notifyUserId = row.creator_id;
+    notifyUserIds = participants.filter((participantId) => participantId !== userId);
     notifyType = action === 'accept' ? 'schedule_accepted' : 'schedule_declined';
     notifyBody = action === 'accept' ? `${actor} accepted your match. Game on!` : `${actor} declined your match.`;
   }
@@ -1742,7 +1870,7 @@ app.patch('/api/scheduled-matches/:id', requireAuth, async (c) => {
       action === 'cancel' ? 'This match can no longer be cancelled' : 'This proposal has already been answered',
     );
   }
-  if (notifyUserId) {
+  for (const notifyUserId of notifyUserIds) {
     await notify({
       userId: notifyUserId,
       type: notifyType,

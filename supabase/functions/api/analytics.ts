@@ -191,12 +191,17 @@ export async function getHeadToHead(userId: string, viewerId: string | null): Pr
     losses: string;
   }>(
     `SELECT opponent_id,
-            COALESCE(o.display_name, m.opponent_name, 'Unknown') AS opponent_name,
+            concat_ws(' & ',
+              COALESCE(o.display_name, m.opponent_name, 'Unknown'),
+              CASE WHEN m.match_format = 'doubles'
+                   THEN COALESCE(o2.display_name, m.opponent2_name, 'Unknown') END
+            ) AS opponent_name,
             COUNT(*) AS matches,
             COUNT(*) FILTER (WHERE result='win')  AS wins,
             COUNT(*) FILTER (WHERE result='loss') AS losses
        FROM matches m
        LEFT JOIN users o ON o.id = m.opponent_id
+       LEFT JOIN users o2 ON o2.id = m.opponent2_id
       WHERE m.user_id = $1
         AND m.verification_status IN ('auto', 'verified')
         AND (m.opponent_id IS NOT NULL OR m.opponent_name IS NOT NULL)
@@ -217,7 +222,27 @@ export async function getHeadToHead(userId: string, viewerId: string | null): Pr
             )
           )
         )
-      GROUP BY opponent_id, COALESCE(o.display_name, m.opponent_name, 'Unknown')
+        AND (
+          m.opponent2_id IS NULL OR m.user_id = $2
+          OR (
+            NOT EXISTS (
+              SELECT 1 FROM blocks b
+               WHERE (b.blocker_id = $2 AND b.blocked_id = m.opponent2_id)
+                  OR (b.blocker_id = m.opponent2_id AND b.blocked_id = $2)
+            )
+            AND (
+              NOT o2.is_private
+              OR EXISTS (
+                SELECT 1 FROM follows f
+                 WHERE f.follower_id = $2 AND f.following_id = m.opponent2_id
+              )
+            )
+          )
+        )
+      GROUP BY opponent_id, opponent2_id,
+               concat_ws(' & ', COALESCE(o.display_name, m.opponent_name, 'Unknown'),
+                 CASE WHEN m.match_format = 'doubles'
+                      THEN COALESCE(o2.display_name, m.opponent2_name, 'Unknown') END)
       ORDER BY matches DESC`,
     [userId, viewerId],
   );

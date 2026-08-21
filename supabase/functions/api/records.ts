@@ -99,11 +99,15 @@ export async function getYearInReview(
   });
 
   const topOpponent = await queryOne<{ name: string; matches: string; wins: string; losses: string }>(
-    `SELECT COALESCE(ou.display_name, m.opponent_name) AS name,
+    `SELECT concat_ws(' & ', COALESCE(ou.display_name, m.opponent_name),
+              CASE WHEN m.match_format = 'doubles'
+                   THEN COALESCE(o2u.display_name, m.opponent2_name) END) AS name,
             COUNT(*) AS matches,
             COUNT(*) FILTER (WHERE m.result = 'win') AS wins,
             COUNT(*) FILTER (WHERE m.result = 'loss') AS losses
-       FROM matches m LEFT JOIN users ou ON ou.id = m.opponent_id
+       FROM matches m
+       LEFT JOIN users ou ON ou.id = m.opponent_id
+       LEFT JOIN users o2u ON o2u.id = m.opponent2_id
       WHERE ${WIN} AND COALESCE(ou.display_name, m.opponent_name) IS NOT NULL
         AND (
           m.opponent_id IS NULL OR m.user_id = $4
@@ -118,6 +122,23 @@ export async function getYearInReview(
               OR EXISTS (
                 SELECT 1 FROM follows f
                  WHERE f.follower_id = $4 AND f.following_id = m.opponent_id
+              )
+            )
+          )
+        )
+        AND (
+          m.opponent2_id IS NULL OR m.user_id = $4
+          OR (
+            NOT EXISTS (
+              SELECT 1 FROM blocks b
+               WHERE (b.blocker_id = $4 AND b.blocked_id = m.opponent2_id)
+                  OR (b.blocker_id = m.opponent2_id AND b.blocked_id = $4)
+            )
+            AND (
+              NOT o2u.is_private
+              OR EXISTS (
+                SELECT 1 FROM follows f
+                 WHERE f.follower_id = $4 AND f.following_id = m.opponent2_id
               )
             )
           )

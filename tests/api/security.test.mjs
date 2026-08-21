@@ -110,7 +110,8 @@ test('one match guard hides unresolved matches before enforcing privacy and bloc
   const profileCheck = guard.indexOf('await assertCanViewContent');
   assert.ok(statusCheck >= 0, 'guard must check match status');
   assert.ok(profileCheck > statusCheck, 'unresolved matches must be hidden before profile checks');
-  assert.match(guard, /viewerId === match\.user_id \|\| viewerId === match\.opponent_id/);
+  assert.match(guard, /isMatchParticipant\(match, viewerId\)/);
+  assert.match(guard, /match\.partner_id, match\.opponent_id, match\.opponent2_id/);
 });
 
 test('match detail and read/remove routes use the centralized visibility guard', () => {
@@ -124,7 +125,7 @@ test('match detail and read/remove routes use the centralized visibility guard',
     const route = section(start, end);
     assert.match(route, /await assertCanViewMatch\(/, `${start} must enforce match visibility`);
     if (loadsReference) {
-      assert.match(route, /SELECT user_id, opponent_id, verification_status FROM matches/,
+      assert.match(route, /SELECT user_id, partner_id, opponent_id, opponent2_id, verification_status FROM matches/,
         `${start} must load verification status for the guard`);
     }
   }
@@ -138,7 +139,7 @@ test('transactions never re-enter the one-connection global pool for controller 
 test('new kudos and comments enforce the block-aware interaction guard', () => {
   const guard = section('async function assertCanInteractWithMatch', "app.get('/api/matches/:id'");
   assert.match(guard, /await assertCanViewMatch/);
-  assert.match(guard, /viewerId === match\.opponent_id/);
+  assert.match(guard, /isMatchParticipant\(match, viewerId\)/);
   assert.match(guard, /if \(access\.blocked\) throw ApiError\.notFound/);
 
   for (const [start, end] of [
@@ -147,7 +148,7 @@ test('new kudos and comments enforce the block-aware interaction guard', () => {
   ]) {
     const route = section(start, end);
     assert.match(route, /await assertCanInteractWithMatch\(/);
-    assert.match(route, /SELECT user_id, opponent_id, verification_status FROM matches/);
+    assert.match(route, /SELECT user_id, partner_id, opponent_id, opponent2_id, verification_status FROM matches/);
   }
 });
 

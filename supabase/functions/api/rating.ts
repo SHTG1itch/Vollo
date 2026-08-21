@@ -27,7 +27,9 @@ interface ReplayMatch {
   result: MatchResult;
   games_won: number;
   games_lost: number;
+  match_format: 'singles' | 'doubles';
   opponent_id: string | null;
+  opponent2_id: string | null;
 }
 
 /**
@@ -55,9 +57,11 @@ export async function recomputeUserRatings(db: Queryable, userId: string): Promi
     result: MatchResult;
     games_won: number;
     games_lost: number;
+    match_format: 'singles' | 'doubles';
     opponent_id: string | null;
+    opponent2_id: string | null;
   }>(
-    `SELECT surface, result, games_won, games_lost, opponent_id
+    `SELECT surface, result, games_won, games_lost, match_format, opponent_id, opponent2_id
        FROM matches
       WHERE user_id = $1 AND verification_status IN ('auto', 'verified')
       ORDER BY played_at ASC, id ASC`,
@@ -66,7 +70,7 @@ export async function recomputeUserRatings(db: Queryable, userId: string): Promi
 
   // Batch-load opponents' current posteriors so the replay needs no per-match
   // query. Keyed by `${opponentId}|${surface}`.
-  const oppIds = [...new Set(matches.map((m) => m.opponent_id).filter((x): x is string => !!x))];
+  const oppIds = [...new Set(matches.flatMap((m) => [m.opponent_id, m.opponent2_id]).filter((x): x is string => !!x))];
   const oppMap = new Map<string, Posterior>();
   if (oppIds.length > 0) {
     const { rows: oppRows } = await db.query<{ user_id: string; surface: Surface; rating: string; rating_deviation: string }>(
@@ -92,10 +96,17 @@ export async function recomputeUserRatings(db: Queryable, userId: string): Promi
       result: m.result,
       gamesWon: Number(m.games_won),
       gamesLost: Number(m.games_lost),
-      opponent: (m.opponent_id ? oppMap.get(`${m.opponent_id}|${surface}`) : null) ?? {
-        mu: DEFAULT_RATING,
-        rd: DEFAULT_RD,
-      },
+      opponent: (() => {
+        const ids = m.match_format === 'doubles' ? [m.opponent_id, m.opponent2_id] : [m.opponent_id];
+        const ratings = ids.map((id) => (id ? oppMap.get(`${id}|${surface}`) : null) ?? {
+          mu: DEFAULT_RATING,
+          rd: DEFAULT_RD,
+        });
+        return {
+          mu: ratings.reduce((sum, r) => sum + r.mu, 0) / ratings.length,
+          rd: ratings.reduce((sum, r) => sum + r.rd, 0) / ratings.length,
+        };
+      })(),
     })));
     const ratingVal = Math.round(replay.posterior.mu);
     const rdVal = Math.round(replay.posterior.rd);

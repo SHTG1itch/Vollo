@@ -41,6 +41,10 @@ const storageShapeMigration = readFileSync(
   new URL('../../supabase/migrations/20260710075738_038_storage_object_shape.sql', import.meta.url),
   'utf8',
 );
+const doublesMigration = readFileSync(
+  new URL('../../supabase/migrations/20260820200000_046_doubles_matches.sql', import.meta.url),
+  'utf8',
+);
 
 function section(source, start, end) {
   const startAt = source.indexOf(start);
@@ -56,8 +60,9 @@ test('private profile shells mask all activity and social totals', () => {
   assert.match(profile, /stats: restricted\s*\? \{ match_count: 0, follower_count: 0, following_count: 0, territory_count: 0 \}/);
   assert.match(profile, /mutuallyVisibleCondition\('\$2', 'f\.follower_id'\)/);
   assert.match(profile, /mutuallyVisibleCondition\('\$2', 'f\.following_id'\)/);
-  assert.match(api, /NOT \(SELECT ou\.is_private FROM users ou WHERE ou\.id = mf\.opponent_id\)/);
-  assert.match(api, /opponentAccess\.blocked \|\| opponentAccess\.restricted/);
+  assert.match(api, /MATCH_PARTICIPANT_COLS\.slice\(1\)\.flatMap/);
+  assert.match(api, /SELECT pu\.is_private FROM users pu WHERE pu\.id = mf\.\$\{col\}/);
+  assert.match(api, /for \(const participantId of \[match\.partner_id, match\.opponent_id, match\.opponent2_id\]\)/);
 });
 
 test('blocked social actors disappear from comment, kudos, and club surfaces', () => {
@@ -138,17 +143,18 @@ test('follow, request, block, and unblock mutations serialize the user pair', ()
 test('match tags and challenge proposals serialize block and spam-cap checks', () => {
   const createMatch = section(api, "app.post('/api/matches'", "app.get('/api/matches/pending'");
   const matchTransaction = createMatch.indexOf('matchId = await withTransaction');
-  assert.ok(createMatch.indexOf('await lockSocialPair(client, userId, body.opponent_id)', matchTransaction) > matchTransaction);
-  assert.ok(createMatch.indexOf('socialPairIsBlocked(client, userId, body.opponent_id)', matchTransaction) > matchTransaction);
+  assert.ok(createMatch.indexOf('for (const participantId of taggedIds)', matchTransaction) > matchTransaction);
+  assert.ok(createMatch.indexOf('socialPairIsBlocked(client, userId, participantId)', matchTransaction) > matchTransaction);
   assert.ok(createMatch.indexOf("verification_status = 'pending'", matchTransaction) > matchTransaction);
 
   const schedule = section(api, "app.post('/api/scheduled-matches'", "app.patch('/api/scheduled-matches/:id'");
   const scheduleTransaction = schedule.indexOf('scheduledId = await withTransaction');
   assert.ok(scheduleTransaction >= 0);
-  assert.ok(schedule.indexOf('await lockSocialPair(client, userId, b.opponent_id)', scheduleTransaction) > scheduleTransaction);
-  assert.ok(schedule.indexOf('socialPairIsBlocked(client, userId, b.opponent_id)', scheduleTransaction) > scheduleTransaction);
+  assert.ok(schedule.indexOf('for (const participantId of taggedIds)', scheduleTransaction) > scheduleTransaction);
+  assert.ok(schedule.indexOf('socialPairIsBlocked(client, userId, participantId)', scheduleTransaction) > scheduleTransaction);
   assert.ok(schedule.indexOf("status = 'proposed'", scheduleTransaction) > scheduleTransaction);
-  assert.match(api, /scheduled_matches[\s\S]*mutuallyVisibleCondition\([\s\S]*CASE WHEN s\.creator_id = \$1/);
+  assert.match(api, /\$1 IN \(s\.creator_id, s\.partner_id, s\.opponent_id, s\.opponent2_id\)/);
+  assert.match(api, /blocked_id = ANY \(ARRAY\[s\.creator_id, s\.partner_id, s\.opponent_id, s\.opponent2_id\]\)/);
 });
 
 test('database triggers close cross-table races and repair cascaded club exits', () => {
@@ -170,6 +176,8 @@ test('database triggers close cross-table races and repair cascaded club exits',
   assert.match(migration, /CREATE TRIGGER trg_blocks_sever_relationships[\s\S]*sever_relationships_after_block/);
   assert.match(migration, /UPDATE public\.matches[\s\S]*verification_status = 'rejected'/);
   assert.match(migration, /UPDATE public\.scheduled_matches[\s\S]*status = 'cancelled', match_id = NULL/);
+  assert.match(doublesMigration, /UPDATE public\.matches[\s\S]*ARRAY\[user_id, partner_id, opponent_id, opponent2_id\]/);
+  assert.match(doublesMigration, /UPDATE public\.scheduled_matches[\s\S]*ARRAY\[creator_id, partner_id, opponent_id, opponent2_id\]/);
   assert.match(migration, /CREATE TRIGGER trg_users_accept_requests_when_public[\s\S]*accept_requests_for_public_profile/);
   assert.match(migration, /INSERT INTO public\.follows[\s\S]*DELETE FROM public\.follow_requests WHERE target_id = NEW\.id/);
   assert.match(migration, /CREATE TRIGGER trg_club_members_repair_after_delete[\s\S]*repair_club_after_member_delete/);

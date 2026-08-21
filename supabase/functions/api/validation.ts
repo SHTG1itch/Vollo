@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { isGoogleAvatarUrl } from './mediaOwnership.ts';
 
 export const surfaceSchema = z.enum(['hard', 'clay', 'grass', 'indoor']);
+export const matchFormatSchema = z.enum(['singles', 'doubles']);
 
 // Media URLs must point at our own Storage (or a Google-hosted avatar carried
 // over from OAuth sign-up, which EditProfile re-sends verbatim on save) —
@@ -72,8 +73,13 @@ const PLAYED_AT_SKEW_MS = 5 * 60_000;
 
 export const createMatchSchema = z
   .object({
+    match_format: matchFormatSchema.default('singles'),
+    partner_id: z.string().uuid().optional(),
+    partner_name: z.string().trim().max(60).optional(),
     opponent_id: z.string().uuid().optional(),
     opponent_name: z.string().trim().max(60).optional(),
+    opponent2_id: z.string().uuid().optional(),
+    opponent2_name: z.string().trim().max(60).optional(),
     court_id: z.string().uuid().optional(),
     // When this match fulfils a scheduled proposal, link it so the result shows
     // on both players' scheduled-match cards.
@@ -106,6 +112,31 @@ export const createMatchSchema = z
   .refine((b) => !(b.opponent_id && b.opponent_name), {
     message: 'Provide either opponent_id or opponent_name, not both',
     path: ['opponent_name'],
+  })
+  .superRefine((b, ctx) => {
+    const extraSlots = [
+      ['partner', b.partner_id, b.partner_name],
+      ['second opponent', b.opponent2_id, b.opponent2_name],
+    ] as const;
+    for (const [label, id, name] of extraSlots) {
+      if (id && name) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Provide either a registered ${label} or a name, not both` });
+      }
+    }
+    if (b.match_format === 'singles' && extraSlots.some(([, id, name]) => id || name)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Singles matches cannot include a partner or second opponent', path: ['match_format'] });
+    }
+    if (b.match_format === 'doubles') {
+      if (!(b.partner_id || b.partner_name)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Doubles matches require your partner', path: ['partner_name'] });
+      }
+      if (!(b.opponent_id || b.opponent_name)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Doubles matches require the first opponent', path: ['opponent_name'] });
+      }
+      if (!(b.opponent2_id || b.opponent2_name)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Doubles matches require the second opponent', path: ['opponent2_name'] });
+      }
+    }
   })
   // Reject internally-impossible stat lines (a subset can't exceed its total)
   // rather than storing numbers that skew analytics.
@@ -146,8 +177,13 @@ const SCHEDULE_MAX_AHEAD_MS = 365 * 86_400_000; // a year out is plenty
 export const createScheduledMatchSchema = z
   .object({
     client_key: z.string().uuid().optional(),
+    match_format: matchFormatSchema.default('singles'),
+    partner_id: z.string().uuid().optional(),
+    partner_name: z.string().trim().max(60).optional(),
     opponent_id: z.string().uuid().optional(),
     opponent_name: z.string().trim().max(60).optional(),
+    opponent2_id: z.string().uuid().optional(),
+    opponent2_name: z.string().trim().max(60).optional(),
     court_id: z.string().uuid().optional(),
     surface: surfaceSchema.optional(),
     scheduled_at: z
@@ -171,6 +207,28 @@ export const createScheduledMatchSchema = z
   .refine((b) => !(b.opponent_id && b.opponent_name), {
     message: 'Provide either opponent_id or opponent_name, not both',
     path: ['opponent_name'],
+  })
+  .superRefine((b, ctx) => {
+    const extraSlots = [
+      ['partner', b.partner_id, b.partner_name],
+      ['second opponent', b.opponent2_id, b.opponent2_name],
+    ] as const;
+    for (const [label, id, name] of extraSlots) {
+      if (id && name) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Provide either a registered ${label} or a name, not both` });
+      }
+    }
+    if (b.match_format === 'singles' && extraSlots.some(([, id, name]) => id || name)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Singles matches cannot include a partner or second opponent', path: ['match_format'] });
+    }
+    if (b.match_format === 'doubles') {
+      if (!(b.partner_id || b.partner_name)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Doubles matches require your partner', path: ['partner_name'] });
+      }
+      if (!(b.opponent2_id || b.opponent2_name)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Doubles matches require the second opponent', path: ['opponent2_name'] });
+      }
+    }
   });
 
 export const updateScheduledMatchSchema = z.object({
