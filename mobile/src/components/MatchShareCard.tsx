@@ -13,7 +13,7 @@ import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 import { TennisBall, VolloWordmark } from './VolloLogo';
 import { colors, fonts, surfaceLabel } from '../theme';
 import type { MatchCard } from '../types';
-import { formatScoreLine } from '../utils/format';
+import { formatScoreLine, matchOpponentLabel, matchPartnerLabel } from '../utils/format';
 
 /** Aspect ratio of an Instagram/Snapchat story frame. */
 export const SHARE_ASPECT = 16 / 9;
@@ -72,7 +72,8 @@ export function MatchShareCard({
   const uid = useId().replace(/:/g, '');
   const height = Math.round(width * SHARE_ASPECT);
   const win = match.result === 'win';
-  const opponent = match.opponent_display_name ?? match.opponent_name ?? null;
+  const opponent = matchOpponentLabel(match);
+  const partner = matchPartnerLabel(match);
   // 'photo' silently falls back to the court gradient when there's no photo.
   const usePhoto = variant === 'photo' && !!match.photo_url;
   const sticker = variant === 'sticker';
@@ -103,7 +104,7 @@ export function MatchShareCard({
 
   const headline =
     match.title?.trim() ||
-    (opponent ? `${win ? 'Win' : 'Loss'} vs ${opponent}` : win ? 'Match win' : 'Match');
+    `${win ? 'Win' : 'Loss'}${partner ? ` with ${partner}` : ''} vs ${opponent}`;
 
   // Header (brand + result) and content (the stats) are composed differently per
   // variant — bottom-anchored in the full-bleed card, stacked in the sticker.
@@ -140,9 +141,9 @@ export function MatchShareCard({
         <Text allowFontScaling={false} style={[styles.title, { fontSize: s.title, fontFamily: fonts.display }, shadow]} numberOfLines={2}>
           {headline}
         </Text>
-        {opponent && match.title ? (
+        {match.title ? (
           <Text allowFontScaling={false} style={[styles.vs, { fontSize: s.vs, fontFamily: fonts.medium }, shadow]} numberOfLines={1}>
-            vs {opponent}
+            {partner ? `with ${partner} · ` : ''}vs {opponent}
           </Text>
         ) : null}
       </View>

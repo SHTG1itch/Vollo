@@ -149,6 +149,9 @@ with `EXPO_PUBLIC_API_URL` to target a different deployment.
 ### Match scoring
 `score_array` like `[[6,4],[2,6],[7,6]]` is analyzed into sets/games won-lost and a
 result. A deciding match-tiebreak (e.g. `[10,8]`) counts as one game-equivalent.
+The same team score model covers both formats: singles is 1 vs 1; doubles stores
+the logger plus a partner against two opponents. Existing and omitted-format rows
+remain singles.
 
 ```
 MatchScore = (gamesWon − gamesLost) × StreakModifier
@@ -161,13 +164,24 @@ windows with ≥1 match; the modifier scales up `+0.1` per maintained week, capp
 window lapses without attempting to process the entire user base in one function.
 
 ### Match verification (competitive integrity)
-A match logged against a **registered Vollo player** starts `pending` and counts for
-**nothing** — not Elo, streak, court leaderboard or territory — until that opponent
-**confirms** it (they get a push to Confirm/Dispute). A disputed match is `rejected`
-and never counts; a match against an off-app opponent is `auto` and counts immediately.
+A match logged against a **registered Vollo opponent** starts `pending` and counts for
+**nothing** — not rating, streak, court leaderboard or territory — until an opposing
+player **confirms** it (registered opponents get a push to Confirm/Dispute). In doubles,
+either opposing player can resolve the request; the first response wins atomically.
+A disputed match is `rejected` and never counts; a match whose opposing team is entirely
+off-app is `auto` and counts immediately. A registered partner does not verify their own
+team's result.
 The court leaderboard view, streak, analytics and achievements all read only
 `auto`/`verified` matches, and the confirm transition is status-guarded so a double-tap
-can't apply Elo twice.
+can't apply effects twice. Doubles ratings compare the logger against the opposing
+team's average current rating; singles keeps the original one-opponent calculation.
+
+### Singles and doubles scheduling
+Scheduled matches use the same format and team slots as logged results. Every registered
+participant can see or cancel the schedule, either registered opposing player can accept
+or decline it, and any registered participant can log the result from their own side.
+When an opponent logs, the app rotates the scheduled teams automatically so “your games
+first” and partner/opponent labels remain correct.
 
 ### Court leaderboards
 Per court, over a trailing **30-day window**, players are ranked by `Σ MatchScore`
@@ -277,10 +291,10 @@ All routes live under `https://<project>.supabase.co/functions/v1/api`.
 | Method & path | Purpose |
 |---|---|
 | `POST /api/auth/login` · `GET /api/auth/username-available?username=` · `GET /api/auth/me` | Auth — sign-up is client-side via **Supabase Auth**; sign-in is proxied server-side (DB-backed brute-force throttle) so a username resolves to a session without exposing email. **Google / Apple sign-in** use the native ID-token flow client-side — see [`supabase/OAUTH_SETUP.md`](supabase/OAUTH_SETUP.md) |
-| `GET /api/scheduled-matches` · `POST …` · `PATCH /:id` | Propose/accept/decline/cancel matches & **challenges** (`is_challenge`); a logged match links its result back |
+| `GET /api/scheduled-matches` · `POST …` · `PATCH /:id` | Propose/accept/decline/cancel singles or doubles matches & **challenges** (`is_challenge`); a logged match links its result back |
 | `GET /api/feed?scope=global\|following&before=` | Paginated match cards (keyset cursor) |
-| `POST /api/matches` | Log a match (+ optional stat matrix); tagging a Vollo player makes it **pending verification** |
-| `GET /api/matches/pending` · `POST /api/matches/:id/verify` | Matches awaiting my confirmation; opponent confirms (counts) or rejects (disputed) |
+| `POST /api/matches` | Log singles or doubles (+ optional stat matrix); tagging either opposing Vollo player makes it **pending verification** |
+| `GET /api/matches/pending` · `POST /api/matches/:id/verify` | Matches awaiting my confirmation; either tagged opposing player confirms (counts) or rejects (disputed) |
 | `POST /api/matches/:id/kudos` · `DELETE …` | Kudos (idempotent) |
 | `GET /api/matches/:id/comments` · `POST …` | Comments (composite keyset cursor) |
 | `GET /api/courts?lat=&lng=&radius_km=` | Nearby courts (PostGIS `ST_DWithin`) |

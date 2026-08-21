@@ -16,7 +16,7 @@ import { showToast } from '../components/Toast';
 import { tapMedium } from '../lib/haptics';
 import { colors, font, fonts, radius, spacing } from '../theme';
 import type { MatchCard, MatchStats } from '../types';
-import { formatScoreLine, timeAgo } from '../utils/format';
+import { formatScoreLine, matchOpponentLabel, matchPartnerLabel, timeAgo } from '../utils/format';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'MatchDetail'>;
 type Comment = CommentItem;
@@ -210,9 +210,14 @@ export function MatchDetailScreen({ route, navigation }: Props) {
   if (!match) return <Muted style={{ padding: spacing.xl }}>Match not found.</Muted>;
 
   const win = match.result === 'win';
-  const opponent = match.opponent_display_name ?? match.opponent_name ?? 'an unrecorded opponent';
+  const opponent = matchOpponentLabel(match);
+  const partner = matchPartnerLabel(match);
+  const opponent1 = match.opponent_display_name ?? match.opponent_name ?? 'an unrecorded opponent';
+  const opponent2 = match.match_format === 'doubles'
+    ? match.opponent2_display_name ?? match.opponent2_name
+    : null;
   const isOwner = match.user_id === user?.id;
-  const isOpponent = !!match.opponent_id && match.opponent_id === user?.id;
+  const isOpponent = match.opponent_id === user?.id || match.opponent2_id === user?.id;
   const pending = match.verification_status === 'pending';
   const rejected = match.verification_status === 'rejected';
 
@@ -246,21 +251,23 @@ export function MatchDetailScreen({ route, navigation }: Props) {
             <Text style={styles.score}>{formatScoreLine(match.score_array)}</Text>
             <Text style={styles.setsTag}>Sets {match.sets_won}–{match.sets_lost}</Text>
           </View>
-          {match.opponent_username ? (
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Text style={styles.vs}>vs </Text>
-              <Pressable
-                onPress={() => goToUser(match.opponent_username)}
-                accessibilityRole="button"
-                accessibilityLabel={`View ${opponent}'s profile`}
-                hitSlop={8}
-              >
-                <Text style={styles.vsLink}>{opponent}</Text>
-              </Pressable>
-            </View>
-          ) : (
-            <Muted>vs {opponent}</Muted>
-          )}
+          <View style={styles.teams}>
+            {partner ? (
+              <>
+                <Text style={styles.vs}>with </Text>
+                <MatchPlayerLink name={partner} username={match.partner_username} onPress={goToUser} />
+                <Text style={styles.vs}> · </Text>
+              </>
+            ) : null}
+            <Text style={styles.vs}>vs </Text>
+            <MatchPlayerLink name={opponent1} username={match.opponent_username} onPress={goToUser} />
+            {opponent2 ? (
+              <>
+                <Text style={styles.vs}> & </Text>
+                <MatchPlayerLink name={opponent2} username={match.opponent2_username} onPress={goToUser} />
+              </>
+            ) : null}
+          </View>
 
           <View style={styles.metaRow}>
             {match.court_name ? (
@@ -392,6 +399,27 @@ export function MatchDetailScreen({ route, navigation }: Props) {
   );
 }
 
+function MatchPlayerLink({
+  name,
+  username,
+  onPress,
+}: {
+  name: string;
+  username: string | null;
+  onPress: (username: string) => void;
+}) {
+  return username ? (
+    <Pressable
+      onPress={() => onPress(username)}
+      accessibilityRole="button"
+      accessibilityLabel={`View ${name}'s profile`}
+      hitSlop={8}
+    >
+      <Text style={styles.vsLink}>{name}</Text>
+    </Pressable>
+  ) : <Text style={styles.vs}>{name}</Text>;
+}
+
 function StatsCard({ stats }: { stats: MatchStats }) {
   const pct = (a: number, b: number) => (b > 0 ? (a / b) * 100 : 0);
   return (
@@ -434,6 +462,7 @@ const styles = StyleSheet.create({
   setsTag: { color: colors.textFaint, fontSize: font.small, fontFamily: fonts.bold },
   vs: { color: colors.textDim, fontSize: font.body },
   vsLink: { color: colors.primary, fontFamily: fonts.bold },
+  teams: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' },
   metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, marginTop: spacing.xs },
   meta: { color: colors.textDim, fontSize: font.small },
   metaLink: { color: colors.primary, fontFamily: fonts.bold },

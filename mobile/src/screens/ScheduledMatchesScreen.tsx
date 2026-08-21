@@ -10,6 +10,8 @@ import { SurfaceBadge } from '../components/SurfaceBadge';
 import { colors, font, fonts, radius, spacing } from '../theme';
 import type { ScheduledMatchCard } from '../types';
 import { formatSchedule, formatScoreLine } from '../utils/format';
+import { scheduledMatchLogPrefill } from '../utils/logMatchState';
+import { useAuth } from '../store/auth';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -23,18 +25,25 @@ const STATUS_META: Record<ScheduledMatchCard['status'], { label: string; color: 
 
 /** The player on the other side of a scheduled match, from the viewer's seat. */
 function otherSide(s: ScheduledMatchCard): { id: string | null; name: string; username: string | null } {
+  const partner = s.partner_display_name ?? s.partner_name;
+  const opponent2 = s.opponent2_display_name ?? s.opponent2_name;
   if (s.viewer_role === 'creator') {
     return {
       id: s.opponent_id,
-      name: s.opponent_display_name ?? s.opponent_name ?? 'Opponent',
+      name: [s.opponent_display_name ?? s.opponent_name ?? 'Opponent', opponent2].filter(Boolean).join(' & '),
       username: s.opponent_username,
     };
   }
-  return { id: s.creator_id, name: s.creator_display_name, username: s.creator_username };
+  return {
+    id: s.creator_id,
+    name: [s.creator_display_name, partner].filter(Boolean).join(' & '),
+    username: s.creator_username,
+  };
 }
 
 export function ScheduledMatchesScreen() {
   const navigation = useNavigation<Nav>();
+  const user = useAuth((state) => state.user);
   const [items, setItems] = useState<ScheduledMatchCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -86,15 +95,14 @@ export function ScheduledMatchesScreen() {
   };
 
   const logResult = (s: ScheduledMatchCard) => {
-    const other = otherSide(s);
+    const prefill = user ? scheduledMatchLogPrefill(s, user.id) : null;
+    if (!prefill) {
+      showToast('Could not identify your team for this scheduled match.', 'error');
+      return;
+    }
     navigation.navigate('Tabs', {
       screen: 'Log',
-      params: {
-        ...(other.id ? { prefillOpponentId: other.id } : { prefillOpponentName: other.name }),
-        ...(s.court_id ? { prefillCourtId: s.court_id } : {}),
-        ...(s.surface ? { prefillSurface: s.surface } : {}),
-        scheduledMatchId: s.id,
-      },
+      params: prefill,
     });
   };
 
@@ -158,6 +166,7 @@ export function ScheduledMatchesScreen() {
                 <Text style={styles.when}>{formatSchedule(s.scheduled_at)}</Text>
                 <View style={styles.metaRow}>
                   {s.is_challenge ? <Text style={styles.challengeTag}>CHALLENGE</Text> : null}
+                  {s.match_format === 'doubles' ? <Text style={styles.doublesTag}>DOUBLES</Text> : null}
                   {s.surface ? <SurfaceBadge surface={s.surface} small /> : null}
                   {s.court_name ? <Text style={styles.court}>📍 {s.court_name}</Text> : null}
                 </View>
@@ -221,6 +230,7 @@ const styles = StyleSheet.create({
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: 4 },
   court: { color: colors.textDim, fontSize: font.tiny },
   challengeTag: { color: colors.loss, fontSize: font.tiny, fontFamily: fonts.bold, letterSpacing: 0.5 },
+  doublesTag: { color: colors.primary, fontSize: font.tiny, fontFamily: fonts.bold, letterSpacing: 0.5 },
   statusPill: { borderWidth: 1, borderRadius: radius.pill, paddingHorizontal: spacing.sm, paddingVertical: 3 },
   statusText: { fontSize: font.tiny, fontFamily: fonts.bold },
   note: { color: colors.textDim, fontSize: font.small, fontStyle: 'italic' },

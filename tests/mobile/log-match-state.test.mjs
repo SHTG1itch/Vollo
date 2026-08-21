@@ -8,6 +8,7 @@ import {
   logMatchPrefillKey,
   matchStatsValidationError,
   PhotoUploadGuard,
+  scheduledMatchLogPrefill,
 } from '../../mobile/src/utils/logMatchState.ts';
 
 test('free-text opponent prefills clear a previously tagged player id', () => {
@@ -29,6 +30,24 @@ test('registered-player prefills retain the selected account identity', () => {
     { opponentId: 'new-player', opponentName: 'New Player' },
   );
   assert.equal(logMatchPrefillKey({ scheduledMatchId: 'schedule-1' }), 'schedule-1');
+});
+
+test('doubles schedule prefills rotate teams for the participant logging', () => {
+  const schedule = {
+    id: 'schedule', match_format: 'doubles', creator_id: 'creator', creator_display_name: 'Creator',
+    partner_id: 'partner', partner_display_name: 'Partner', partner_name: null,
+    opponent_id: 'opponent', opponent_display_name: 'Opponent', opponent_name: null,
+    opponent2_id: 'opponent2', opponent2_display_name: 'Opponent Two', opponent2_name: null,
+    court_id: 'court', surface: 'clay',
+  };
+
+  assert.deepEqual(scheduledMatchLogPrefill(schedule, 'opponent2'), {
+    scheduledMatchId: 'schedule', prefillMatchFormat: 'doubles',
+    prefillPartnerId: 'opponent', prefillPartnerName: 'Opponent',
+    prefillOpponentId: 'creator', prefillOpponentName: 'Creator',
+    prefillOpponent2Id: 'partner', prefillOpponent2Name: 'Partner',
+    prefillCourtId: 'court', prefillSurface: 'clay',
+  });
 });
 
 test('a reset invalidates a late photo upload without affecting the next upload', () => {

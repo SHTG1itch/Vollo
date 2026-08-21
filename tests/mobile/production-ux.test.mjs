@@ -117,7 +117,7 @@ test('player search flexes the field container without collapsing its input', as
 test('challenge actions do not advertise an unavailable past slot', async () => {
   const source = await read('mobile/src/screens/ScheduleMatchScreen.tsx');
   assert.match(source, /availableHours\.length === 0\s*\? 'Choose another day'/);
-  assert.match(source, /disabled=\{!hasOpponent \|\| availableHours\.length === 0 \|\| inPast\}/);
+  assert.match(source, /disabled=\{!hasOpponent \|\| !teamsValid \|\| availableHours\.length === 0 \|\| inPast\}/);
   assert.match(source, /<Button label=\{actionLabel\}/);
 });
 
@@ -315,11 +315,11 @@ test('privacy relationship queues distinguish load failures from an empty queue'
 });
 
 test('match opponent lookup distinguishes search failure from no registered player', async () => {
-  const source = await read('mobile/src/screens/LogMatchScreen.tsx');
-  assert.match(source, /setOppSearchError\(true\)/);
-  assert.match(source, /Player search is unavailable\. Try again before logging if this opponent uses Vollo\./);
-  assert.match(source, /label="Retry player search"[\s\S]*onPress=\{\(\) => searchOpponents\(opponentName\)\}/);
-  assert.doesNotMatch(source, /if \(query\.length < 2 \|\| opponentId\)/);
+  const source = await read('mobile/src/components/PlayerPicker.tsx');
+  assert.match(source, /setSearchError\(true\)/);
+  assert.match(source, /Player search is unavailable\. Retry before continuing if this player uses Vollo\./);
+  assert.match(source, /label="Retry player search"[\s\S]*onPress=\{\(\) => search\(value\.name\)\}/);
+  assert.doesNotMatch(source, /if \(query\.length < 2 \|\| value\.id\)/);
 });
 
 test('route-prefilled courts are visible before selection and remain retryable', async () => {

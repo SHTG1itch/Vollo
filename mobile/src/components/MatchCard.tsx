@@ -2,7 +2,7 @@ import React from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font, fonts, radius, shadow, spacing } from '../theme';
 import type { MatchCard as MatchCardType } from '../types';
-import { formatCount, formatScoreLine, timeAgo } from '../utils/format';
+import { formatCount, formatScoreLine, matchOpponentLabel, matchPartnerLabel, timeAgo } from '../utils/format';
 import { Avatar } from './ui';
 import { KudosButton } from './KudosButton';
 import { SurfaceBadge } from './SurfaceBadge';
@@ -19,15 +19,15 @@ export function MatchCard({
   onPressAuthor?: () => void;
 }) {
   const win = match.result === 'win';
-  const opponent =
-    match.opponent_display_name ?? match.opponent_name ?? 'an unrecorded opponent';
+  const opponent = matchOpponentLabel(match);
+  const partner = matchPartnerLabel(match);
 
   return (
     <Pressable
       onPress={onPress}
       style={({ pressed }) => [styles.card, pressed && { opacity: 0.92 }]}
       accessibilityRole="button"
-      accessibilityLabel={`${win ? 'Win' : 'Loss'} against ${opponent}. ${formatScoreLine(match.score_array)}`}
+      accessibilityLabel={`${win ? 'Win' : 'Loss'}${partner ? ` with ${partner}` : ''} against ${opponent}. ${formatScoreLine(match.score_array)}`}
       accessibilityHint="Opens match details"
     >
       {/* Header */}
@@ -67,6 +67,7 @@ export function MatchCard({
       </View>
 
       <Text style={styles.vs}>
+        {partner ? <>with <Text style={styles.vsName}>{partner}</Text> · </> : null}
         vs <Text style={styles.vsName}>{opponent}</Text>
       </Text>
 

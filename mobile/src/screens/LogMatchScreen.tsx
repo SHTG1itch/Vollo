@@ -5,7 +5,7 @@ import * as Location from 'expo-location';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList, TabParamList } from '../navigation/types';
-import { api, ApiError, type CreateMatchPayload, type UserSearchResult } from '../api/client';
+import { api, ApiError, type CreateMatchPayload } from '../api/client';
 import { useFeed } from '../store/feed';
 import {
   pickMatchPhotoDraft,
@@ -17,12 +17,13 @@ import {
 } from '../lib/uploadImage';
 import { showToast } from '../components/Toast';
 import { tapLight } from '../lib/haptics';
-import { Avatar, Button, Card, Field, H2, Muted, SectionHeader } from '../components/ui';
+import { Button, Card, Field, H2, Muted, SectionHeader } from '../components/ui';
+import { PlayerPicker, type PlayerSelection } from '../components/PlayerPicker';
 import { ScoreInput } from '../components/ScoreInput';
 import { Stepper } from '../components/Stepper';
 import { SurfaceBadge } from '../components/SurfaceBadge';
 import { colors, font, fonts, radius, spacing, surfaceColors, surfaceColorsSoft } from '../theme';
-import type { Court, MatchStats, ScoreArray, Surface } from '../types';
+import type { Court, MatchFormat, MatchStats, ScoreArray, Surface } from '../types';
 import { analyzeLocal, scoreValidationError } from '../utils/format';
 import {
   applyOpponentPrefill,
@@ -59,6 +60,7 @@ export function LogMatchScreen() {
   const coords = useRef<{ lat: number; lng: number } | null>(null);
 
   const [surface, setSurface] = useState<Surface>('hard');
+  const [matchFormat, setMatchFormat] = useState<MatchFormat>('singles');
   const [surfaceTouched, setSurfaceTouched] = useState(false);
   const [courtId, setCourtId] = useState<string | null>(null);
   // Set when this log fulfils a scheduled match, so we link the result on submit.
@@ -66,10 +68,8 @@ export function LogMatchScreen() {
   const lastPrefillKey = useRef<string | null>(null);
   const [opponentName, setOpponentName] = useState('');
   const [opponentId, setOpponentId] = useState<string | null>(null);
-  const [oppResults, setOppResults] = useState<UserSearchResult[]>([]);
-  const [oppSearchError, setOppSearchError] = useState(false);
-  const oppToken = useRef(0);
-  const oppDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [partner, setPartner] = useState<PlayerSelection>({ id: null, name: '' });
+  const [opponent2, setOpponent2] = useState<PlayerSelection>({ id: null, name: '' });
   const [score, setScore] = useState<ScoreArray>([[6, 4]]);
   const [tiebreakFinal, setTiebreakFinal] = useState(false);
   const [daysAgo, setDaysAgo] = useState(0);
@@ -103,42 +103,11 @@ export function LogMatchScreen() {
   // Idempotency key for the in-flight/retried submission (see submit()).
   const clientKeyRef = useRef<string | null>(null);
 
-  // Debounced player search for tagging a registered opponent. Typing in the
-  // field clears any previously-picked id so a stale opponent_id can't be
-  // submitted with a different typed name.
-  const searchOpponents = (term: string) => {
-    if (oppDebounce.current) clearTimeout(oppDebounce.current);
-    // Bump the token synchronously on every keystroke so any already-in-flight
-    // request resolves stale and can't clobber the latest query's results.
-    const t = ++oppToken.current;
-    const query = term.trim();
-    setOppSearchError(false);
-    if (query.length < 2) {
-      setOppResults([]);
-      return;
-    }
-    oppDebounce.current = setTimeout(async () => {
-      try {
-        const { users } = await api.searchUsers(query, 6);
-        if (t === oppToken.current) {
-          setOppResults(users);
-          setOppSearchError(false);
-        }
-      } catch {
-        if (t === oppToken.current) {
-          setOppResults([]);
-          setOppSearchError(true);
-        }
-      }
-    }, 300);
-  };
-
   useEffect(() => {
     const uploadGuard = photoUploadGuard.current;
     mounted.current = true;
     return () => {
       mounted.current = false;
-      if (oppDebounce.current) clearTimeout(oppDebounce.current);
       courtLookupToken.current += 1;
       uploadGuard.invalidate();
       const staged = stagedPhoto.current;
@@ -247,8 +216,13 @@ export function LogMatchScreen() {
       const nextOpponent = applyOpponentPrefill(p, { opponentId, opponentName });
       setOpponentId(nextOpponent.opponentId);
       setOpponentName(nextOpponent.opponentName);
-      setOppResults([]);
-      setOppSearchError(false);
+    }
+    if (p.prefillMatchFormat) setMatchFormat(p.prefillMatchFormat);
+    if (p.prefillPartnerId || p.prefillPartnerName) {
+      setPartner({ id: p.prefillPartnerId ?? null, name: p.prefillPartnerName ?? '' });
+    }
+    if (p.prefillOpponent2Id || p.prefillOpponent2Name) {
+      setOpponent2({ id: p.prefillOpponent2Id ?? null, name: p.prefillOpponent2Name ?? '' });
     }
     if (p.prefillSurface) {
       setSurface(p.prefillSurface);
@@ -272,17 +246,17 @@ export function LogMatchScreen() {
     if (lastPrefillKey.current === key) return;
     lastPrefillKey.current = key;
 
-    // A navigation prefill replaces the opponent field. Invalidate any search
-    // that was started for the previous text before its response can arrive.
-    if (oppDebounce.current) clearTimeout(oppDebounce.current);
-    oppToken.current += 1;
-
     if (p?.prefillCourtId) {
       void loadCourtIntoPicker(p.prefillCourtId);
     }
     (navigation.setParams as (params: Partial<Record<string, undefined>>) => void)({
       prefillOpponentId: undefined,
       prefillOpponentName: undefined,
+      prefillMatchFormat: undefined,
+      prefillPartnerId: undefined,
+      prefillPartnerName: undefined,
+      prefillOpponent2Id: undefined,
+      prefillOpponent2Name: undefined,
       prefillCourtId: undefined,
       prefillSurface: undefined,
       scheduledMatchId: undefined,
@@ -304,6 +278,8 @@ export function LogMatchScreen() {
   const setStat = (k: keyof MatchStats, v: number) => setStats((s) => ({ ...s, [k]: v }));
   const statsTouched = hasRecordedMatchStats(stats);
   const statsError = statsTouched ? matchStatsValidationError(stats) : null;
+  const doublesTeamsValid = matchFormat === 'singles'
+    || (partner.name.trim().length > 0 && opponentName.trim().length > 0 && opponent2.name.trim().length > 0);
 
   const onAddPhoto = async () => {
     const uploadToken = photoUploadGuard.current.begin();
@@ -350,6 +326,10 @@ export function LogMatchScreen() {
       showToast(scoreError ?? 'Enter a valid completed tennis score.', 'error');
       return;
     }
+    if (!doublesTeamsValid) {
+      showToast('Choose your partner and both opponents for doubles.', 'error');
+      return;
+    }
     if (statsError) {
       showToast(statsError, 'error');
       return;
@@ -379,6 +359,7 @@ export function LogMatchScreen() {
         stagedPhoto.current = uploaded;
       }
       const payload: CreateMatchPayload = {
+        match_format: matchFormat,
         surface,
         score_array: score,
         is_tiebreak: tiebreakFinal,
@@ -391,6 +372,16 @@ export function LogMatchScreen() {
           ? { opponent_id: opponentId }
           : opponentName.trim()
             ? { opponent_name: opponentName.trim() }
+            : {}),
+        ...(matchFormat === 'doubles' && partner.id
+          ? { partner_id: partner.id }
+          : matchFormat === 'doubles' && partner.name.trim()
+            ? { partner_name: partner.name.trim() }
+            : {}),
+        ...(matchFormat === 'doubles' && opponent2.id
+          ? { opponent2_id: opponent2.id }
+          : matchFormat === 'doubles' && opponent2.name.trim()
+            ? { opponent2_name: opponent2.name.trim() }
             : {}),
         ...(rpe ? { rpe_index: rpe } : {}),
         ...(duration > 0 ? { duration_minutes: duration } : {}),
@@ -420,8 +411,9 @@ export function LogMatchScreen() {
       setDaysAgo(0);
       setOpponentName('');
       setOpponentId(null);
-      setOppResults([]);
-      setOppSearchError(false);
+      setPartner({ id: null, name: '' });
+      setOpponent2({ id: null, name: '' });
+      setMatchFormat('singles');
       setScheduledMatchId(null);
       setRpe(null);
       setDuration(0);
@@ -485,6 +477,28 @@ export function LogMatchScreen() {
         </Text>
       </Card>
 
+      <Section title="Format">
+        <View style={styles.surfaceRow}>
+          {(['singles', 'doubles'] as MatchFormat[]).map((format) => (
+            <Pressable
+              key={format}
+              onPress={() => {
+                if (matchFormat !== format) tapLight();
+                setMatchFormat(format);
+              }}
+              style={[styles.formatChip, matchFormat === format && styles.formatChipActive]}
+              accessibilityRole="button"
+              accessibilityState={{ selected: matchFormat === format }}
+              accessibilityLabel={`${format} match`}
+            >
+              <Text style={[styles.formatText, matchFormat === format && styles.formatTextActive]}>
+                {format === 'singles' ? 'Singles · 1 vs 1' : 'Doubles · 2 vs 2'}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      </Section>
+
       {/* Surface */}
       <Section title="Surface">
         <View style={styles.surfaceRow}>
@@ -529,71 +543,40 @@ export function LogMatchScreen() {
         ) : null}
       </Section>
 
-      {/* Opponent */}
-      <Section title="Opponent">
-        {opponentId ? (
-          <View style={styles.oppChip}>
-            <Avatar name={opponentName} size={28} />
-            <Text style={styles.oppChipName} numberOfLines={1}>{opponentName}</Text>
-            <Pressable
-              onPress={() => {
-                setOpponentId(null);
-                setOpponentName('');
-                setOppSearchError(false);
-              }}
-              hitSlop={8}
-              accessibilityRole="button"
-              accessibilityLabel="Remove tagged opponent"
-            >
-              <Text style={styles.oppRemove}>✕</Text>
-            </Pressable>
-          </View>
-        ) : (
-          <>
-            <Field
-              value={opponentName}
-              onChangeText={(t) => {
-                setOpponentName(t);
-                setOpponentId(null);
-                searchOpponents(t);
-              }}
-              placeholder="Search a Vollo player, or type any name"
-              autoCapitalize="none"
-              autoCorrect={false}
-              maxLength={60}
-            />
-            {oppResults.map((u) => (
-              <Pressable
-                key={u.id}
-                onPress={() => {
-                  setOpponentId(u.id);
-                  setOpponentName(u.display_name);
-                  setOppResults([]);
-                  setOppSearchError(false);
-                }}
-                style={styles.oppResult}
-                accessibilityRole="button"
-                accessibilityLabel={`Select ${u.display_name}, @${u.username}`}
-              >
-                <Avatar name={u.display_name} uri={u.avatar_url} size={28} />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.oppResultName}>{u.display_name}</Text>
-                  <Text style={styles.oppResultHandle}>@{u.username}</Text>
-                </View>
-              </Pressable>
-            ))}
-            {oppSearchError ? (
-              <View style={styles.oppSearchError} accessibilityLiveRegion="assertive">
-                <Muted style={{ textAlign: 'left' }}>
-                  Player search is unavailable. Try again before logging if this opponent uses Vollo.
-                </Muted>
-                <Button label="Retry player search" variant="secondary" onPress={() => searchOpponents(opponentName)} />
-              </View>
-            ) : null}
-          </>
-        )}
-        {opponentId ? (
-          <Muted>⏳ {opponentName || 'They'}’ll need to verify this match before it counts toward your rating & territory.</Muted>
+      {matchFormat === 'doubles' ? (
+        <Section title="Your partner">
+          <PlayerPicker
+            value={partner}
+            onChange={setPartner}
+            placeholder="Search your partner, or type their name"
+            excludedIds={[opponentId, opponent2.id].filter((id): id is string => Boolean(id))}
+          />
+        </Section>
+      ) : null}
+
+      <Section title={matchFormat === 'doubles' ? 'Opponents' : 'Opponent'}>
+        <PlayerPicker
+          value={{ id: opponentId, name: opponentName }}
+          onChange={(selection) => {
+            setOpponentId(selection.id);
+            setOpponentName(selection.name);
+          }}
+          placeholder="Search a Vollo player, or type any name"
+          excludedIds={[partner.id, opponent2.id].filter((id): id is string => Boolean(id))}
+        />
+        {matchFormat === 'doubles' ? (
+          <PlayerPicker
+            value={opponent2}
+            onChange={setOpponent2}
+            placeholder="Search the second opponent, or type their name"
+            excludedIds={[partner.id, opponentId].filter((id): id is string => Boolean(id))}
+          />
+        ) : null}
+        {opponentId || opponent2.id ? (
+          <Muted>⏳ Either tagged opponent can verify this match so it counts toward your rating and territory.</Muted>
+        ) : null}
+        {matchFormat === 'doubles' && !doublesTeamsValid ? (
+          <Text style={styles.validationError}>Add your partner and both opponents.</Text>
         ) : null}
       </Section>
 
@@ -795,7 +778,7 @@ export function LogMatchScreen() {
         loading={submitting}
         disabled={
           courtLookupLoading || !canSubmitLogMatch({
-            scoreValid,
+            scoreValid: scoreValid && doublesTeamsValid,
             statsValid: statsError === null,
             submitting,
             photoUploadActive: uploadingPhoto,
@@ -859,6 +842,18 @@ const styles = StyleSheet.create({
   groupTitle: { color: colors.primary, fontSize: font.small, fontFamily: fonts.bold, textTransform: 'uppercase', letterSpacing: 0.5 },
   surfaceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   surfaceChip: { padding: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border },
+  formatChip: {
+    flex: 1,
+    minWidth: 130,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceAlt,
+  },
+  formatChipActive: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+  formatText: { color: colors.textDim, fontFamily: fonts.bold, fontSize: font.small, textAlign: 'center' },
+  formatTextActive: { color: colors.primary },
   rpeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   rpePill: {
     width: 38, height: 38, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center',
@@ -912,20 +907,6 @@ const styles = StyleSheet.create({
   checkboxOn: { backgroundColor: colors.primary, borderColor: colors.primary },
   checkboxMark: { color: colors.onPrimary, fontFamily: fonts.bold, fontSize: 13 },
   tbToggleText: { color: colors.textDim, fontSize: font.small, flexShrink: 1 },
-  oppChip: {
-    flexDirection: 'row', alignItems: 'center', gap: spacing.sm, alignSelf: 'flex-start',
-    backgroundColor: colors.primarySoft, borderRadius: radius.pill, paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.sm, maxWidth: '100%',
-  },
-  oppChipName: { color: colors.text, fontFamily: fonts.bold, fontSize: font.small, flexShrink: 1 },
-  oppRemove: { color: colors.textDim, fontFamily: fonts.bold, paddingHorizontal: spacing.xs },
-  oppResult: {
-    flexDirection: 'row', alignItems: 'center', gap: spacing.sm, backgroundColor: colors.surfaceAlt,
-    borderRadius: radius.md, padding: spacing.sm, borderWidth: 1, borderColor: colors.border,
-  },
-  oppResultName: { color: colors.text, fontFamily: fonts.bold, fontSize: font.small },
-  oppResultHandle: { color: colors.textFaint, fontSize: font.tiny },
-  oppSearchError: { gap: spacing.sm, alignItems: 'flex-start' },
   dayChip: {
     paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.md,
     backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border,

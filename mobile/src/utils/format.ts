@@ -1,4 +1,21 @@
-import type { ScoreArray } from '../types';
+import type { MatchCard, ScoreArray } from '../types';
+
+type MatchTeams = Pick<
+  MatchCard,
+  'match_format' | 'partner_display_name' | 'partner_name'
+    | 'opponent_display_name' | 'opponent_name' | 'opponent2_display_name' | 'opponent2_name'
+>;
+
+export function matchPartnerLabel(match: MatchTeams): string | null {
+  return match.match_format === 'doubles' ? match.partner_display_name ?? match.partner_name : null;
+}
+
+export function matchOpponentLabel(match: MatchTeams): string {
+  return [
+    match.opponent_display_name ?? match.opponent_name ?? 'an unrecorded opponent',
+    match.match_format === 'doubles' ? match.opponent2_display_name ?? match.opponent2_name : null,
+  ].filter(Boolean).join(' & ');
+}
 
 export function timeAgo(iso: string): string {
   const date = new Date(iso);

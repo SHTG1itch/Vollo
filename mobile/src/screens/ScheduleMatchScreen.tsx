@@ -6,10 +6,11 @@ import type { RootStackParamList } from '../navigation/types';
 import { api, ApiError } from '../api/client';
 import { Avatar, Button, Card, Field, Muted, SectionHeader } from '../components/ui';
 import { SurfaceBadge } from '../components/SurfaceBadge';
+import { PlayerPicker, type PlayerSelection } from '../components/PlayerPicker';
 import { showToast } from '../components/Toast';
 import { tapLight } from '../lib/haptics';
 import { colors, font, fonts, radius, spacing, surfaceColors, surfaceColorsSoft } from '../theme';
-import type { Surface } from '../types';
+import type { MatchFormat, Surface } from '../types';
 import { newClientKey } from '../utils/idempotency';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ScheduleMatch'>;
@@ -53,6 +54,9 @@ export function ScheduleMatchScreen({ navigation, route }: Props) {
   const isChallenge = !!presetOpponentId;
 
   const [opponentName, setOpponentName] = useState(presetOpponentName);
+  const [matchFormat, setMatchFormat] = useState<MatchFormat>('singles');
+  const [partner, setPartner] = useState<PlayerSelection>({ id: null, name: '' });
+  const [opponent2, setOpponent2] = useState<PlayerSelection>({ id: null, name: '' });
   const [dayOffset, setDayOffset] = useState(0);
   const [hour, setHour] = useState(18);
   const [surface, setSurface] = useState<Surface | null>(null);
@@ -84,6 +88,8 @@ export function ScheduleMatchScreen({ navigation, route }: Props) {
 
   const inPast = scheduledAt.getTime() < now;
   const hasOpponent = !!presetOpponentId || opponentName.trim().length > 0;
+  const teamsValid = matchFormat === 'singles'
+    || (partner.name.trim().length > 0 && opponent2.name.trim().length > 0);
   const actionLabel = availableHours.length === 0
     ? 'Choose another day'
     : `${isChallenge ? '⚔️ Send challenge' : 'Propose'} · ${dayLabel(dayOffset, base)} ${hourLabel(hour)}`;
@@ -92,6 +98,10 @@ export function ScheduleMatchScreen({ navigation, route }: Props) {
     if (saveActive.current || saving) return;
     if (!hasOpponent) {
       showToast('Choose who you want to play.', 'error');
+      return;
+    }
+    if (!teamsValid) {
+      showToast('Choose your partner and the second opponent for doubles.', 'error');
       return;
     }
     // Validate against a fresh clock — the render-time tick can be a minute stale.
@@ -106,7 +116,14 @@ export function ScheduleMatchScreen({ navigation, route }: Props) {
     try {
       await api.createScheduledMatch({
         client_key: requestKey,
+        match_format: matchFormat,
         ...(presetOpponentId ? { opponent_id: presetOpponentId } : { opponent_name: opponentName.trim() }),
+        ...(matchFormat === 'doubles' && partner.id
+          ? { partner_id: partner.id }
+          : matchFormat === 'doubles' ? { partner_name: partner.name.trim() } : {}),
+        ...(matchFormat === 'doubles' && opponent2.id
+          ? { opponent2_id: opponent2.id }
+          : matchFormat === 'doubles' ? { opponent2_name: opponent2.name.trim() } : {}),
         ...(surface ? { surface } : {}),
         scheduled_at: scheduledAt.toISOString(),
         ...(note.trim() ? { note: note.trim() } : {}),
@@ -160,6 +177,50 @@ export function ScheduleMatchScreen({ navigation, route }: Props) {
           />
         )}
       </Card>
+
+      <Card style={{ gap: spacing.sm }}>
+        <SectionHeader title="Format" />
+        <View style={styles.formatRow}>
+          {(['singles', 'doubles'] as MatchFormat[]).map((format) => (
+            <Pressable
+              key={format}
+              onPress={() => {
+                if (matchFormat !== format) tapLight();
+                setMatchFormat(format);
+              }}
+              style={[styles.formatChip, matchFormat === format && styles.chipActive]}
+              accessibilityRole="button"
+              accessibilityState={{ selected: matchFormat === format }}
+              accessibilityLabel={`${format} match`}
+            >
+              <Text style={[styles.chipText, matchFormat === format && styles.chipTextActive]}>
+                {format === 'singles' ? 'Singles · 1 vs 1' : 'Doubles · 2 vs 2'}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      </Card>
+
+      {matchFormat === 'doubles' ? (
+        <Card style={{ gap: spacing.sm }}>
+          <SectionHeader title="Doubles teams" />
+          <Text style={styles.slotLabel}>Your partner</Text>
+          <PlayerPicker
+            value={partner}
+            onChange={setPartner}
+            placeholder="Search your partner, or type their name"
+            excludedIds={[presetOpponentId, opponent2.id].filter((id): id is string => Boolean(id))}
+          />
+          <Text style={styles.slotLabel}>Second opponent</Text>
+          <PlayerPicker
+            value={opponent2}
+            onChange={setOpponent2}
+            placeholder="Search the second opponent, or type their name"
+            excludedIds={[presetOpponentId, partner.id].filter((id): id is string => Boolean(id))}
+          />
+          {!teamsValid ? <Muted>Add both players to continue.</Muted> : null}
+        </Card>
+      ) : null}
 
       {/* When */}
       <Card style={{ gap: spacing.md }}>
@@ -231,7 +292,7 @@ export function ScheduleMatchScreen({ navigation, route }: Props) {
         <Field value={note} onChangeText={setNote} placeholder="e.g. Best of 3, bring new balls" multiline maxLength={280} style={{ height: 70, paddingTop: spacing.sm }} />
       </Card>
 
-      <Button label={actionLabel} onPress={submit} loading={saving} disabled={!hasOpponent || availableHours.length === 0 || inPast} />
+      <Button label={actionLabel} onPress={submit} loading={saving} disabled={!hasOpponent || !teamsValid || availableHours.length === 0 || inPast} />
       <View style={{ height: spacing.xxl }} />
     </ScrollView>
     </KeyboardAvoidingView>
@@ -245,6 +306,17 @@ const styles = StyleSheet.create({
   oppName: { color: colors.text, fontFamily: fonts.bold, fontSize: font.body },
   oppHandle: { color: colors.textFaint, fontSize: font.small },
   chipRow: { gap: spacing.sm, paddingVertical: 2 },
+  formatRow: { flexDirection: 'row', gap: spacing.sm },
+  formatChip: {
+    flex: 1,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceAlt,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  slotLabel: { color: colors.textFaint, fontFamily: fonts.bold, fontSize: font.tiny, textTransform: 'uppercase' },
   chip: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.md, backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border },
   chipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   chipText: { color: colors.textDim, fontFamily: fonts.bold, fontSize: font.small },

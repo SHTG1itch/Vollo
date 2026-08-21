@@ -53,10 +53,10 @@ const PAGES: Page[] = [
     key: 'log',
     icon: 'plus-circle',
     title: 'Log every match',
-    body: 'Tap the Log tab after you play. Enter the score set by set, pick the court and surface, and add stats like aces or longest rally when you have them. Tag your opponent so the match links to their profile.',
+    body: 'Tap the Log tab after you play. Choose singles or doubles, enter the team score set by set, pick the court and surface, and add stats like aces or longest rally when you have them.',
     bullets: [
       { icon: 'locate', text: 'Pick the court you played at — that claims it for your map' },
-      { icon: 'users', text: 'Tag a Vollo opponent to link the head-to-head' },
+      { icon: 'users', text: 'Tag partners and opponents, or enter off-app names' },
       { icon: 'plus', text: 'Add photos and a title to tell the story' },
     ],
   },
@@ -64,7 +64,7 @@ const PAGES: Page[] = [
     key: 'rating',
     icon: 'shield',
     title: 'Ratings & verified wins',
-    body: 'Every logged match moves your Vollo rating — win against stronger players and it climbs faster. When you tag an opponent they can confirm the score, which marks the match verified and makes your rating count for more.',
+    body: 'Every counted match moves your Vollo rating — win against stronger players and it climbs faster. A tagged opponent confirms the score first; in doubles, either opposing player can verify it.',
     bullets: [
       { icon: 'shield', text: 'Verified matches carry a badge everyone can trust' },
       { icon: 'target', text: 'Your rating converges as you log more matches' },

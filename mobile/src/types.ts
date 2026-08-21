@@ -2,6 +2,7 @@
 
 export type Surface = 'hard' | 'clay' | 'grass' | 'indoor';
 export type MatchResult = 'win' | 'loss';
+export type MatchFormat = 'singles' | 'doubles';
 export type SetScore = [number, number];
 export type ScoreArray = SetScore[];
 
@@ -87,8 +88,13 @@ export interface MatchStats {
 export interface MatchCard {
   id: string;
   user_id: string;
+  match_format: MatchFormat;
+  partner_id: string | null;
+  partner_name: string | null;
   opponent_id: string | null;
   opponent_name: string | null;
+  opponent2_id: string | null;
+  opponent2_name: string | null;
   court_id: string | null;
   surface: Surface;
   /** Optional short headline for the match, shown on the feed card. */
@@ -120,6 +126,10 @@ export interface MatchCard {
   court_lng: number | null;
   opponent_username: string | null;
   opponent_display_name: string | null;
+  partner_username: string | null;
+  partner_display_name: string | null;
+  opponent2_username: string | null;
+  opponent2_display_name: string | null;
   kudos_count: number;
   comment_count: number;
   viewer_has_kudos?: boolean;
@@ -244,11 +254,22 @@ export interface ScheduledMatchCard {
   creator_username: string;
   creator_display_name: string;
   creator_avatar_url: string | null;
+  match_format: MatchFormat;
+  partner_id: string | null;
+  partner_username: string | null;
+  partner_display_name: string | null;
+  partner_avatar_url: string | null;
+  partner_name: string | null;
   opponent_id: string | null;
   opponent_username: string | null;
   opponent_display_name: string | null;
   opponent_avatar_url: string | null;
   opponent_name: string | null;
+  opponent2_id: string | null;
+  opponent2_username: string | null;
+  opponent2_display_name: string | null;
+  opponent2_avatar_url: string | null;
+  opponent2_name: string | null;
   court_id: string | null;
   court_name: string | null;
   surface: Surface | null;

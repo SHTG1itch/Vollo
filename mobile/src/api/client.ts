@@ -17,6 +17,7 @@ import type {
   HeadToHead,
   LeaderboardEntry,
   MatchCard,
+  MatchFormat,
   NotificationItem,
   PersonalRecords,
   ProfileAnalytics,
@@ -308,8 +309,13 @@ export interface UserSearchResult {
 }
 
 export interface CreateMatchPayload {
+  match_format?: MatchFormat;
+  partner_id?: string;
+  partner_name?: string;
   opponent_id?: string;
   opponent_name?: string;
+  opponent2_id?: string;
+  opponent2_name?: string;
   court_id?: string;
   scheduled_match_id?: string;
   surface: Surface;
@@ -338,8 +344,13 @@ export interface SessionTokens {
 
 export interface CreateScheduledMatchPayload {
   client_key?: string;
+  match_format?: MatchFormat;
+  partner_id?: string;
+  partner_name?: string;
   opponent_id?: string;
   opponent_name?: string;
+  opponent2_id?: string;
+  opponent2_name?: string;
   court_id?: string;
   surface?: Surface;
   scheduled_at: string;

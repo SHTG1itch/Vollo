@@ -14,6 +14,11 @@ export type TabParamList = {
         newCourtId?: string;
         prefillOpponentId?: string;
         prefillOpponentName?: string;
+        prefillMatchFormat?: 'singles' | 'doubles';
+        prefillPartnerId?: string;
+        prefillPartnerName?: string;
+        prefillOpponent2Id?: string;
+        prefillOpponent2Name?: string;
         prefillCourtId?: string;
         prefillSurface?: Surface;
         scheduledMatchId?: string;
