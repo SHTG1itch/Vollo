@@ -21,18 +21,34 @@ test('doubles data remains additive and singles stays the default', () => {
 });
 
 test('doubles creation requires three distinct player slots', () => {
-  assert.match(migration, /matches_doubles_slots_chk[\s\S]*num_nonnulls\(partner_id[\s\S]*num_nonnulls\(opponent2_id/);
   assert.match(migration, /scheduled_doubles_slots_chk[\s\S]*num_nonnulls\(partner_id[\s\S]*num_nonnulls\(opponent2_id/);
   assert.match(validation, /Doubles matches require your partner/);
   assert.match(validation, /Doubles matches require the first opponent/);
   assert.match(validation, /Doubles matches require the second opponent/);
   assert.match(api, /new Set\(\[userId, \.\.\.taggedIds\]\)\.size !== taggedIds\.length \+ 1/);
+  assert.match(validation, /playerNameSchema = z\.string\(\)\.trim\(\)\.min\(1\)\.max\(60\)/);
+});
+
+test('participant account deletion preserves match history and removes open schedules', () => {
+  assert.match(migration, /partner_id UUID REFERENCES public\.users\(id\) ON DELETE SET NULL/);
+  assert.match(migration, /opponent2_id UUID REFERENCES public\.users\(id\) ON DELETE SET NULL/);
+  assert.match(migration, /scheduled_matches[\s\S]*partner_id UUID REFERENCES public\.users\(id\) ON DELETE CASCADE/);
+  assert.match(migration, /scheduled_matches[\s\S]*opponent2_id UUID REFERENCES public\.users\(id\) ON DELETE CASCADE/);
+  assert.doesNotMatch(migration, /matches_doubles_slots_chk/);
 });
 
 test('either opposing doubles player can verify and receives the request', () => {
   assert.match(api, /\$1 IN \(mf\.opponent_id, mf\.opponent2_id\)/);
   assert.match(api, /locked\.opponent_id !== userId && locked\.opponent2_id !== userId/);
   assert.match(api, /for \(const verifierId of verifierIds\)/);
+});
+
+test('every registered participant can log a scheduled doubles result from their side', () => {
+  assert.match(api, /callerId === scheduled\.creator_id[\s\S]*expected = \{ partner, opponent, opponent2 \}/);
+  assert.match(api, /callerId === scheduled\.partner_id[\s\S]*partner: creator/);
+  assert.match(api, /callerId === scheduled\.opponent_id[\s\S]*partner: opponent2, opponent: creator, opponent2: partner/);
+  assert.match(api, /callerId === scheduled\.opponent2_id[\s\S]*partner: opponent, opponent: creator, opponent2: partner/);
+  assert.match(api, /scheduledPersonMatches\(body\.partner_id[\s\S]*scheduledPersonMatches\(body\.opponent2_id/);
 });
 
 test('doubles ratings use both opponents while singles keeps one', () => {

@@ -41,6 +41,7 @@ export const loginSchema = z.object({
 
 const setSchema = z.tuple([z.number().int().min(0).max(99), z.number().int().min(0).max(99)]);
 export const scoreArraySchema = z.array(setSchema).min(1).max(5);
+const playerNameSchema = z.string().trim().min(1).max(60);
 
 // A single match can't realistically exceed a few hundred of any one event;
 // cap each counter so bad input can't store absurd values that skew analytics.
@@ -75,11 +76,11 @@ export const createMatchSchema = z
   .object({
     match_format: matchFormatSchema.default('singles'),
     partner_id: z.string().uuid().optional(),
-    partner_name: z.string().trim().max(60).optional(),
+    partner_name: playerNameSchema.optional(),
     opponent_id: z.string().uuid().optional(),
-    opponent_name: z.string().trim().max(60).optional(),
+    opponent_name: playerNameSchema.optional(),
     opponent2_id: z.string().uuid().optional(),
-    opponent2_name: z.string().trim().max(60).optional(),
+    opponent2_name: playerNameSchema.optional(),
     court_id: z.string().uuid().optional(),
     // When this match fulfils a scheduled proposal, link it so the result shows
     // on both players' scheduled-match cards.
@@ -179,11 +180,11 @@ export const createScheduledMatchSchema = z
     client_key: z.string().uuid().optional(),
     match_format: matchFormatSchema.default('singles'),
     partner_id: z.string().uuid().optional(),
-    partner_name: z.string().trim().max(60).optional(),
+    partner_name: playerNameSchema.optional(),
     opponent_id: z.string().uuid().optional(),
-    opponent_name: z.string().trim().max(60).optional(),
+    opponent_name: playerNameSchema.optional(),
     opponent2_id: z.string().uuid().optional(),
-    opponent2_name: z.string().trim().max(60).optional(),
+    opponent2_name: playerNameSchema.optional(),
     court_id: z.string().uuid().optional(),
     surface: surfaceSchema.optional(),
     scheduled_at: z

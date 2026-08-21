@@ -48,8 +48,8 @@ stream). Each match feeds three systems:
    **concave-hull territory** whose vertices sit on the courts you actually hold.
    Lose your grip and the polygon contracts, mutates, or shatters — with push
    notifications when a rival cuts off your district or starts a **Turf War**.
-   Matches against another Vollo player only count once that opponent **verifies**
-   them, so domination and Elo stay honest.
+   Matches against a Vollo opponent only count once a registered opposing player
+   **verifies** them, so domination and Elo stay honest.
 
 ---
 
@@ -243,8 +243,8 @@ verified-match gate keeps that honest).
 - **Drop-a-pin court adding** — can't find a court? Pan the map so the 🎾 sits on
   it, name it, pick a surface, set how many courts the venue has, and it's saved
   as a shared court everyone sees (reverse-geocoding fills the city best-effort).
-- **Match verification** — a match tagged against a registered player only counts
-  once they confirm it (pending → verified / rejected), keeping Elo and turf honest.
+- **Match verification** — a match tagged against a registered opponent only counts
+  once they confirm it (either opponent can respond in doubles), keeping Elo and turf honest.
 - **Turf Wars** — when a rival closes in on a court you control inside your
   territory, you get a "⚔️ Turf War Initiated" alert so control is a constant fight.
 - **Challenge a player** — a ⚔️ Challenge button on any profile (or on a domination

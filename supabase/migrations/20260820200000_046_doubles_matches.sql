@@ -12,14 +12,9 @@ ALTER TABLE public.matches
     match_format = 'doubles'
     OR (partner_id IS NULL AND partner_name IS NULL AND opponent2_id IS NULL AND opponent2_name IS NULL)
   ),
-  ADD CONSTRAINT matches_doubles_slots_chk CHECK (
-    match_format = 'singles'
-    OR (
-      num_nonnulls(partner_id, NULLIF(regexp_replace(partner_name, '[[:space:]]', '', 'g'), '')) = 1
-      AND num_nonnulls(opponent_id, NULLIF(regexp_replace(opponent_name, '[[:space:]]', '', 'g'), '')) = 1
-      AND num_nonnulls(opponent2_id, NULLIF(regexp_replace(opponent2_name, '[[:space:]]', '', 'g'), '')) = 1
-    )
-  ),
+  -- Account deletion intentionally anonymizes tagged players through the
+  -- SET NULL foreign keys, so required doubles slots are enforced by the API.
+  -- The database still rejects ambiguous id+name pairs and duplicate accounts.
   ADD CONSTRAINT matches_partner_xor_chk CHECK (
     num_nonnulls(partner_id, NULLIF(regexp_replace(partner_name, '[[:space:]]', '', 'g'), '')) <= 1
   ),
@@ -33,9 +28,9 @@ ALTER TABLE public.matches
 
 ALTER TABLE public.scheduled_matches
   ADD COLUMN match_format TEXT NOT NULL DEFAULT 'singles',
-  ADD COLUMN partner_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  ADD COLUMN partner_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
   ADD COLUMN partner_name TEXT,
-  ADD COLUMN opponent2_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  ADD COLUMN opponent2_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
   ADD COLUMN opponent2_name TEXT;
 
 ALTER TABLE public.scheduled_matches

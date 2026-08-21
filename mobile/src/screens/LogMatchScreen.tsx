@@ -279,7 +279,9 @@ export function LogMatchScreen() {
   const statsTouched = hasRecordedMatchStats(stats);
   const statsError = statsTouched ? matchStatsValidationError(stats) : null;
   const doublesTeamsValid = matchFormat === 'singles'
-    || (partner.name.trim().length > 0 && opponentName.trim().length > 0 && opponent2.name.trim().length > 0);
+    || (Boolean(partner.id || partner.name.trim())
+      && Boolean(opponentId || opponentName.trim())
+      && Boolean(opponent2.id || opponent2.name.trim()));
 
   const onAddPhoto = async () => {
     const uploadToken = photoUploadGuard.current.begin();
@@ -546,6 +548,7 @@ export function LogMatchScreen() {
       {matchFormat === 'doubles' ? (
         <Section title="Your partner">
           <PlayerPicker
+            key={`partner-${scheduledMatchId ?? 'manual'}`}
             value={partner}
             onChange={setPartner}
             placeholder="Search your partner, or type their name"
@@ -556,6 +559,7 @@ export function LogMatchScreen() {
 
       <Section title={matchFormat === 'doubles' ? 'Opponents' : 'Opponent'}>
         <PlayerPicker
+          key={`opponent-${scheduledMatchId ?? 'manual'}`}
           value={{ id: opponentId, name: opponentName }}
           onChange={(selection) => {
             setOpponentId(selection.id);
@@ -566,6 +570,7 @@ export function LogMatchScreen() {
         />
         {matchFormat === 'doubles' ? (
           <PlayerPicker
+            key={`opponent2-${scheduledMatchId ?? 'manual'}`}
             value={opponent2}
             onChange={setOpponent2}
             placeholder="Search the second opponent, or type their name"

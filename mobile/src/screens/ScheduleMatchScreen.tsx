@@ -89,7 +89,7 @@ export function ScheduleMatchScreen({ navigation, route }: Props) {
   const inPast = scheduledAt.getTime() < now;
   const hasOpponent = !!presetOpponentId || opponentName.trim().length > 0;
   const teamsValid = matchFormat === 'singles'
-    || (partner.name.trim().length > 0 && opponent2.name.trim().length > 0);
+    || (Boolean(partner.id || partner.name.trim()) && Boolean(opponent2.id || opponent2.name.trim()));
   const actionLabel = availableHours.length === 0
     ? 'Choose another day'
     : `${isChallenge ? '⚔️ Send challenge' : 'Propose'} · ${dayLabel(dayOffset, base)} ${hourLabel(hour)}`;

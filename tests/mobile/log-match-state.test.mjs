@@ -48,6 +48,26 @@ test('doubles schedule prefills rotate teams for the participant logging', () =>
     prefillOpponent2Id: 'partner', prefillOpponent2Name: 'Partner',
     prefillCourtId: 'court', prefillSurface: 'clay',
   });
+
+  assert.deepEqual(
+    scheduledMatchLogPrefill(schedule, 'creator'),
+    {
+      scheduledMatchId: 'schedule', prefillMatchFormat: 'doubles',
+      prefillPartnerId: 'partner', prefillPartnerName: 'Partner',
+      prefillOpponentId: 'opponent', prefillOpponentName: 'Opponent',
+      prefillOpponent2Id: 'opponent2', prefillOpponent2Name: 'Opponent Two',
+      prefillCourtId: 'court', prefillSurface: 'clay',
+    },
+  );
+  const partnerView = scheduledMatchLogPrefill(schedule, 'partner');
+  assert.equal(partnerView?.prefillPartnerId, 'creator');
+  assert.equal(partnerView?.prefillOpponentId, 'opponent');
+  assert.equal(partnerView?.prefillOpponent2Id, 'opponent2');
+  const opponentView = scheduledMatchLogPrefill(schedule, 'opponent');
+  assert.equal(opponentView?.prefillPartnerId, 'opponent2');
+  assert.equal(opponentView?.prefillOpponentId, 'creator');
+  assert.equal(opponentView?.prefillOpponent2Id, 'partner');
+  assert.equal(scheduledMatchLogPrefill(schedule, 'outsider'), null);
 });
 
 test('a reset invalidates a late photo upload without affecting the next upload', () => {
