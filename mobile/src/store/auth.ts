@@ -16,11 +16,13 @@ import { useFeed } from './feed';
 import { useNotifications } from './notifications';
 import type { User } from '../types';
 import { parsePasswordRecoveryLink } from '../utils/authRecovery';
+import { RequestGeneration } from '../utils/sessionGeneration';
 import { CURRENT_TERMS_VERSION } from '../policy/terms';
 
 const PASSWORD_RECOVERY_ACCOUNT_KEY = 'vollo:password-recovery-account';
 const PENDING_APPLE_NAME_KEY = 'vollo:pending-apple-name';
 const startupRecoveryAccount = AsyncStorage.getItem(PASSWORD_RECOVERY_ACCOUNT_KEY).catch(() => null);
+const userRequests = new RequestGeneration();
 
 interface AuthState {
   user: User | null;
@@ -237,18 +239,24 @@ export const useAuth = create<AuthState>()((set, get) => ({
     await supabase.auth.signOut().catch(() => {});
   },
 
-  setUser: (user) => set({ user }),
+  setUser: (user) => {
+    userRequests.invalidate();
+    set({ user });
+  },
 
   acceptTerms: async (version) => {
     const { user } = await api.acceptTerms(version);
+    userRequests.invalidate();
     set({ user, meError: false });
     await applyPendingAppleName();
   },
 
   refreshMe: async () => {
     if (!get().token) return;
+    const request = userRequests.next();
     try {
       const { user } = await api.me();
+      if (!userRequests.isCurrent(request)) return;
       set({ user, meError: false });
       await applyPendingAppleName();
     } catch {
@@ -258,7 +266,7 @@ export const useAuth = create<AuthState>()((set, get) => ({
       // But if we still have no profile to show, surface an error flag so the Me
       // tab can offer a retry instead of an indefinite spinner. A transient
       // failure that still has a cached user stays silent.
-      if (!get().user) set({ meError: true });
+      if (userRequests.isCurrent(request) && !get().user) set({ meError: true });
     }
   },
 }));
@@ -274,7 +282,7 @@ async function applyPendingAppleName(): Promise<void> {
     if (pending.authId !== state.accountId) return;
     if (typeof pending.name === 'string' && pending.name.trim() && (me.display_name === me.username || !me.display_name.trim())) {
       const { user } = await api.updateProfile({ display_name: pending.name.trim() });
-      if (useAuth.getState().accountId === pending.authId) useAuth.setState({ user });
+      if (useAuth.getState().accountId === pending.authId) useAuth.getState().setUser(user);
     }
     await AsyncStorage.removeItem(PENDING_APPLE_NAME_KEY);
   } catch {
@@ -309,6 +317,7 @@ function applySession(token: string | null, accountId: string | null): void {
   if (changedSession) {
     // Drop the previous profile and account-owned caches before rendering the
     // signed-in replacement (or the signed-out navigator).
+    userRequests.invalidate();
     useAuth.setState({ token, accountId, user: null, meError: false });
     useFeed.getState().reset();
     useNotifications.getState().reset();

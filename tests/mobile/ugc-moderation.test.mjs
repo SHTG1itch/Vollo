@@ -5,10 +5,11 @@ import test from 'node:test';
 const read = (path) => readFile(new URL(`../../${path}`, import.meta.url), 'utf8');
 
 test('authenticated navigation cannot bypass the current Terms gate', async () => {
-  const [navigator, terms, policy] = await Promise.all([
+  const [navigator, terms, policy, auth] = await Promise.all([
     read('mobile/src/navigation/RootNavigator.tsx'),
     read('mobile/src/screens/TermsScreen.tsx'),
     read('mobile/src/policy/terms.ts'),
+    read('mobile/src/store/auth.ts'),
   ]);
   assert.match(navigator, /user\.terms_version !== CURRENT_TERMS_VERSION/);
   assert.match(navigator, /needsTerms \? \(/);
@@ -18,6 +19,10 @@ test('authenticated navigation cannot bypass the current Terms gate', async () =
   assert.match(policy, /sexually explicit/);
   assert.match(policy, /report players and content/);
   assert.match(policy, /terminate accounts/);
+  assert.match(auth, /const userRequests = new RequestGeneration\(\)/);
+  assert.match(auth, /acceptTerms:[^]*userRequests\.invalidate\(\)[^]*set\(\{ user, meError: false \}\)/);
+  assert.match(auth, /refreshMe:[^]*const request = userRequests\.next\(\)[^]*userRequests\.isCurrent\(request\)/);
+  assert.match(auth, /if \(changedSession\) \{[^]*userRequests\.invalidate\(\)/);
 });
 
 test('reports are available for every public UGC surface', async () => {
